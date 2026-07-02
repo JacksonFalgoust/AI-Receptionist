@@ -16,3 +16,14 @@ WELCOME_GREETING = os.environ.get(
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
 
 PORT = int(os.environ.get("PORT", "8080"))
+
+# Selective barge-in: how long to wait after a caller interrupts before
+# assuming it was noise/silence and resuming the reply on our own.
+BARGE_IN_RESUME_TIMEOUT_S = float(os.environ.get("BARGE_IN_RESUME_TIMEOUT_S", "2.5"))
+
+# Extra phrases (beyond barge_in.STOP_PHRASES) that should stop the reply.
+BARGE_IN_EXTRA_STOP_PHRASES = [
+    p.strip().lower()
+    for p in os.environ.get("BARGE_IN_EXTRA_STOP_PHRASES", "").split(",")
+    if p.strip()
+]

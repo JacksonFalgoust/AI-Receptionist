@@ -16,6 +16,7 @@ Caller ⇄ Twilio number ⇄ Conversation Relay ⇄ this app (/twiml, /ws) ⇄ G
 |---|---|
 | `app.py` | FastAPI server: `POST /twiml` returns the TwiML that opens the relay; `WS /ws` is the Conversation Relay message loop. |
 | `guide_client.py` | Streams replies from the GuideAnts guide using the `openai` SDK pointed at GuideAnts' OpenAI-compatible endpoint. |
+| `barge_in.py` | Pure logic for selective barge-in: decides whether a caller's utterance should stop the AI's reply (a stop command or a question) or let it resume (a filler, statement, or noise). |
 | `config.py` | Loads settings from `.env`. |
 | `.env.example` | Template for required configuration — copy to `.env`. |
 
@@ -37,7 +38,7 @@ this code. This app is just the phone/WebSocket bridge.
 3. Twilio opens a WebSocket to `/ws` and sends JSON messages:
    - `setup` — call metadata (callSid, from, to)
    - `prompt` — `voicePrompt` holds the caller's transcribed speech
-   - `interrupt` — caller spoke over the AI; `utteranceUntilInterrupt` is what they actually heard
+   - `interrupt` — caller spoke over the AI; Twilio pauses TTS immediately and reports what they'd heard so far via `utteranceUntilInterrupt`
    - `dtmf` — caller pressed a key
    - `error` — Conversation Relay reported a problem
 4. On each `prompt`, `/ws` sends the running chat history to the GuideAnts
@@ -50,9 +51,14 @@ this code. This app is just the phone/WebSocket bridge.
    ```
    Twilio starts speaking tokens as they arrive, so the caller doesn't wait for
    the full reply to be generated.
-5. On `interrupt`, the in-flight reply is cancelled and the conversation
-   history is corrected to only what the caller actually heard, so the next
-   guide reply has accurate context.
+5. On `interrupt`, the app pauses the reply rather than stopping it, and waits
+   for the caller's transcribed words (the next `prompt`) to decide what to
+   do: a stop command ("stop", "hold on", ...) or a question actually cancels
+   the reply and starts a fresh one for the new words; anything else (a
+   filler like "uh-huh", a statement, background noise) resumes the paused
+   reply right where Twilio left off. If no `prompt` follows within a couple
+   of seconds (e.g. a cough), the app resumes on its own. See
+   [ARCHITECTURE.md](ARCHITECTURE.md) for the full state machine.
 
 ## Setup
 

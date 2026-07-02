@@ -61,6 +61,21 @@ WELCOME_GREETING=<what the AI says when it picks up>
 PORT=8080
 ```
 
+Two more variables control the selective barge-in behavior (see the manual
+test in step 6). Both are optional — sensible defaults apply if you leave them
+unset:
+
+```
+BARGE_IN_RESUME_TIMEOUT_S=2.5
+BARGE_IN_EXTRA_STOP_PHRASES=cancel that,forget it
+```
+
+- `BARGE_IN_RESUME_TIMEOUT_S` — how long (seconds) to wait after the caller
+  interrupts before assuming it was noise/silence and resuming the reply on
+  its own.
+- `BARGE_IN_EXTRA_STOP_PHRASES` — comma-separated phrases, beyond the built-in
+  list in `barge_in.py`, that should stop the reply outright.
+
 ## 4. Twilio account setup
 
 1. **Accept the Conversation Relay AI/ML Features Addendum.** In the Twilio
@@ -104,8 +119,21 @@ Conversation Relay requires a public `wss://` URL — it will not connect to
 ## 6. Call it
 
 Dial the Twilio number. You should hear the `WELCOME_GREETING`, then be able to
-ask a question and hear the guide's answer. Try talking over the AI's reply —
-it should stop and listen (barge-in).
+ask a question and hear the guide's answer.
+
+Try these to exercise selective barge-in:
+
+- **Say "uh-huh" or "okay" while the guide is mid-reply.** TTS should pause
+  almost instantly, then continue speaking from where it left off — not
+  restart from the beginning — once the app decides that wasn't a real
+  interruption.
+- **Say "stop", "hold on", or ask a question (e.g. "what time do you
+  close?") mid-reply.** The reply should actually stop, and a fresh answer to
+  your new words should follow.
+- **Stay silent, or cough, instead of speaking after an interrupt.** TTS
+  pauses briefly, then resumes on its own after about
+  `BARGE_IN_RESUME_TIMEOUT_S` seconds (2.5s by default) even though you said
+  nothing intelligible.
 
 ## Optional hardening (not implemented, not required for the demo)
 
