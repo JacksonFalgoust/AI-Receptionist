@@ -41,3 +41,11 @@ EXTRA_BACKCHANNEL_PHRASES = [
     for p in os.environ.get("EXTRA_BACKCHANNEL_PHRASES", "").split(",")
     if p.strip()
 ]
+
+# Extra phrases (beyond barge_in.STOP_PHRASES) that should also cancel and
+# restart an in-flight reply when heard mid-reply.
+EXTRA_STOP_PHRASES = [
+    p.strip().lower()
+    for p in os.environ.get("EXTRA_STOP_PHRASES", "").split(",")
+    if p.strip()
+]
