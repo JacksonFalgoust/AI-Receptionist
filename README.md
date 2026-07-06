@@ -72,8 +72,9 @@ this code. This app is just the phone/WebSocket bridge.
    the reply has already finished playing, so it wouldn't be caught by the
    "already streaming" case above. `fillers.is_backchannel()` catches this
    too: pure acknowledgments ("ok", "okay", "yeah", "mmhmm", "got it", ...)
-   are recorded into history but never trigger a guide reply, whether they
-   arrive mid-reply or just after.
+   are just logged and never trigger a guide reply, whether they arrive
+   mid-reply or just after — like fillers and other non-trigger mid-reply
+   speech, they're never added to the conversation history either.
 
 ## Setup
 
