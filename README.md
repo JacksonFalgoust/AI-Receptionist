@@ -17,6 +17,7 @@ Caller ⇄ Twilio number ⇄ Conversation Relay ⇄ this app (/twiml, /ws) ⇄ G
 | `app.py` | FastAPI server: `POST /twiml` returns the TwiML that opens the relay; `WS /ws` is the Conversation Relay message loop. |
 | `guide_client.py` | Streams replies from the GuideAnts guide using the `openai` SDK pointed at GuideAnts' OpenAI-compatible endpoint. |
 | `fillers.py` | Pure logic for the filler-phrase feature: `looks_like_question` decides whether a caller's utterance looks like a question or request that warrants a short filler phrase before the real reply; `pick` returns a random filler phrase from a list; `is_backchannel` decides whether an utterance (e.g. "ok", "yeah") is pure acknowledgment noise that should never get a guide reply. |
+| `barge_in.py` | Pure logic for selective barge-in: `should_interrupt` decides whether a caller's utterance heard mid-reply (a stop/wait phrase, or a new question) should cancel the in-flight reply and start a fresh one. |
 | `config.py` | Loads settings from `.env`. |
 | `.env.example` | Template for required configuration — copy to `.env`. |
 
@@ -59,13 +60,14 @@ this code. This app is just the phone/WebSocket bridge.
    look that up for you.") is spoken first, before the real reply, to mask
    GuideAnts lookup latency.
 5. If a `prompt` arrives *while* a reply is already streaming, Twilio does not
-   stop or pause TTS (`interruptible="none"`) and this app doesn't act on it
-   either — the reply always plays to completion. The caller's words are just
-   recorded into the conversation history and only reach GuideAnts as context
-   on the *next* turn. This means even a genuine new question asked mid-reply
-   won't be answered until the caller repeats it after the current answer
-   finishes — see [ARCHITECTURE.md](ARCHITECTURE.md) for the full model and
-   why.
+   stop or pause TTS on its own (`interruptible="none"`) — but this app does
+   act on it if it's a stop/wait phrase ("stop", "wait", "hold on", ...) or a
+   new question: the in-flight reply is cancelled and a fresh reply starts
+   immediately for what the caller just said, cutting over playback via
+   Conversation Relay's `preemptible` flag. Anything else said mid-reply
+   (statements, backchannel, noise) is just logged and the current reply
+   keeps playing to the end — see [ARCHITECTURE.md](ARCHITECTURE.md) for the
+   full model and why.
 6. Speech-to-text can finish transcribing a short utterance like "ok" *after*
    the reply has already finished playing, so it wouldn't be caught by the
    "already streaming" case above. `fillers.is_backchannel()` catches this
