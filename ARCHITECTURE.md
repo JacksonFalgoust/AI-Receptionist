@@ -9,9 +9,10 @@ the system end to end.
 The whole app is four files. There is no database, no session store outside
 memory, and no business logic — this is purely a **protocol bridge** between
 Twilio Conversation Relay's WebSocket protocol and GuideAnts' OpenAI-compatible
-chat API. `barge_in.py` is the one exception to "no business logic": it holds
-the pure, I/O-free heuristics that decide how the app reacts to a caller
-talking over the AI.
+chat API. `fillers.py` is the one exception to "no business logic": it holds
+the pure, I/O-free heuristics that decide whether a caller's utterance looks
+like a question/request worth masking with a spoken filler phrase before the
+real reply.
 
 ```
                     POST /twiml (TwiML)            WS /ws (JSON frames)
@@ -31,7 +32,7 @@ Caller ⇄ Twilio ⇄ ───────────────────�
 |---|---|
 | [config.py](config.py) | Reads all settings from environment / `.env`, no other file touches `os.environ`. |
 | [guide_client.py](guide_client.py) | Thin wrapper around the `openai` SDK pointed at GuideAnts; exposes one function, `stream_reply`. |
-| [barge_in.py](barge_in.py) | Pure functions used by `app.py` to handle selective barge-in: `should_stop_reply` classifies a caller utterance as a stop command/question (cancel the reply) vs. filler/statement/noise (resume it), and `split_spoken` diffs already-sent text against what Twilio reports it actually played. No I/O, no Twilio/GuideAnts knowledge — this is why it's unit-tested directly in `test_barge_in.py`. |
+| [fillers.py](fillers.py) | Pure functions used by `app.py` to decide the filler-phrase behavior: `looks_like_question` classifies a caller utterance as question/request-like (warrants a filler) or not, `pick` returns a random filler phrase from a list, and `is_backchannel` classifies an utterance as pure acknowledgment noise (e.g. "ok", "yeah") that should never get a guide reply. No I/O, no Twilio/GuideAnts knowledge. |
 | [app.py](app.py) | FastAPI app with the two endpoints Twilio talks to: `POST /twiml` and `WS /ws`. All call-handling logic lives here. |
 
 ---
@@ -52,8 +53,8 @@ env var is unset):
 | `WELCOME_GREETING` | `WELCOME_GREETING` | `"Thanks for calling! How can I help you today?"` | `app.py` — spoken by Twilio before any WS traffic happens |
 | `TWILIO_AUTH_TOKEN` | `TWILIO_AUTH_TOKEN` | `""` | not currently used in code — reserved for optional `X-Twilio-Signature` validation (not implemented, see SETUP.md) |
 | `PORT` | `PORT` | `8080` | not read by `app.py` itself — `uvicorn` is started with `--port` on the command line; this constant is unused today |
-| `BARGE_IN_RESUME_TIMEOUT_S` | `BARGE_IN_RESUME_TIMEOUT_S` | `2.5` | `app.py` — seconds to wait after an `interrupt` for a follow-up `prompt` before auto-resuming the paused reply on its own (handles a cough or silence) |
-| `BARGE_IN_EXTRA_STOP_PHRASES` | `BARGE_IN_EXTRA_STOP_PHRASES` | `""` (empty) | `barge_in.py` (via `app.py`) — comma-separated phrases, on top of the built-in `barge_in.STOP_PHRASES`, that should cancel the in-flight reply |
+| `FILLER_PHRASES` | `FILLER_PHRASES` | a built-in list of 6 phrases (e.g. `"Let me look that up for you."`) | `app.py` (via `fillers.pick`) — pool of filler phrases spoken before the real reply when the caller's utterance looks like a question/request. Pipe-separated (`\|`) in the env var, since phrases contain commas/periods; falls back to the built-in list if unset. |
+| `EXTRA_BACKCHANNEL_PHRASES` | `EXTRA_BACKCHANNEL_PHRASES` | `[]` (empty) | `app.py` (via `fillers.is_backchannel`) — comma-separated phrases, on top of the built-in `fillers.BACKCHANNEL_PHRASES`, that count as pure acknowledgment noise and should never get a guide reply. |
 
 If `GUIDEANTS_PUB_ID` is empty when the guide client is first used, `guide_client.py` raises a `RuntimeError` telling the user to fill in `.env` — this is the only config validation in the app.
 
@@ -91,12 +92,12 @@ Called once by Twilio the moment a call comes in (this URL is configured on the 
         welcomeGreeting="<WELCOME_GREETING>"
         ttsProvider="ElevenLabs"
         transcriptionProvider="Deepgram"
-        interruptible="speech"
+        interruptible="none"
         reportInputDuringAgentSpeech="speech" />
     </Connect>
   </Response>
   ```
-- `interruptible="speech"` + `reportInputDuringAgentSpeech="speech"` together enable **barge-in** at the Twilio layer: the instant Twilio hears caller speech it pauses TTS playback and reports it via an `interrupt` WS message, followed by a `prompt` once transcription finishes. This Twilio-side pause is unconditional — it happens on any caller speech, every time. What this app does with that pause (actually stop the reply, or let it resume) is a decision made in `app.py`/`barge_in.py`; see "Concurrency / barge-in model" below.
+- `interruptible="none"` + `reportInputDuringAgentSpeech="speech"` together give **uninterruptible replies with reported input**: Twilio never pauses or stops TTS playback because of caller speech, but caller speech heard during agent speech is still transcribed and delivered to this app as a `prompt` message (instead of the `interrupt` message Twilio would send under `interruptible="speech"`). What this app does with that reported speech (record it, but never act on it mid-reply) is a decision made in `app.py`/`fillers.py`; see "Filler phrases and uninterruptible replies" below.
 - Response content type is `application/xml`. No request body is read — everything needed comes from the `Host` header and this app's own config.
 
 ### `WS /ws`
@@ -105,19 +106,16 @@ Twilio opens exactly one WebSocket connection here per call, immediately after `
 
 **Per-connection state** (`CallState`, one instance per call — all local to the WS handler closure; nothing is shared across calls, nothing persists after disconnect):
 - `messages: list[dict]` — the full running chat history sent to GuideAnts on every turn.
-- `task` — the `asyncio.Task` currently generating/streaming a reply, if any.
-- `gate: asyncio.Event` — set = the reply task is flowing, cleared = paused mid barge-in; `respond_to()` awaits this before every send.
-- `cycle_text` / `cycle_base` — text handed to Twilio so far this talk cycle, and text confirmed spoken in earlier segments of the same reply; together they let a barge-in figure out what was actually heard.
-- `pending` — the current `PendingBargeIn` (an unresolved `interrupt` awaiting a follow-up `prompt`), if any.
-- `resume_timer` — the `asyncio.Task` running the auto-resume countdown after an `interrupt`, if any.
+- `task` — the `asyncio.Task` currently generating/streaming a reply, if any; also doubles as the "is a reply active right now" flag (`st.task and not st.task.done()`).
+- `interjections: list[str]` — caller utterances heard (as `prompt`) while a reply is already streaming. Buffered here and flushed into `messages` as `{"role": "user", ...}` entries once the in-flight reply finishes; never acted on while buffered.
 
 **Inbound message types** (sent by Twilio Conversation Relay):
 
 | `type` | Key fields | Handling |
 |---|---|---|
 | `setup` | `callSid`, `from`, `to` | Logged only; no state change. First message on every connection. |
-| `prompt` | `voicePrompt` (caller's transcribed speech) | If it resolves a pending `interrupt`, classifies the utterance to decide whether to stop the paused reply or resume it. Otherwise starts (or, if a stop-worthy prompt arrives mid-reply with nothing paused, restarts) a reply normally. See "Concurrency / barge-in model" below for the full logic. |
-| `interrupt` | `utteranceUntilInterrupt` (what the caller actually heard before interrupting) | **Pauses** (does not cancel) the in-flight reply and starts an auto-resume timer, pending the caller's next `prompt`. See "Concurrency / barge-in model" below for the full logic. |
+| `prompt` | `voicePrompt` (caller's transcribed speech) | If a reply *is* already streaming, the text is appended to `st.interjections` and logged — not spoken, not acted on. Otherwise, if `fillers.is_backchannel()` says it's pure acknowledgment noise (e.g. "ok", "yeah"), it's recorded straight into `messages` with no reply — this also covers the case where STT finishes transcribing a short "ok" just *after* the reply already finished. Otherwise a new reply starts (`start_reply()`), which also decides via `fillers.looks_like_question()` whether to prepend a filler phrase. See "Filler phrases and uninterruptible replies" below. |
+| `interrupt` | `utteranceUntilInterrupt` | Not expected given `interruptible="none"` — logged only, no state change. Caller speech during agent speech arrives as `prompt` instead (see above). |
 | `dtmf` | `digit` | Logged only — not acted on (no IVR menu implemented; see SETUP.md's "not implemented" list). |
 | `error` | `description` | Logged as an error. Connection is not closed by this app. |
 | anything else | — | Logged as a warning, ignored. |
@@ -134,33 +132,32 @@ Twilio starts speaking (TTS) as tokens arrive rather than waiting for the full r
 
 ### `start_reply()` / `respond_to()` — the reply pipeline
 
-`start_reply(user_text)` appends the caller's utterance to `messages`, resets `cycle_text`/`cycle_base` for the new talk cycle, opens the gate, and spawns `respond_to()` as a cancellable `asyncio.Task`:
+`start_reply(user_text)` appends the caller's utterance to `st.messages`, decides whether a filler is warranted (`fillers.looks_like_question(user_text)`; if so, `fillers.pick(config.FILLER_PHRASES)` picks one at random), and spawns `respond_to(filler)` as an `asyncio.Task` stored on `st.task`:
 
-1. Call `guide_client.stream_reply(messages)` and, for each delta: wait on `st.gate` (this is where the task blocks while paused by a barge-in), forward the delta to the WS as a `{"type": "text", ...}` frame, and accumulate it into both the reply text and `st.cycle_text`.
-2. Wait on the gate once more, then send a final `{"token": "", "last": true}` frame to signal end-of-turn to Twilio.
-3. Append the full assistant reply to `messages` so the next turn has it as context.
-4. **On cancellation** (`asyncio.CancelledError`, raised only by `cancel_task()` — called from `stop_and_restart()` when a barge-in resolves to a stop command/question, from the plain-prompt path when a stop-worthy prompt arrives mid-reply with no pending barge-in, or on `WebSocketDisconnect`): re-raises without touching `messages` itself; whichever caller triggered the cancellation is responsible for recording the correct history (`stop_and_restart()` writes `cycle_base + heard`; the plain-prompt path appends `cycle_base + cycle_text`).
-5. **On any other exception** (e.g. GuideAnts unreachable, HTTP error): logs the full traceback and sends a single spoken fallback line (`"Sorry, I'm having trouble right now."`) as a `last: true` frame, rather than leaving the caller in silence or crashing the WS loop.
+1. If a filler was picked, send it immediately as the very first spoken token: `{"type": "text", "token": filler + " ", "last": False}`. This happens *before* `guide_client.stream_reply()` is even called, so the caller hears something right away while GuideAnts is still generating the real answer.
+2. Call `guide_client.stream_reply(st.messages)` and forward each delta to the WS as a `{"type": "text", ...}` frame, accumulating it into `reply_text`.
+3. Send a final `{"token": "", "last": true}` frame to signal end-of-turn to Twilio.
+4. **On success**, append to `st.messages` in this exact order:
+   1. the filler, as its own `{"role": "assistant", "content": filler}` message (only if one was picked),
+   2. the real reply, as `{"role": "assistant", "content": reply_text}`,
+   3. any buffered `st.interjections`, each as a `{"role": "user", "content": text}` message, then `st.interjections` is cleared.
 
-Note that a plain `interrupt` never cancels this task by itself — it only clears `st.gate`, which the task is already cooperatively waiting on between sends.
+   **Why this order matters:** GuideAnts resolves/matches its persisted server-side conversation by looking at the text of the *latest* assistant message in the transcript this app sends each turn (see "The GuideAnts endpoint this app depends on" below). If the filler were appended last instead of the real reply, GuideAnts would fail to match the existing conversation on the next turn and would start a brand-new one every single turn — silently discarding all prior context. So the filler must be appended *before* the real reply, never after it and never in its place. The filler is also deliberately kept out of `st.messages` before `stream_reply()` is called, so GuideAnts itself never sees the filler as part of the conversation it's continuing.
+5. **On `asyncio.CancelledError`** (only ever raised by `cancel_task()`, which runs on `WebSocketDisconnect`): re-raises without touching `st.messages`.
+6. **On any other exception** (e.g. GuideAnts unreachable, HTTP error): logs the full traceback and sends a single spoken fallback line (`"Sorry, I'm having trouble right now."`) as a `last: true` frame, rather than leaving the caller in silence or crashing the WS loop. `st.messages` is left as it was before the failed attempt (the filler, if any, was never appended, and neither is a reply — since none was produced).
 
-### Concurrency / barge-in model
+### Filler phrases and uninterruptible replies
 
-Only one reply task runs at a time per call, but an `interrupt` no longer cancels it outright — Twilio pausing TTS on caller speech doesn't by itself mean the reply should stop. Instead, `interrupt` **pauses** the reply and the caller's next `prompt` **classifies** what to do with it:
+There is no pause, resume, or cancellation of an in-flight reply anymore. Once `respond_to()` starts streaming, it always runs to completion (barring a WS disconnect or an unrelated error) — Twilio's `interruptible="none"` setting means playback is never stopped by caller speech either, so app-level behavior and Twilio-level behavior agree: nothing interrupts a reply in progress.
 
-1. **Pause.** On `interrupt`, `st.gate` (set = flowing, cleared = paused) is cleared, so `respond_to()` blocks in place at its next `gate.wait()` — no text or task state is lost or cancelled. The app records `st.pending = PendingBargeIn(heard=utteranceUntilInterrupt, task_was_done=...)` and starts a `config.BARGE_IN_RESUME_TIMEOUT_S`-second (default 2.5s) auto-resume timer via `restart_resume_timer()`.
-2. **Classify.** The caller's transcribed speech then arrives as `prompt`. With `st.pending` set, `barge_in.should_stop_reply(text, config.BARGE_IN_EXTRA_STOP_PHRASES)` decides:
-   - **Stop** (a phrase from `barge_in.STOP_PHRASES`/`BARGE_IN_EXTRA_STOP_PHRASES`, or a question — ends in `?` or starts with an interrogative/auxiliary word per `barge_in.QUESTION_STARTERS`) → `stop_and_restart()`: the paused task is actually cancelled, `messages` is corrected to reflect only what was truly heard (`cycle_base + pend.heard`), and a fresh reply is started for the new utterance.
-   - **Resume** (anything else — filler like "uh-huh"/"okay", a statement, background noise) → `resume()`: `barge_in.split_spoken()` diffs `cycle_text` against `utteranceUntilInterrupt` to find the tail Twilio discarded, that remainder is re-sent, then the gate reopens so playback continues where it left off instead of repeating from the start. The filler utterance itself is never added to `messages`. (If the reply task had already finished streaming before the barge — TTS was just still catching up — the remainder starts a fresh talk cycle instead of resuming an in-flight one.)
-3. **Auto-resume.** If no `prompt` follows an `interrupt` within `BARGE_IN_RESUME_TIMEOUT_S` seconds (e.g. a cough, or silence that doesn't transcribe to anything), `auto_resume()` fires on its own and calls `resume()` exactly as above.
+1. **While a reply is streaming.** Any `prompt` that arrives is *not* acted on: `fillers.py` is not even consulted. The text is appended to `st.interjections` and logged ("Recorded caller speech during active reply (not acted on)"). Nothing is spoken for it, nothing is cancelled, and the current reply keeps playing to its end exactly as if the caller had stayed silent.
+2. **Late backchannel, after the reply already finished.** Twilio's speech-to-text can finish transcribing a short utterance like "ok" slightly *after* the reply has already finished playing, so by the time the `prompt` arrives `st.task.done()` is already `True` — it no longer looks like "mid-reply" at all. To stop this from being treated as a brand-new question, `fillers.is_backchannel(text, config.EXTRA_BACKCHANNEL_PHRASES)` checks whether the whole utterance is pure acknowledgment noise (`fillers.BACKCHANNEL_PHRASES`: "ok", "okay", "yeah", "mmhmm", "got it", ... plus anything in the env-configurable extra list). If so, it's appended straight to `st.messages` as a `user` message and logged ("Recorded backchannel utterance (not acted on)") — no guide call, no reply, exactly as if it had arrived one moment earlier while the reply was still streaming.
+3. **Starting a real reply.** Otherwise, `start_reply(text)` runs: it appends the caller's text to `st.messages`, and separately (not stored in `st.messages`) checks `fillers.looks_like_question(text)` — true for text ending in `?`, or starting (after stripping leading fillers like "um"/"okay"/"so") with an interrogative word (`what`, `how`, `can`, `is`, ...) or a request verb (`tell`, `find`, `help`, ...), or a lead-in phrase like "i need"/"i want"/"looking for". If true, a random phrase from `config.FILLER_PHRASES` is spoken first, immediately, before the real GuideAnts reply — masking the network/LLM latency of the lookup with something audible right away. If false, the real reply just starts streaming with no filler.
+4. **After the reply finishes.** `respond_to()`'s success path (see above) flushes `st.interjections` into `st.messages` as `user` messages, in the order they were heard, so GuideAnts sees them as context on the *next* reply. Since the interjections were never acted on individually, if one of them was itself a real question (not backchannel), it will not be answered until the caller repeats it (or asks again) after the current reply completes — a deliberate trade-off in exchange for never garbling or truncating a reply mid-sentence, or answering a mere "ok".
 
-A caller can also barge into the welcome greeting itself, which Twilio speaks directly from the TwiML `welcomeGreeting` attribute and which never crosses the WebSocket. This falls out of the same machinery for free: `st.cycle_text` is seeded with `config.WELCOME_GREETING` when the WS connects, so an `interrupt` during the greeting has real text to diff against in `split_spoken()`.
+Because there's no pause/resume/classification machinery left, per-call state no longer needs a gate, a pending-barge-in record, or a resume timer — `CallState` is down to `messages`, `task` (used only to check "is a reply active"), and `interjections` (the buffer described above).
 
-Known cosmetic limitation: a token already in flight to Twilio at the exact instant of an `interrupt` can be spoken once immediately and then repeated at the start of the resumed remainder (one stray word). This is self-healing on the next sentence and not worth engineering around.
-
-This is why per-call state lives in a `CallState` dataclass (`st`) rather than plain closure variables — `gate`, `pending`, `resume_timer`, `cycle_text`/`cycle_base`, and `task` are all read and mutated from multiple coroutines (the message loop, `respond_to()`, and the resume timer) and need to be shared by reference.
-
-On `WebSocketDisconnect`, the resume timer is cancelled, any in-flight task is cancelled, and the loop exits — nothing is persisted, so a dropped call simply forgets the conversation.
+On `WebSocketDisconnect`, any in-flight task is cancelled and the loop exits — nothing is persisted, so a dropped call simply forgets the conversation.
 
 ---
 
@@ -186,11 +183,11 @@ On `WebSocketDisconnect`, the resume timer is cancelled, any in-flight task is c
 2. Twilio POSTs to `/twiml`. App returns `<Connect><ConversationRelay url="wss://.../ws" .../></Connect>`.
 3. Twilio opens the WS, speaks `WELCOME_GREETING` to the caller immediately (handled entirely by Twilio, not by this app), then sends `setup`.
 4. Caller speaks. Twilio transcribes it and sends `prompt` with `voicePrompt`.
-5. `app.py` appends it to `messages`, calls `guide_client.stream_reply`, and streams the reply back as `text` frames; Twilio speaks it via TTS as tokens arrive.
-6. If the caller talks over the reply, Twilio pauses TTS instantly and sends `interrupt` with `utteranceUntilInterrupt`; the app pauses the reply task (it does not cancel it yet) and starts a short auto-resume timer.
-7. The caller's utterance then arrives as `prompt`. `barge_in.should_stop_reply()` decides: a stop command or question actually cancels the paused reply, corrects the history, and starts a fresh reply (steps 4–5 repeat for it); anything else (filler, statement, noise) resumes the paused reply from where Twilio left off. If no `prompt` arrives in time, the app resumes on its own.
-8. Repeat from step 4 for each new turn — `messages` grows for the life of the call.
-9. Caller hangs up → WS disconnects → in-flight task and any pending resume timer are cancelled, connection state (and the entire conversation) is discarded.
+5. `app.py` appends it to `messages`. If the utterance looks like a question/request (`fillers.looks_like_question()`), a random filler phrase is sent first as its own spoken token. Then `guide_client.stream_reply` is called and the reply is streamed back as `text` frames; Twilio speaks it via TTS as tokens arrive, with `interruptible="none"` so nothing Twilio hears from the caller during this stops playback.
+6. If the caller talks during the reply, Twilio still transcribes it and sends it as another `prompt` (`report_input_during_agent_speech="speech"`) rather than an `interrupt`. Since a reply is already active, the app does not act on it — the text is appended to `st.interjections` and logged, and the current reply keeps playing to the end.
+7. Once the reply finishes, the filler (if any) and the real reply are appended to `messages` in that order, then any buffered interjections are appended as `user` messages. `messages` grows for the life of the call.
+8. Repeat from step 4 for each new turn. If an interjection buffered in step 6 was itself a real question, it is only answered if/when the caller asks it again — nothing automatically revisits it.
+9. Caller hangs up → WS disconnects → in-flight task is cancelled, connection state (and the entire conversation) is discarded.
 
 ## Known gaps (intentionally out of scope today)
 

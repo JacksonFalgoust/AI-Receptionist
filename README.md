@@ -16,7 +16,7 @@ Caller ⇄ Twilio number ⇄ Conversation Relay ⇄ this app (/twiml, /ws) ⇄ G
 |---|---|
 | `app.py` | FastAPI server: `POST /twiml` returns the TwiML that opens the relay; `WS /ws` is the Conversation Relay message loop. |
 | `guide_client.py` | Streams replies from the GuideAnts guide using the `openai` SDK pointed at GuideAnts' OpenAI-compatible endpoint. |
-| `barge_in.py` | Pure logic for selective barge-in: decides whether a caller's utterance should stop the AI's reply (a stop command or a question) or let it resume (a filler, statement, or noise). |
+| `fillers.py` | Pure logic for the filler-phrase feature: `looks_like_question` decides whether a caller's utterance looks like a question or request that warrants a short filler phrase before the real reply; `pick` returns a random filler phrase from a list; `is_backchannel` decides whether an utterance (e.g. "ok", "yeah") is pure acknowledgment noise that should never get a guide reply. |
 | `config.py` | Loads settings from `.env`. |
 | `.env.example` | Template for required configuration — copy to `.env`. |
 
@@ -37,28 +37,41 @@ this code. This app is just the phone/WebSocket bridge.
    ```
 3. Twilio opens a WebSocket to `/ws` and sends JSON messages:
    - `setup` — call metadata (callSid, from, to)
-   - `prompt` — `voicePrompt` holds the caller's transcribed speech
-   - `interrupt` — caller spoke over the AI; Twilio pauses TTS immediately and reports what they'd heard so far via `utteranceUntilInterrupt`
+   - `prompt` — `voicePrompt` holds the caller's transcribed speech; this
+     arrives for normal turns *and* for caller speech heard while the agent is
+     still talking (`report_input_during_agent_speech="speech"`)
+   - `interrupt` — not expected in this app's configuration
+     (`interruptible="none"` means Twilio never pauses/stops TTS on caller
+     speech); logged if it ever arrives
    - `dtmf` — caller pressed a key
    - `error` — Conversation Relay reported a problem
-4. On each `prompt`, `/ws` sends the running chat history to the GuideAnts
-   guide (`guide_client.stream_reply`) and streams the reply back to Twilio as
-   it's generated:
+4. On each `prompt`, if no reply is currently streaming, `/ws` sends the
+   running chat history to the GuideAnts guide (`guide_client.stream_reply`)
+   and streams the reply back to Twilio as it's generated:
    ```json
    {"type": "text", "token": "Hello", "last": false}
    ...
    {"type": "text", "token": "", "last": true}
    ```
    Twilio starts speaking tokens as they arrive, so the caller doesn't wait for
-   the full reply to be generated.
-5. On `interrupt`, the app pauses the reply rather than stopping it, and waits
-   for the caller's transcribed words (the next `prompt`) to decide what to
-   do: a stop command ("stop", "hold on", ...) or a question actually cancels
-   the reply and starts a fresh one for the new words; anything else (a
-   filler like "uh-huh", a statement, background noise) resumes the paused
-   reply right where Twilio left off. If no `prompt` follows within a couple
-   of seconds (e.g. a cough), the app resumes on its own. See
-   [ARCHITECTURE.md](ARCHITECTURE.md) for the full state machine.
+   the full reply to be generated. If the caller's utterance looks like a
+   question or request (see `fillers.py`), a short filler phrase (e.g. "Let me
+   look that up for you.") is spoken first, before the real reply, to mask
+   GuideAnts lookup latency.
+5. If a `prompt` arrives *while* a reply is already streaming, Twilio does not
+   stop or pause TTS (`interruptible="none"`) and this app doesn't act on it
+   either — the reply always plays to completion. The caller's words are just
+   recorded into the conversation history and only reach GuideAnts as context
+   on the *next* turn. This means even a genuine new question asked mid-reply
+   won't be answered until the caller repeats it after the current answer
+   finishes — see [ARCHITECTURE.md](ARCHITECTURE.md) for the full model and
+   why.
+6. Speech-to-text can finish transcribing a short utterance like "ok" *after*
+   the reply has already finished playing, so it wouldn't be caught by the
+   "already streaming" case above. `fillers.is_backchannel()` catches this
+   too: pure acknowledgments ("ok", "okay", "yeah", "mmhmm", "got it", ...)
+   are recorded into history but never trigger a guide reply, whether they
+   arrive mid-reply or just after.
 
 ## Setup
 

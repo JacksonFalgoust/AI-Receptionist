@@ -17,13 +17,27 @@ TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
 
 PORT = int(os.environ.get("PORT", "8080"))
 
-# Selective barge-in: how long to wait after a caller interrupts before
-# assuming it was noise/silence and resuming the reply on our own.
-BARGE_IN_RESUME_TIMEOUT_S = float(os.environ.get("BARGE_IN_RESUME_TIMEOUT_S", "2.5"))
+# Filler phrases spoken before the real answer, to mask GuideAnts lookup
+# latency. Pipe-separated in the env var since phrases contain commas/periods.
+_DEFAULT_FILLER_PHRASES = [
+    "Let me look that up for you.",
+    "One moment while I check on that.",
+    "Sure, give me just a second.",
+    "Let me find that for you.",
+    "Okay, let me pull that up.",
+    "Happy to help — one second while I check.",
+]
 
-# Extra phrases (beyond barge_in.STOP_PHRASES) that should stop the reply.
-BARGE_IN_EXTRA_STOP_PHRASES = [
+FILLER_PHRASES = [
+    p.strip()
+    for p in os.environ.get("FILLER_PHRASES", "").split("|")
+    if p.strip()
+] or _DEFAULT_FILLER_PHRASES
+
+# Extra phrases (beyond fillers.BACKCHANNEL_PHRASES) that are pure
+# acknowledgment noise and should never get a guide reply.
+EXTRA_BACKCHANNEL_PHRASES = [
     p.strip().lower()
-    for p in os.environ.get("BARGE_IN_EXTRA_STOP_PHRASES", "").split(",")
+    for p in os.environ.get("EXTRA_BACKCHANNEL_PHRASES", "").split(",")
     if p.strip()
 ]
