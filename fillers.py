@@ -2,9 +2,11 @@
 
 Decides whether a caller's utterance looks like a question or a request that
 warrants a short filler phrase (e.g. "Let me look that up for you") before
-streaming the guide's real reply. Replies are uninterruptible, so there is no
-stop/resume classification here anymore. Also decides whether an utterance is
-pure backchannel noise (e.g. "ok", "yeah") that shouldn't get a reply at all.
+streaming the guide's real reply. The question detection is also used by
+barge_in.should_interrupt() to help decide whether a caller's utterance heard
+mid-reply should cancel and restart the in-flight reply. Also decides whether
+an utterance is pure backchannel noise (e.g. "ok", "yeah") that shouldn't get
+a reply at all.
 """
 
 import random
