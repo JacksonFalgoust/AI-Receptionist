@@ -6,12 +6,18 @@ WS   /ws      Conversation Relay's WebSocket bridge: receives transcribed
               caller speech and streams the GuideAnts guide's reply back as
               speakable text tokens.
 
-Conversation Relay is configured `interruptible="none"`, so caller speech
-never stops TTS playback; it still arrives here as "prompt" messages
-(`report_input_during_agent_speech="speech"`) and is logged but not acted
-on mid-reply. When a caller's utterance looks like a question or request
-(see fillers.py), a short filler phrase is spoken immediately, before the
-real GuideAnts reply, to mask lookup latency.
+Conversation Relay is configured `interruptible="none"`, so Twilio itself
+never pauses TTS playback on caller speech; it still arrives here as
+"prompt" messages (`report_input_during_agent_speech="speech"`). Most
+mid-reply speech (statements, backchannel, noise) is logged but not acted
+on. The exception is a trigger utterance -- a stop/wait phrase or a new
+question, per barge_in.should_interrupt() -- which cancels the in-flight
+reply and immediately starts a fresh one for what the caller just said.
+Playback is actually cut over using Conversation Relay's per-frame
+`preemptible` flag (see respond_to()), not Twilio-native interruption.
+When a caller's utterance looks like a question or request (see
+fillers.py), a short filler phrase is spoken immediately, before the real
+GuideAnts reply, to mask lookup latency.
 
 Only real user prompts and the guide's own replies go into `st.messages`.
 Fillers, mid-reply interjections, and backchannel noise ("ok", "thanks")
@@ -33,6 +39,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 from twilio.twiml.voice_response import Connect, VoiceResponse
 
+import barge_in
 import config
 import fillers
 from guide_client import stream_reply
@@ -67,6 +74,7 @@ async def twiml(request: Request) -> Response:
 class CallState:
     messages: list = field(default_factory=list)
     task: object = None  # asyncio.Task | None
+    partial_reply: str = ""  # real reply text streamed so far this turn (never the filler)
 
 
 @app.websocket("/ws")
@@ -76,14 +84,25 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
     st = CallState()
 
     async def respond_to(filler: str | None) -> None:
+        # Every frame is marked preemptible so that if this turn is still
+        # playing when a later trigger-interrupted turn starts, Twilio drops
+        # this audio and switches to the new turn's audio immediately. This
+        # is a no-op in the normal (non-interrupting) case, since by the
+        # time a new turn starts normally the previous one has already
+        # finished.
         reply_text = ""
         try:
             if filler:
-                await websocket.send_json({"type": "text", "token": filler + " ", "last": False})
+                await websocket.send_json(
+                    {"type": "text", "token": filler + " ", "last": False, "preemptible": True}
+                )
             async for delta in stream_reply(st.messages):
-                await websocket.send_json({"type": "text", "token": delta, "last": False})
+                await websocket.send_json(
+                    {"type": "text", "token": delta, "last": False, "preemptible": True}
+                )
                 reply_text += delta
-            await websocket.send_json({"type": "text", "token": "", "last": True})
+                st.partial_reply = reply_text
+            await websocket.send_json({"type": "text", "token": "", "last": True, "preemptible": True})
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -94,6 +113,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                         "type": "text",
                         "token": "Sorry, I'm having trouble right now.",
                         "last": True,
+                        "preemptible": True,
                     }
                 )
             except Exception:
@@ -110,6 +130,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
 
     def start_reply(user_text: str) -> None:
         st.messages.append({"role": "user", "content": user_text})
+        st.partial_reply = ""
         filler = fillers.pick(config.FILLER_PHRASES) if fillers.looks_like_question(user_text) else None
         st.task = asyncio.create_task(respond_to(filler))
 
@@ -148,12 +169,24 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 text = msg.get("voicePrompt", "") or ""
                 if text.strip():
                     if st.task and not st.task.done():
-                        # Logged only, never added to st.messages: GuideAnts
-                        # never receives or persists this utterance, so
-                        # recording it locally would desync our history from
-                        # GuideAnts' and break conversation matching on the
-                        # next turn (see module docstring).
-                        logger.info("Ignored caller speech during active reply (not acted on): %r", text)
+                        if barge_in.should_interrupt(text, config.EXTRA_STOP_PHRASES):
+                            logger.info("Interrupting active reply for trigger utterance: %r", text)
+                            await cancel_task()
+                            # Only the real reply text streamed so far goes
+                            # into st.messages -- never the filler -- same
+                            # invariant as a normal completed turn (see
+                            # module docstring).
+                            if st.partial_reply:
+                                st.messages.append({"role": "assistant", "content": st.partial_reply})
+                                st.partial_reply = ""
+                            start_reply(text)
+                        else:
+                            # Logged only, never added to st.messages: GuideAnts
+                            # never receives or persists this utterance, so
+                            # recording it locally would desync our history from
+                            # GuideAnts' and break conversation matching on the
+                            # next turn (see module docstring).
+                            logger.info("Ignored caller speech during active reply (not acted on): %r", text)
                     elif fillers.is_backchannel(text, config.EXTRA_BACKCHANNEL_PHRASES):
                         # STT can finish transcribing a short "ok" after the
                         # reply has already finished playing, so this branch
