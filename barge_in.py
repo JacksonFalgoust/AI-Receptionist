@@ -12,6 +12,8 @@ import re
 import string
 from typing import Iterable
 
+import fillers
+
 STOP_PHRASES = frozenset(
     {
         "stop",
@@ -71,3 +73,8 @@ def is_stop_command(text: str, extra_phrases: Iterable[str] = ()) -> bool:
     return any(
         normalized == phrase or normalized.startswith(phrase + " ") for phrase in phrases
     )
+
+
+def should_interrupt(text: str, extra_phrases: Iterable[str] = ()) -> bool:
+    """True if this utterance, heard mid-reply, should cancel and restart it."""
+    return is_stop_command(text, extra_phrases) or fillers.looks_like_question(text)

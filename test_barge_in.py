@@ -32,3 +32,27 @@ def test_is_stop_command_false_for_empty_text():
 def test_is_stop_command_checks_extra_phrases():
     assert barge_in.is_stop_command("cancel please", extra_phrases=["cancel"]) is True
     assert barge_in.is_stop_command("cancel please") is False
+
+
+def test_should_interrupt_true_for_stop_command():
+    assert barge_in.should_interrupt("stop") is True
+
+
+def test_should_interrupt_true_for_question():
+    assert barge_in.should_interrupt("what time do you close") is True
+
+
+def test_should_interrupt_true_for_question_mark():
+    assert barge_in.should_interrupt("are you open on Sundays?") is True
+
+
+def test_should_interrupt_false_for_statement():
+    assert barge_in.should_interrupt("I think that's fine") is False
+
+
+def test_should_interrupt_false_for_backchannel_like_text():
+    assert barge_in.should_interrupt("okay yeah") is False
+
+
+def test_should_interrupt_passes_through_extra_phrases():
+    assert barge_in.should_interrupt("cancel please", extra_phrases=["cancel"]) is True
