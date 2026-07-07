@@ -24,16 +24,19 @@ def _get_client() -> AsyncOpenAI:
 
 
 async def stream_reply(messages: list[dict]) -> AsyncIterator[str]:
-    """Yield text deltas for the guide's reply to the given chat history."""
+    """Yield text deltas for the guide's reply to the given chat history.
+
+    The GuideAnts published wire API's chat/completions endpoint is
+    non-streaming only (stream=true returns unsupported_feature), so this
+    makes a single blocking call and yields the whole reply as one delta.
+    """
     client = _get_client()
-    stream = await client.chat.completions.create(
+    response = await client.chat.completions.create(
         model=config.GUIDEANTS_MODEL,
         messages=messages,
-        stream=True,
     )
-    async for chunk in stream:
-        if not chunk.choices:
-            continue
-        delta = chunk.choices[0].delta.content
-        if delta:
-            yield delta
+    if not response.choices:
+        return
+    content = response.choices[0].message.content
+    if content:
+        yield content

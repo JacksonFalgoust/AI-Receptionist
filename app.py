@@ -12,22 +12,28 @@ never pauses TTS playback on caller speech; it still arrives here as
 mid-reply speech (statements, backchannel, noise) is logged but not acted
 on. The exception is a trigger utterance -- a stop/wait phrase or a new
 question, per barge_in.should_interrupt() -- which cancels the in-flight
-reply and immediately starts a fresh one for what the caller just said.
-Playback is actually cut over using Conversation Relay's per-frame
-`preemptible` flag (see respond_to()), not Twilio-native interruption.
-When a caller's utterance looks like a question or request (see
-fillers.py), a short filler phrase is spoken immediately, before the real
-GuideAnts reply, to mask lookup latency.
+reply. A stop/wait phrase (barge_in.is_stop_command()) then just gets a
+short local acknowledgment (config.STOP_ACK_PHRASES) and silence -- never
+routed through GuideAnts, so it cuts over immediately with no extra
+round-trip and doesn't depend on the guide choosing to reply briefly. A new
+question instead starts a fresh reply for what the caller just said, same
+as any other prompt. Playback is actually cut over using Conversation
+Relay's per-frame `preemptible` flag (see respond_to()), not Twilio-native
+interruption. When a caller's utterance looks like a question or request
+(see fillers.py), a short filler phrase is spoken immediately, before the
+real GuideAnts reply, to mask lookup latency.
 
 Only real user prompts and the guide's own replies go into `st.messages`.
-Fillers, mid-reply interjections, and backchannel noise ("ok", "thanks")
-are never added there, even though they're spoken/heard: GuideAnts matches
-a follow-up request to its existing server-side conversation by replaying
-our message history and checking it exactly aligns with what it actually
-persisted (see WireConversationResolver.ResolveConversationFromTranscriptAsync
-in the GuideAnts repo). Any local message that GuideAnts never saw --
-a filler line, a swallowed interjection -- breaks that alignment and makes
-GuideAnts start a brand-new conversation on the very next turn.
+Fillers, stop acknowledgments, mid-reply interjections, and backchannel
+noise ("ok", "thanks") are never added there, even though they're
+spoken/heard: GuideAnts matches a follow-up request to its existing
+server-side conversation by replaying our message history and checking it
+exactly aligns with what it actually persisted (see
+WireConversationResolver.ResolveConversationFromTranscriptAsync in the
+GuideAnts repo). Any local message that GuideAnts never saw -- a filler
+line, a stop acknowledgment, a swallowed interjection -- breaks that
+alignment and makes GuideAnts start a brand-new conversation on the very
+next turn.
 """
 
 import asyncio
@@ -42,6 +48,7 @@ from twilio.twiml.voice_response import Connect, VoiceResponse
 import barge_in
 import config
 import fillers
+import speech_timing
 from guide_client import stream_reply
 
 logging.basicConfig(level=logging.INFO)
@@ -90,6 +97,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         # is a no-op in the normal (non-interrupting) case, since by the
         # time a new turn starts normally the previous one has already
         # finished.
+        start_time = asyncio.get_event_loop().time()
         reply_text = ""
         try:
             if filler:
@@ -127,6 +135,22 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         # matching on the very next turn.
         if reply_text:
             st.messages.append({"role": "assistant", "content": reply_text})
+            # Cleared so a later barge-in cancellation (which lands during
+            # the pacing sleep below, not during generation) doesn't re-append
+            # this same content via the st.partial_reply check in the `prompt`
+            # handler.
+            st.partial_reply = ""
+        # GuideAnts' endpoint is non-streaming, so the whole reply arrives and
+        # is sent to Twilio in one shot -- this task would otherwise be marked
+        # "done" well before Twilio actually finishes speaking it aloud,
+        # making mid-reply caller speech look like it arrived after the reply
+        # ended and incorrectly starting a brand-new turn. Hold the task open
+        # for the estimated remaining speaking time instead.
+        spoken_text = f"{filler} {reply_text}" if filler else reply_text
+        estimated_duration = speech_timing.estimate_seconds(spoken_text, config.TTS_WORDS_PER_SECOND)
+        remaining = estimated_duration - (asyncio.get_event_loop().time() - start_time)
+        if remaining > 0:
+            await asyncio.sleep(remaining)
 
     def start_reply(user_text: str) -> None:
         st.messages.append({"role": "user", "content": user_text})
@@ -170,7 +194,6 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 if text.strip():
                     if st.task and not st.task.done():
                         if barge_in.should_interrupt(text, config.EXTRA_STOP_PHRASES):
-                            logger.info("Interrupting active reply for trigger utterance: %r", text)
                             await cancel_task()
                             # Only the real reply text streamed so far goes
                             # into st.messages -- never the filler -- same
@@ -179,7 +202,24 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                             if st.partial_reply:
                                 st.messages.append({"role": "assistant", "content": st.partial_reply})
                                 st.partial_reply = ""
-                            start_reply(text)
+                            if barge_in.is_stop_command(text, config.EXTRA_STOP_PHRASES):
+                                # Stop/wait means stop -- acknowledge locally
+                                # and go silent rather than asking GuideAnts
+                                # what to say next, which would both add a
+                                # round-trip before playback cuts over and
+                                # leave whether the turn actually ends up to
+                                # the guide's own reply. Never sent through
+                                # GuideAnts, so (like fillers) never recorded
+                                # in st.messages either.
+                                logger.info("Stop command heard during active reply -- cancelling and going silent: %r", text)
+                                ack = fillers.pick(config.STOP_ACK_PHRASES)
+                                if ack:
+                                    await websocket.send_json(
+                                        {"type": "text", "token": ack, "last": True, "preemptible": True}
+                                    )
+                            else:
+                                logger.info("Interrupting active reply for a new question: %r", text)
+                                start_reply(text)
                         else:
                             # Logged only, never added to st.messages: GuideAnts
                             # never receives or persists this utterance, so
