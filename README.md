@@ -3,7 +3,7 @@
 A phone-based AI receptionist demo. A caller dials a Twilio number; **Twilio
 Conversation Relay** handles speech-to-text and text-to-speech and streams the
 conversation over a WebSocket to this middleware; the middleware forwards the
-caller's words to a **GuideAnts** guide and streams the guide's reply back to
+caller's words to a **GuideAnts** guide and sends the guide's reply back to
 Twilio, which speaks it to the caller.
 
 ```
@@ -15,9 +15,10 @@ Caller ⇄ Twilio number ⇄ Conversation Relay ⇄ this app (/twiml, /ws) ⇄ G
 | File | Purpose |
 |---|---|
 | `app.py` | FastAPI server: `POST /twiml` returns the TwiML that opens the relay; `WS /ws` is the Conversation Relay message loop. |
-| `guide_client.py` | Streams replies from the GuideAnts guide using the `openai` SDK pointed at GuideAnts' OpenAI-compatible endpoint. |
+| `guide_client.py` | Fetches replies from the GuideAnts guide using the `openai` SDK pointed at GuideAnts' OpenAI-compatible endpoint (non-streaming — see below). |
 | `fillers.py` | Pure logic for the filler-phrase feature: `looks_like_question` decides whether a caller's utterance looks like a question or request that warrants a short filler phrase before the real reply; `pick` returns a random filler phrase from a list; `is_backchannel` decides whether an utterance (e.g. "ok", "yeah") is pure acknowledgment noise that should never get a guide reply. |
-| `barge_in.py` | Pure logic for selective barge-in: `should_interrupt` decides whether a caller's utterance heard mid-reply (a stop/wait phrase, or a new question) should cancel the in-flight reply and start a fresh one. |
+| `barge_in.py` | Pure logic for selective barge-in: `should_interrupt` decides whether a caller's utterance heard mid-reply (a stop/wait phrase, or a new question) should cancel the in-flight reply; a stop/wait phrase then gets a local acknowledgment, a new question starts a fresh reply. |
+| `speech_timing.py` | Pure logic: `estimate_seconds` estimates how long Twilio's TTS will take to speak a given text, from its word count. |
 | `config.py` | Loads settings from `.env`. |
 | `.env.example` | Template for required configuration — copy to `.env`. |
 
@@ -46,25 +47,28 @@ this code. This app is just the phone/WebSocket bridge.
      speech); logged if it ever arrives
    - `dtmf` — caller pressed a key
    - `error` — Conversation Relay reported a problem
-4. On each `prompt`, if no reply is currently streaming, `/ws` sends the
-   running chat history to the GuideAnts guide (`guide_client.stream_reply`)
-   and streams the reply back to Twilio as it's generated:
+4. On each `prompt`, if no reply is currently in flight, `/ws` sends the
+   running chat history to the GuideAnts guide (`guide_client.stream_reply`),
+   which makes a single non-streaming call (GuideAnts' chat-completions
+   endpoint rejects `stream: true`) and sends the whole reply to Twilio as one
+   frame:
    ```json
-   {"type": "text", "token": "Hello", "last": false}
-   ...
+   {"type": "text", "token": "Hello there!", "last": false}
    {"type": "text", "token": "", "last": true}
    ```
-   Twilio starts speaking tokens as they arrive, so the caller doesn't wait for
-   the full reply to be generated. If the caller's utterance looks like a
-   question or request (see `fillers.py`), a short filler phrase (e.g. "Let me
-   look that up for you.") is spoken first, before the real reply, to mask
-   GuideAnts lookup latency.
+   Since the reply arrives all at once rather than incrementally, a short
+   filler phrase (e.g. "Let me look that up for you.") is spoken first, before
+   the real reply, whenever the caller's utterance looks like a question or
+   request (see `fillers.py`) — this is what masks GuideAnts lookup latency.
 5. If a `prompt` arrives *while* a reply is already streaming, Twilio does not
    stop or pause TTS on its own (`interruptible="none"`) — but this app does
    act on it if it's a stop/wait phrase ("stop", "wait", "hold on", ...) or a
-   new question: the in-flight reply is cancelled and a fresh reply starts
-   immediately for what the caller just said, cutting over playback via
-   Conversation Relay's `preemptible` flag. Anything else said mid-reply
+   new question, cutting over playback via Conversation Relay's `preemptible`
+   flag either way. A stop/wait phrase gets a short local acknowledgment
+   (e.g. "Okay.") and then silence — it's never sent to GuideAnts, so it cuts
+   over immediately and doesn't depend on the guide replying briefly. A new
+   question instead cancels the in-flight reply and starts a fresh one
+   immediately for what the caller just said. Anything else said mid-reply
    (statements, backchannel, noise) is just logged and the current reply
    keeps playing to the end — see [ARCHITECTURE.md](ARCHITECTURE.md) for the
    full model and why.
@@ -89,10 +93,11 @@ With the server running and `.env` pointed at a real published guide, confirm
 GuideAnts is reachable directly:
 
 ```
-curl -N http://localhost:5107/api/published/openai/<pubId>/v1/chat/completions ^
+curl http://localhost:5107/api/published/openai/<pubId>/v1/chat/completions ^
   -H "Authorization: Bearer <key-or-anonymous>" -H "Content-Type: application/json" ^
-  -d "{\"model\":\"<alias>\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"stream\":true}"
+  -d "{\"model\":\"<alias>\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"
 ```
 
-You should see `data:` chunks containing `choices[].delta.content`. If this
-works, `/ws` will work too.
+You should see a single JSON object with `choices[0].message.content` (don't
+pass `"stream":true` — this endpoint is non-streaming only and rejects it with
+an `unsupported_feature` error). If this works, `/ws` will work too.

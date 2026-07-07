@@ -32,7 +32,8 @@ Caller ⇄ Twilio ⇄ ───────────────────�
 | [config.py](config.py) | Reads all settings from environment / `.env`, no other file touches `os.environ`. |
 | [guide_client.py](guide_client.py) | Thin wrapper around the `openai` SDK pointed at GuideAnts; exposes one function, `stream_reply`. |
 | [fillers.py](fillers.py) | Pure functions used by `app.py` to decide the filler-phrase behavior: `looks_like_question` classifies a caller utterance as question/request-like (warrants a filler) or not, `pick` returns a random filler phrase from a list, and `is_backchannel` classifies an utterance as pure acknowledgment noise (e.g. "ok", "yeah") that should never get a guide reply. No I/O, no Twilio/GuideAnts knowledge. |
-| [barge_in.py](barge_in.py) | Pure functions used by `app.py` to decide selective barge-in: `is_stop_command` matches a caller utterance against a built-in stop/wait phrase list, and `should_interrupt` (= `is_stop_command` or `fillers.looks_like_question`) decides whether an utterance heard mid-reply should cancel and restart the in-flight reply. No I/O, no Twilio/GuideAnts knowledge — unit-tested directly in `test_barge_in.py`. |
+| [barge_in.py](barge_in.py) | Pure functions used by `app.py` to decide selective barge-in: `is_stop_command` matches a caller utterance against a built-in stop/wait phrase list, and `should_interrupt` (= `is_stop_command` or `fillers.looks_like_question`) decides whether an utterance heard mid-reply should cancel the in-flight reply at all. No I/O, no Twilio/GuideAnts knowledge — unit-tested directly in `test_barge_in.py`. |
+| [speech_timing.py](speech_timing.py) | One pure function, `estimate_seconds`, used by `app.py` to estimate how long Twilio's TTS will take to speak a given text from its word count. No I/O. |
 | [app.py](app.py) | FastAPI app with the two endpoints Twilio talks to: `POST /twiml` and `WS /ws`. All call-handling logic lives here. |
 
 ---
@@ -55,7 +56,9 @@ env var is unset):
 | `PORT` | `PORT` | `8080` | not read by `app.py` itself — `uvicorn` is started with `--port` on the command line; this constant is unused today |
 | `FILLER_PHRASES` | `FILLER_PHRASES` | a built-in list of 6 phrases (e.g. `"Let me look that up for you."`) | `app.py` (via `fillers.pick`) — pool of filler phrases spoken before the real reply when the caller's utterance looks like a question/request. Pipe-separated (`\|`) in the env var, since phrases contain commas/periods; falls back to the built-in list if unset. |
 | `EXTRA_BACKCHANNEL_PHRASES` | `EXTRA_BACKCHANNEL_PHRASES` | `[]` (empty) | `app.py` (via `fillers.is_backchannel`) — comma-separated phrases, on top of the built-in `fillers.BACKCHANNEL_PHRASES`, that count as pure acknowledgment noise and should never get a guide reply. |
-| `EXTRA_STOP_PHRASES` | `EXTRA_STOP_PHRASES` | `[]` (empty) | `app.py` (via `barge_in.should_interrupt`) — comma-separated phrases, on top of the built-in `barge_in.STOP_PHRASES`, that also cancel and restart an in-flight reply when heard mid-reply. |
+| `EXTRA_STOP_PHRASES` | `EXTRA_STOP_PHRASES` | `[]` (empty) | `app.py` (via `barge_in.should_interrupt`/`is_stop_command`) — comma-separated phrases, on top of the built-in `barge_in.STOP_PHRASES`, that also cancel an in-flight reply when heard mid-reply. |
+| `STOP_ACK_PHRASES` | `STOP_ACK_PHRASES` | a built-in list of 4 phrases (e.g. `"Okay."`) | `app.py` (via `fillers.pick`) — pool of short local acknowledgments spoken (instead of a GuideAnts reply) when a stop/wait phrase cancels an in-flight reply. Pipe-separated (`\|`) in the env var; falls back to the built-in list if unset. |
+| `TTS_WORDS_PER_SECOND` | `TTS_WORDS_PER_SECOND` | `2.5` | `app.py` (via `speech_timing.estimate_seconds`) — assumed TTS speaking rate, used to estimate how long a reply takes to speak aloud since GuideAnts' non-streaming endpoint gives no real playback-progress signal. |
 
 If `GUIDEANTS_PUB_ID` is empty when the guide client is first used, `guide_client.py` raises a `RuntimeError` telling the user to fill in `.env` — this is the only config validation in the app.
 
@@ -68,7 +71,7 @@ Exposes exactly one public function: `stream_reply(messages) -> AsyncIterator[st
 - `_get_client()` lazily builds a module-level singleton `AsyncOpenAI` client the first time it's needed, pointed at:
   `{GUIDEANTS_BASE_URL}/api/published/openai/{GUIDEANTS_PUB_ID}/v1`
   This is GuideAnts' OpenAI-compatible endpoint, **not** the OpenAI API — same request/response shape, different backend. Because it's a singleton, the client (and its HTTP connection pool) is reused across every call/WS connection the app handles.
-- `stream_reply(messages)` calls `client.chat.completions.create(model=..., messages=messages, stream=True)` and yields each non-empty `chunk.choices[0].delta.content` string as it arrives. Empty/keepalive chunks (`chunk.choices` empty, or `delta.content` falsy) are silently skipped.
+- `stream_reply(messages)` calls `client.chat.completions.create(model=..., messages=messages)` (no `stream=True` — the published wire API's chat-completions endpoint is non-streaming only and rejects `stream=true` with `unsupported_feature`) and yields the whole `choices[0].message.content` as a single delta, if non-empty.
 - `messages` is the **full chat history** (list of `{"role": ..., "content": ...}` dicts) — GuideAnts is stateless from this client's point of view per the wire protocol used here (see below), so `app.py` is responsible for holding and resending the whole conversation on every turn.
 
 ### Why this endpoint and not `/invoke`
@@ -107,7 +110,7 @@ Twilio opens exactly one WebSocket connection here per call, immediately after `
 
 **Per-connection state** (`CallState`, one instance per call — all local to the WS handler closure; nothing is shared across calls, nothing persists after disconnect):
 - `messages: list[dict]` — the full running chat history sent to GuideAnts on every turn.
-- `task` — the `asyncio.Task` currently generating/streaming a reply, if any; also doubles as the "is a reply active right now" flag (`st.task and not st.task.done()`).
+- `task` — the `asyncio.Task` currently generating/speaking a reply, if any; also doubles as the "is a reply active right now" flag (`st.task and not st.task.done()`). Because GuideAnts' endpoint is non-streaming, the whole reply is fetched and sent to Twilio in one shot almost immediately — `respond_to()` doesn't let this task finish there, though; it estimates the reply's (plus any filler's) speaking duration from word count (`speech_timing.estimate_seconds`, paced by `config.TTS_WORDS_PER_SECOND`) and sleeps out whatever's left of that before returning, so the task stays "not done," and mid-reply speech still gets evaluated as mid-reply, for roughly as long as Twilio is actually still speaking.
 - `partial_reply: str` — the real (GuideAnts-sourced) reply text streamed so far in the current turn, never including the filler. Reset to `""` at the start of every turn; read and appended to `st.messages` if a trigger utterance cancels the turn before it finishes.
 
 **Inbound message types** (sent by Twilio Conversation Relay):
@@ -115,7 +118,7 @@ Twilio opens exactly one WebSocket connection here per call, immediately after `
 | `type` | Key fields | Handling |
 |---|---|---|
 | `setup` | `callSid`, `from`, `to` | Logged only; no state change. First message on every connection. |
-| `prompt` | `voicePrompt` (caller's transcribed speech) | If a reply *is* already streaming: `barge_in.should_interrupt()` checks whether this is a stop/wait phrase or a new question. If so, the in-flight reply is cancelled and a fresh one starts for this utterance (see "Selective barge-in" below). Otherwise the text is just logged — not spoken, not acted on, not recorded anywhere. If no reply is streaming: `fillers.is_backchannel()` catches pure acknowledgment noise (e.g. "ok", "yeah") and it's just logged, never recorded into `messages` either — this also covers the case where STT finishes transcribing a short "ok" just *after* the reply already finished. Otherwise a new reply starts (`start_reply()`), which also decides via `fillers.looks_like_question()` whether to prepend a filler phrase. |
+| `prompt` | `voicePrompt` (caller's transcribed speech) | If a reply *is* already streaming: `barge_in.should_interrupt()` checks whether this is a stop/wait phrase or a new question. If so, the in-flight reply is cancelled; a stop/wait phrase then just gets a local acknowledgment and silence, a new question starts a fresh reply for this utterance (see "Selective barge-in" below). Otherwise the text is just logged — not spoken, not acted on, not recorded anywhere. If no reply is streaming: `fillers.is_backchannel()` catches pure acknowledgment noise (e.g. "ok", "yeah") and it's just logged, never recorded into `messages` either — this also covers the case where STT finishes transcribing a short "ok" just *after* the reply already finished. Otherwise a new reply starts (`start_reply()`), which also decides via `fillers.looks_like_question()` whether to prepend a filler phrase. |
 | `interrupt` | `utteranceUntilInterrupt` | Not expected given `interruptible="none"` — logged only, no state change. Caller speech during agent speech arrives as `prompt` instead (see above); Twilio itself never auto-pauses. |
 | `dtmf` | `digit` | Logged only — not acted on (no IVR menu implemented; see SETUP.md's "not implemented" list). |
 | `error` | `description` | Logged as an error. Connection is not closed by this app. |
@@ -123,13 +126,12 @@ Twilio opens exactly one WebSocket connection here per call, immediately after `
 
 Non-JSON frames are logged and skipped rather than crashing the loop.
 
-**Outbound message shape** (sent by this app to Twilio), streamed token-by-token as GuideAnts generates them:
+**Outbound message shape** (sent by this app to Twilio):
 ```json
-{"type": "text", "token": "Hello", "last": false, "preemptible": true}
-{"type": "text", "token": " there!", "last": false, "preemptible": true}
+{"type": "text", "token": "Hello there!", "last": false, "preemptible": true}
 {"type": "text", "token": "", "last": true, "preemptible": true}
 ```
-Twilio starts speaking (TTS) as tokens arrive rather than waiting for the full reply — this is what makes the reply feel low-latency on a phone call. Every frame carries `preemptible: true` — see "Selective barge-in" below for why.
+Because GuideAnts' chat-completions endpoint is non-streaming only, `guide_client.stream_reply` yields the whole reply as one token frame rather than incremental deltas — the filler phrase (sent as its own frame first, see below) is what actually masks the wait while GuideAnts generates the answer. Every frame carries `preemptible: true` — see "Selective barge-in" below for why.
 
 ### `start_reply()` / `respond_to()` — the reply pipeline
 
@@ -147,8 +149,8 @@ Twilio starts speaking (TTS) as tokens arrive rather than waiting for the full r
 ### Filler phrases and mid-reply speech
 
 1. **While a reply is streaming, non-trigger speech.** `barge_in.should_interrupt()` calls `fillers.looks_like_question()` on every mid-reply utterance to classify it (see "Selective barge-in" below for exactly what counts as a trigger); if it comes back false and the utterance also isn't a stop/wait phrase, nothing further happens: not spoken, not cancelled, not recorded anywhere, and no filler is picked. The current reply keeps playing to its end exactly as if the caller had stayed silent, and the utterance itself is gone: it is never replayed to GuideAnts as context on a later turn.
-2. **While a reply is streaming, trigger speech.** See "Selective barge-in" below — the in-flight reply is cancelled and a fresh one starts immediately for the new utterance.
-3. **Late backchannel, after the reply already finished.** Twilio's speech-to-text can finish transcribing a short utterance like "ok" slightly *after* the reply has already finished playing, so by the time the `prompt` arrives `st.task.done()` is already `True` — it no longer looks like "mid-reply" at all. To stop this from being treated as a brand-new question, `fillers.is_backchannel(text, config.EXTRA_BACKCHANNEL_PHRASES)` checks whether the whole utterance is pure acknowledgment noise (`fillers.BACKCHANNEL_PHRASES`: "ok", "okay", "yeah", "mmhmm", "got it", ... plus anything in the env-configurable extra list). If so, it's just logged ("Ignored backchannel utterance (not acted on)") — never appended to `st.messages`, no guide call, no reply — for the same reason fillers and non-trigger mid-reply speech aren't: GuideAnts must never see a local message it didn't itself produce (see the module docstring in `app.py`).
+2. **While a reply is streaming, trigger speech.** See "Selective barge-in" below — the in-flight reply is cancelled; a stop/wait phrase gets a local acknowledgment and silence, a new question starts a fresh reply immediately for the new utterance.
+3. **Late backchannel, after the reply already finished.** Twilio's speech-to-text can finish transcribing a short utterance like "ok" slightly *after* the reply (and its estimated speaking-duration pacing sleep, see above) has actually finished, so by the time the `prompt` arrives `st.task.done()` is already `True` — it no longer looks like "mid-reply" at all. To stop this from being treated as a brand-new question, `fillers.is_backchannel(text, config.EXTRA_BACKCHANNEL_PHRASES)` checks whether the whole utterance is pure acknowledgment noise (`fillers.BACKCHANNEL_PHRASES`: "ok", "okay", "yeah", "mmhmm", "got it", ... plus anything in the env-configurable extra list). If so, it's just logged ("Ignored backchannel utterance (not acted on)") — never appended to `st.messages`, no guide call, no reply — for the same reason fillers and non-trigger mid-reply speech aren't: GuideAnts must never see a local message it didn't itself produce (see the module docstring in `app.py`).
 4. **Starting a real reply.** Otherwise, `start_reply(text)` runs: it appends the caller's text to `st.messages`, and separately (not stored in `st.messages`) checks `fillers.looks_like_question(text)` — true for text ending in `?`, or starting (after stripping leading fillers like "um"/"okay"/"so") with an interrogative word (`what`, `how`, `can`, `is`, ...) or a request verb (`tell`, `find`, `help`, ...), or a lead-in phrase like "i need"/"i want"/"looking for". If true, a random phrase from `config.FILLER_PHRASES` is spoken first, immediately, before the real GuideAnts reply — masking the network/LLM latency of the lookup with something audible right away. If false, the real reply just starts streaming with no filler.
 
 On `WebSocketDisconnect`, any in-flight task is cancelled and the loop exits — nothing is persisted, so a dropped call simply forgets the conversation.
@@ -160,13 +162,24 @@ playback on its own. Instead, `app.py` decides, per mid-reply `prompt`,
 whether to cut the reply over using `barge_in.should_interrupt(text,
 config.EXTRA_STOP_PHRASES)`:
 
-- **Stop/wait phrase** (`barge_in.STOP_PHRASES`/`EXTRA_STOP_PHRASES` — "stop",
-  "wait", "hold on", "no", ...) or **a new question**
-  (`fillers.looks_like_question()`) → the in-flight reply is cancelled
-  (`cancel_task()`), the real reply text streamed so far this turn
-  (`st.partial_reply` — never including the filler) is appended to
-  `st.messages` if non-empty, and `start_reply(text)` runs for the new
-  utterance exactly as if it were a fresh prompt.
+Both cases below start by cancelling the in-flight reply (`cancel_task()`)
+and, if any reply text had been sent so far this turn (`st.partial_reply` —
+never including the filler), appending it to `st.messages`. What happens
+next differs:
+
+- **Stop/wait phrase** (`barge_in.is_stop_command()` — "stop", "wait", "hold
+  on", "no", ... plus `EXTRA_STOP_PHRASES`) → GuideAnts is *not* called. A
+  random phrase from `config.STOP_ACK_PHRASES` (e.g. "Okay.") is sent as a
+  single preemptible frame instead, then the turn ends there — no
+  `start_reply()`, no new `st.messages` entries for the stop utterance or the
+  acknowledgment (same reasoning as fillers: GuideAnts never saw either, so
+  recording them would desync local history from GuideAnts' persisted
+  state). This is what actually makes "stop" stop: cutting over doesn't wait
+  on a GuideAnts round-trip, and doesn't depend on the guide choosing to
+  reply briefly.
+- **A new question** (`fillers.looks_like_question()`, and not itself a stop
+  phrase) → `start_reply(text)` runs for the new utterance exactly as if it
+  were a fresh prompt.
 - **Anything else** (statement, backchannel, noise) → logged and ignored,
   exactly as before this feature.
 
@@ -192,10 +205,9 @@ persisted server-side for an aborted stream — there's no Twilio-side
 `guide_client.py` calls **`POST {GUIDEANTS_BASE_URL}/api/published/openai/{GUIDEANTS_PUB_ID}/v1/chat/completions`** — GuideAnts' OpenAI-wire-compatible endpoint (implemented server-side in `PublishedOpenAiChatWireHandler.PostChatCompletionsAsync`, routed via `PublishedOpenAiWireEndpoints`, GuideAnts repo). Relevant contract details:
 
 - **Auth**: `Authorization: Bearer <GUIDEANTS_API_KEY>` header (the `openai` SDK adds this automatically from `api_key=`). GuideAnts also accepts `x-guideants-apikey` or anonymous access, depending on how the published guide's auth mode was configured (see SETUP.md step 1.4).
-- **Request body**: standard OpenAI chat-completions shape — `{"model": "guide", "messages": [...], "stream": true}`. `model` must match one of the alias `id`s returned by `GET .../v1/models` (normally the fixed alias `"guide"` for the chat-completions endpoint, not the real underlying model name).
+- **Request body**: standard OpenAI chat-completions shape — `{"model": "guide", "messages": [...]}`. `model` must match one of the alias `id`s returned by `GET .../v1/models` (normally the fixed alias `"guide"` for the chat-completions endpoint, not the real underlying model name).
 - **Statelessness**: this endpoint does not remember prior turns on its own from a bare `messages` array the way `/invoke` implicitly manages a conversation — GuideAnts derives/resumes a conversation from the message history it's given, but this client's contract is "send the full transcript every time," which is exactly what `app.py`'s `messages` list does.
-- **Streaming response**: with `stream: true`, GuideAnts returns `text/event-stream` SSE chunks, each an OpenAI-shaped JSON object under `choices[0].delta.content`. `guide_client.stream_reply` reads these via the `openai` SDK's async streaming iterator and yields just the text deltas.
-- **Non-streaming response** (not used by this app, but supported by the same endpoint): a single JSON object with `choices[0].message.content`, `finish_reason`, and `usage`.
+- **Non-streaming only**: this endpoint rejects `stream: true` with an OpenAI-shaped `unsupported_feature` error — it always returns a single JSON object with `choices[0].message.content`, `finish_reason`, and `usage`. `guide_client.stream_reply` reads that whole message and yields it as one delta.
 - **Tool calls**: the wire endpoint also supports OpenAI-style `tools`/`tool_calls` (client-side tool execution) — unused here since the receptionist guide doesn't define any tools today, but the endpoint would return `finish_reason: "tool_calls"` if it did.
 - **Errors**: e.g. `403 endpoint_disabled` if the guide's "Enable Wire API" / "Chat Completions" toggle isn't turned on in the Publish dialog (see SETUP.md step 1.5).
 
@@ -209,8 +221,8 @@ persisted server-side for an aborted stream — there's no Twilio-side
 2. Twilio POSTs to `/twiml`. App returns `<Connect><ConversationRelay url="wss://.../ws" .../></Connect>`.
 3. Twilio opens the WS, speaks `WELCOME_GREETING` to the caller immediately (handled entirely by Twilio, not by this app), then sends `setup`.
 4. Caller speaks. Twilio transcribes it and sends `prompt` with `voicePrompt`.
-5. `app.py` appends it to `messages`. If the utterance looks like a question/request (`fillers.looks_like_question()`), a random filler phrase is sent first as its own spoken token. Then `guide_client.stream_reply` is called and the reply is streamed back as `text` frames; Twilio speaks it via TTS as tokens arrive, with `interruptible="none"` so nothing Twilio hears from the caller during this stops playback.
-6. If the caller talks during the reply, Twilio still transcribes it and sends it as another `prompt` (`report_input_during_agent_speech="speech"`) rather than an `interrupt`. If it's a stop/wait phrase or a new question (`barge_in.should_interrupt()`), the in-flight reply is cancelled and a fresh reply starts for it immediately (repeat from step 4). Otherwise the current reply keeps playing to the end and the utterance is just logged.
+5. `app.py` appends it to `messages`. If the utterance looks like a question/request (`fillers.looks_like_question()`), a random filler phrase is sent first as its own spoken token, masking the wait. Then `guide_client.stream_reply` is called and GuideAnts' (non-streaming) reply is sent to Twilio as one `text` frame; Twilio speaks it via TTS, with `interruptible="none"` so nothing Twilio hears from the caller during this stops playback.
+6. If the caller talks during the reply, Twilio still transcribes it and sends it as another `prompt` (`report_input_during_agent_speech="speech"`) rather than an `interrupt`. If it's a stop/wait phrase (`barge_in.is_stop_command()`), the in-flight reply is cancelled and a short local acknowledgment is spoken instead — no GuideAnts call. If it's a new question, the in-flight reply is cancelled and a fresh reply starts for it immediately (repeat from step 4). Otherwise the current reply keeps playing to the end and the utterance is just logged.
 7. Once the reply finishes normally, the real reply is appended to `messages` (the filler, if any, is never appended — see "Why the filler is excluded" above). `messages` grows for the life of the call.
 8. Repeat from step 4 for each new turn. Non-trigger speech heard mid-reply (step 6) is never recorded anywhere and is not automatically revisited — if it was itself a real question, it is only answered if the caller asks it again after the current reply finishes.
 9. Caller hangs up → WS disconnects → in-flight task is cancelled, connection state (and the entire conversation) is discarded.

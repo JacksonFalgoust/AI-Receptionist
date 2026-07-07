@@ -124,24 +124,27 @@ Conversation Relay requires a public `wss://` URL — it will not connect to
 Dial the Twilio number. You should hear the `WELCOME_GREETING`, then be able to
 ask a question and hear the guide's answer.
 
-Try these to see the filler-phrase and uninterruptible-reply behavior:
+Try these to see the filler-phrase and selective-barge-in behavior:
 
 - **Ask a question** (e.g. "what time do you close?") or a request ("can you
   help me find...", "I need..."). You should hear a short filler phrase (e.g.
   "Let me look that up for you.") right away, followed by the real answer.
-- **Say something — even "stop" — while the guide is mid-answer.** The answer
-  should *not* get cut off; it keeps playing all the way to the end. Whatever
-  you said is only recorded into the conversation history, not acted on.
+- **Say "stop" (or "wait", "hold on", "no", ...) while the guide is
+  mid-answer.** The answer should cut off right away, followed by a short
+  local acknowledgment (e.g. "Okay.") — not a new guide reply.
+- **Ask a different question while the guide is still answering a previous
+  one.** The current answer should cut off and a fresh reply should start for
+  your new question.
+- **Make a plain statement** (not a stop phrase or a question) while the
+  guide is mid-answer. It should *not* get cut off; it keeps playing all the
+  way to the end, and what you said is not recorded or acted on.
 - **Say "ok" (or "okay", "yeah", "got it", ...) right as the guide finishes
   answering.** You should hear nothing in response — no new guide reply. This
   also covers the case where speech-to-text finishes transcribing your "ok"
   a moment *after* the answer already ended.
-- **Make a plain statement** (not phrased as a question or request) and notice
-  no filler phrase plays — the reply just starts streaming directly.
-- **Ask a real question while the guide is still answering a previous one.**
-  Notice it is *not* answered next — you'll need to ask it again after the
-  current answer finishes, since interruptions are only recorded, not acted
-  on.
+- **Make a plain statement** (not phrased as a question or request) as a
+  fresh prompt and notice no filler phrase plays — the reply just starts
+  directly.
 
 ## Optional hardening (not implemented, not required for the demo)
 

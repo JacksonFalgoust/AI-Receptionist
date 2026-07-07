@@ -9,6 +9,12 @@ GUIDEANTS_PUB_ID = os.environ.get("GUIDEANTS_PUB_ID", "")
 GUIDEANTS_API_KEY = os.environ.get("GUIDEANTS_API_KEY", "anonymous")
 GUIDEANTS_MODEL = os.environ.get("GUIDEANTS_MODEL", "guide")
 
+# Average TTS speaking rate, used to estimate how long Twilio will take to
+# speak a reply since GuideAnts' non-streaming endpoint gives no real
+# playback-progress signal (see speech_timing.py). ~150 wpm is a typical
+# conversational TTS rate.
+TTS_WORDS_PER_SECOND = float(os.environ.get("TTS_WORDS_PER_SECOND", "2.5"))
+
 WELCOME_GREETING = os.environ.get(
     "WELCOME_GREETING", "Thanks for calling! How can I help you today?"
 )
@@ -42,10 +48,26 @@ EXTRA_BACKCHANNEL_PHRASES = [
     if p.strip()
 ]
 
-# Extra phrases (beyond barge_in.STOP_PHRASES) that should also cancel and
-# restart an in-flight reply when heard mid-reply.
+# Extra phrases (beyond barge_in.STOP_PHRASES) that should also cancel an
+# in-flight reply when heard mid-reply.
 EXTRA_STOP_PHRASES = [
     p.strip().lower()
     for p in os.environ.get("EXTRA_STOP_PHRASES", "").split(",")
     if p.strip()
 ]
+
+# Short local acknowledgment spoken when a stop/wait phrase cancels an
+# in-flight reply -- never sent through GuideAnts, so it cuts over the
+# playback immediately instead of waiting on another guide round-trip.
+_DEFAULT_STOP_ACK_PHRASES = [
+    "Okay.",
+    "Got it.",
+    "No problem.",
+    "Sure thing.",
+]
+
+STOP_ACK_PHRASES = [
+    p.strip()
+    for p in os.environ.get("STOP_ACK_PHRASES", "").split("|")
+    if p.strip()
+] or _DEFAULT_STOP_ACK_PHRASES
