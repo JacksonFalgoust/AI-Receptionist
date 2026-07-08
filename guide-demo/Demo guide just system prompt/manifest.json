@@ -1,0 +1,7 @@
+{
+  "name": "Restaurant Guide (System Prompt)",
+  "description": "Demo for twilio conversation relay",
+  "defaultModel": "deepseek/deepseek-v4-flash:nitro",
+  "defaultAssistant": null,
+  "crew": []
+}
