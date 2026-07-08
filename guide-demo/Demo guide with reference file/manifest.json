@@ -1,0 +1,7 @@
+{
+  "name": "Restaurant Guide (reference file)",
+  "description": "Guide answering questions about a restaurant",
+  "defaultModel": "deepseek/deepseek-v4-flash:nitro",
+  "defaultAssistant": null,
+  "crew": []
+}
