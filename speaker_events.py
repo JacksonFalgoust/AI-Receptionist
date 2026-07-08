@@ -1,0 +1,67 @@
+"""Loose classifier for Conversation Relay speaker-event WS messages.
+
+Subscribing with `events="speaker-events"` in the <ConversationRelay> TwiML
+(see app.py's /twiml) makes Twilio notify this app when the agent (TTS
+playback) and the client (caller) start and stop speaking. Twilio's
+reference docs document the subscription attribute but not (yet) the exact
+JSON shape of the resulting messages, so `classify` matches loosely instead
+of pattern-matching one exact schema: it scans the message's string values
+for the documented event names ("agentSpeaking" / "clientSpeaking") and for
+start/stop-flavored words. app.py only *acts* on "agent-stop" (see the
+playback hold in respond_to()), and only after at least one agent-stop has
+already been recognized on the call, so a wire shape this parser can't
+recognize degrades to the older estimate-based pacing rather than
+misbehaving. Only called for message types app.py doesn't already handle,
+so a caller's prompt whose transcript happens to mention "agent speaking"
+never reaches it. Pure functions only, no I/O -- mirrors the role
+fillers.py and barge_in.py play for their features.
+"""
+
+import re
+
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+
+# Checked in this order: a stop notification may plausibly mention when the
+# speech *started* (e.g. a startTime), but not the other way around.
+_STOP_HINTS = ("stop", "end", "finish", "complete", "done")
+_START_HINTS = ("start", "begin")
+
+_MAX_DEPTH = 3
+
+
+def _iter_strings(value, depth: int = _MAX_DEPTH):
+    """Yield every string value in a (shallowly) nested JSON-ish structure, lowercased."""
+    if isinstance(value, str):
+        yield value.lower()
+    elif depth > 0 and isinstance(value, dict):
+        for v in value.values():
+            yield from _iter_strings(v, depth - 1)
+    elif depth > 0 and isinstance(value, (list, tuple)):
+        for v in value:
+            yield from _iter_strings(v, depth - 1)
+
+
+def classify(msg) -> str | None:
+    """Classify a decoded WS message as a speaker event, or None if it isn't one.
+
+    Returns "agent-start", "agent-stop", "client-start", "client-stop", or --
+    for a recognized speaker event whose direction can't be determined --
+    "agent-unknown"/"client-unknown".
+    """
+    if not isinstance(msg, dict):
+        return None
+    strings = list(_iter_strings(msg))
+    # "agentSpeaking" / "agent-speaking-started" / "agent_speaking" all
+    # squash to something containing "agentspeaking".
+    squashed = [_NON_ALNUM_RE.sub("", s) for s in strings]
+    if any("agentspeaking" in s for s in squashed):
+        speaker = "agent"
+    elif any("clientspeaking" in s for s in squashed):
+        speaker = "client"
+    else:
+        return None
+    if any(hint in s for s in strings for hint in _STOP_HINTS):
+        return f"{speaker}-stop"
+    if any(hint in s for s in strings for hint in _START_HINTS):
+        return f"{speaker}-start"
+    return f"{speaker}-unknown"

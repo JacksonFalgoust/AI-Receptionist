@@ -10,8 +10,10 @@ GUIDEANTS_API_KEY = os.environ.get("GUIDEANTS_API_KEY", "anonymous")
 GUIDEANTS_MODEL = os.environ.get("GUIDEANTS_MODEL", "guide")
 
 # Average TTS speaking rate, used to estimate how long Twilio will take to
-# speak a reply since GuideAnts' non-streaming endpoint gives no real
-# playback-progress signal (see speech_timing.py). ~150 wpm is a typical
+# speak a reply (see speech_timing.py). Twilio's agent-stopped speaker event
+# is the primary "reply finished playing" signal; this estimate paces the
+# reply until the first such event is recognized on a call, and caps how
+# long the app waits for one after that. ~150 wpm is a typical
 # conversational TTS rate.
 TTS_WORDS_PER_SECOND = float(os.environ.get("TTS_WORDS_PER_SECOND", "2.5"))
 
