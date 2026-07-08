@@ -61,19 +61,25 @@ WELCOME_GREETING=<what the AI says when it picks up>
 PORT=8080
 ```
 
-One more variable controls the filler-phrase behavior (see the manual test in
-step 6). It's optional — a sensible built-in default list applies if you leave
-it unset:
+A couple more variables control the filler-phrase behavior (see the manual
+test in step 6). Both are optional — sensible built-in defaults apply if you
+leave them unset:
 
 ```
 FILLER_PHRASES=Let me look that up for you.|One moment while I check on that.
+FILLER_DELAY_SECONDS=1.0
 ```
 
 - `FILLER_PHRASES` — pipe-separated (`|`) list of short phrases the app can
-  speak immediately, before the real answer, when the caller's utterance looks
-  like a question or request (masks GuideAnts lookup latency). Pipe-separated
-  rather than comma-separated because the phrases themselves contain commas
-  and periods. If unset, a built-in default list of six phrases is used.
+  speak, before the real answer, when the caller's utterance looks like a
+  question or request *and* GuideAnts hasn't replied yet (masks GuideAnts
+  lookup latency). Pipe-separated rather than comma-separated because the
+  phrases themselves contain commas and periods. If unset, a built-in default
+  list of six phrases is used.
+- `FILLER_DELAY_SECONDS` — how long (in seconds) to wait for GuideAnts' reply,
+  for a filler-eligible utterance, before speaking a filler phrase. If the
+  reply arrives before this elapses, no filler is spoken at all. Defaults to
+  `1.0`.
 - `EXTRA_BACKCHANNEL_PHRASES` — comma-separated list of extra phrases (beyond
   the built-in list in `fillers.py`) that count as pure acknowledgment noise
   ("ok", "yeah", "got it", ...) and should never get a guide reply, whether
@@ -127,8 +133,11 @@ ask a question and hear the guide's answer.
 Try these to see the filler-phrase and selective-barge-in behavior:
 
 - **Ask a question** (e.g. "what time do you close?") or a request ("can you
-  help me find...", "I need..."). You should hear a short filler phrase (e.g.
-  "Let me look that up for you.") right away, followed by the real answer.
+  help me find...", "I need...") **and GuideAnts takes longer than
+  `FILLER_DELAY_SECONDS` to answer.** You should hear a short filler phrase
+  (e.g. "Let me look that up for you.") while it's still thinking, followed by
+  the real answer. If GuideAnts answers faster than that, no filler plays —
+  the reply just starts.
 - **Say "stop" (or "wait", "hold on", "no", ...) while the guide is
   mid-answer.** The answer should cut off right away, followed by a short
   local acknowledgment (e.g. "Okay.") — not a new guide reply.

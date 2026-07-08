@@ -18,7 +18,8 @@ Caller ⇄ Twilio number ⇄ Conversation Relay ⇄ this app (/twiml, /ws) ⇄ G
 | `guide_client.py` | Fetches replies from the GuideAnts guide using the `openai` SDK pointed at GuideAnts' OpenAI-compatible endpoint (non-streaming — see below). |
 | `fillers.py` | Pure logic for the filler-phrase feature: `looks_like_question` decides whether a caller's utterance looks like a question or request that warrants a short filler phrase before the real reply; `pick` returns a random filler phrase from a list; `is_backchannel` decides whether an utterance (e.g. "ok", "yeah") is pure acknowledgment noise that should never get a guide reply. |
 | `barge_in.py` | Pure logic for selective barge-in: `should_interrupt` decides whether a caller's utterance heard mid-reply (a stop/wait phrase, or a new question) should cancel the in-flight reply; a stop/wait phrase then gets a local acknowledgment, a new question starts a fresh reply. |
-| `speech_timing.py` | Pure logic: `estimate_seconds` estimates how long Twilio's TTS will take to speak a given text, from its word count. |
+| `speech_timing.py` | Pure logic: `estimate_seconds` estimates how long Twilio's TTS will take to speak a given text, from its word count — the fallback pacing signal when Twilio's speaker events aren't available. |
+| `speaker_events.py` | Pure logic: `classify` recognizes Twilio's speaker-event messages (`agentSpeaking`/`clientSpeaking` start/stop) — the agent-stopped event is the real "reply finished playing" signal. |
 | `config.py` | Loads settings from `.env`. |
 | `.env.example` | Template for required configuration — copy to `.env`. |
 
@@ -47,6 +48,10 @@ this code. This app is just the phone/WebSocket bridge.
      speech); logged if it ever arrives
    - `dtmf` — caller pressed a key
    - `error` — Conversation Relay reported a problem
+   - speaker events (`events="speaker-events"`) — notifications that the
+     agent or caller started/stopped speaking; the agent-stopped event is
+     how the app knows a reply actually finished playing (with a word-count
+     estimate as fallback and ceiling — see `speech_timing.py`)
 4. On each `prompt`, if no reply is currently in flight, `/ws` sends the
    running chat history to the GuideAnts guide (`guide_client.stream_reply`),
    which makes a single non-streaming call (GuideAnts' chat-completions
@@ -59,7 +64,9 @@ this code. This app is just the phone/WebSocket bridge.
    Since the reply arrives all at once rather than incrementally, a short
    filler phrase (e.g. "Let me look that up for you.") is spoken first, before
    the real reply, whenever the caller's utterance looks like a question or
-   request (see `fillers.py`) — this is what masks GuideAnts lookup latency.
+   request (see `fillers.py`) *and* GuideAnts hasn't replied within
+   `FILLER_DELAY_SECONDS` (default 1s) — this is what masks GuideAnts lookup
+   latency without adding a filler to fast replies.
 5. If a `prompt` arrives *while* a reply is already streaming, Twilio does not
    stop or pause TTS on its own (`interruptible="none"`) — but this app does
    act on it if it's a stop/wait phrase ("stop", "wait", "hold on", ...) or a

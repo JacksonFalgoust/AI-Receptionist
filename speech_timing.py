@@ -2,11 +2,13 @@
 
 GuideAnts' chat-completions endpoint is non-streaming (see guide_client.py),
 so app.py gets the whole reply back and sends it to Twilio as a single frame
-almost instantly -- it can no longer rely on "we're still receiving tokens"
-to know a reply is still being spoken aloud. This lets app.py instead keep
-its in-flight-reply flag set for roughly as long as Twilio will actually take
-to speak the text, so mid-reply caller speech is still recognized as
-mid-reply instead of looking like a fresh turn once the words are counted.
+almost instantly -- it can't rely on "we're still receiving tokens" to know
+a reply is still being spoken aloud. The primary end-of-playback signal is
+Twilio's agent-stopped speaker event (`events="speaker-events"` in the
+TwiML, see speaker_events.py); this estimate is what app.py holds its
+in-flight-reply flag open on until the first such event is recognized on a
+call, and the basis of the ceiling on how long it will wait for one, so a
+lost event can't hold a turn open forever.
 """
 
 

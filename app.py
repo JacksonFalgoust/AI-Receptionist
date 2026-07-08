@@ -19,7 +19,12 @@ round-trip and doesn't depend on the guide choosing to reply briefly. A new
 question instead starts a fresh reply for what the caller just said, same
 as any other prompt. Playback is actually cut over using Conversation
 Relay's per-frame `preemptible` flag (see respond_to()), not Twilio-native
-interruption. When a caller's utterance looks like a question or request
+interruption. Whether speech counts as "mid-reply" at all is tracked by
+holding the reply task open until Twilio's agent-stopped speaker event
+(`events="speaker-events"`, see speaker_events.py) reports playback
+finished, falling back to a word-count estimate of the speaking time
+(speech_timing.py) until the first such event is recognized on the call.
+When a caller's utterance looks like a question or request
 (see fillers.py) and GuideAnts' reply doesn't arrive within
 config.FILLER_DELAY_SECONDS, a short filler phrase is spoken while still
 waiting on the same in-flight call, to mask lookup latency.
@@ -49,6 +54,7 @@ from twilio.twiml.voice_response import Connect, VoiceResponse
 import barge_in
 import config
 import fillers
+import speaker_events
 import speech_timing
 from guide_client import stream_reply
 
@@ -72,6 +78,7 @@ async def twiml(request: Request) -> Response:
         transcription_provider="Deepgram",
         interruptible="none",
         report_input_during_agent_speech="speech",
+        events="speaker-events",
     )
     vr.append(connect)
 
@@ -83,6 +90,13 @@ class CallState:
     messages: list = field(default_factory=list)
     task: object = None  # asyncio.Task | None
     partial_reply: str = ""  # real reply text streamed so far this turn (never the filler)
+    # Set by the WS loop when an agent-stopped speaker event arrives
+    # (events="speaker-events"); awaited by respond_to()'s playback hold.
+    playback_done: asyncio.Event = field(default_factory=asyncio.Event)
+    # True once any agent-stop event has been recognized this call. Until
+    # then the hold uses the word-count estimate alone, so an account/shape
+    # that never emits recognizable events behaves exactly as before.
+    agent_stop_seen: bool = False
 
 
 @app.websocket("/ws")
@@ -169,12 +183,34 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         # "done" well before Twilio actually finishes speaking it aloud,
         # making mid-reply caller speech look like it arrived after the reply
         # ended and incorrectly starting a brand-new turn. Hold the task open
-        # for the estimated remaining speaking time instead.
+        # until Twilio's agent-stopped speaker event says playback actually
+        # finished (events="speaker-events", see speaker_events.py); until
+        # the first such event has been recognized this call, fall back to
+        # the estimated remaining speaking time, exactly as before.
         spoken_text = f"{filler} {reply_text}" if filler else reply_text
         estimated_duration = speech_timing.estimate_seconds(spoken_text, config.TTS_WORDS_PER_SECOND)
-        remaining = estimated_duration - (asyncio.get_event_loop().time() - start_time)
-        if remaining > 0:
-            await asyncio.sleep(remaining)
+        if st.agent_stop_seen:
+            # Cleared only now so stale sets (the welcome greeting ending, or
+            # the filler finishing while GuideAnts was still thinking) can't
+            # release the wait early: the stop event that matters here can't
+            # fire yet, since the reply was sent milliseconds ago and takes
+            # seconds to play.
+            st.playback_done.clear()
+            # The estimate degrades to a generous ceiling, measured from now
+            # (playback of the just-sent reply is only starting), so a lost
+            # event can't hold the turn open forever.
+            ceiling = estimated_duration * 1.5 + 2.0
+            try:
+                await asyncio.wait_for(st.playback_done.wait(), timeout=ceiling)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "No agent-stopped speaker event within %.1fs; releasing turn on the estimate",
+                    ceiling,
+                )
+        else:
+            remaining = estimated_duration - (asyncio.get_event_loop().time() - start_time)
+            if remaining > 0:
+                await asyncio.sleep(remaining)
 
     def start_reply(user_text: str) -> None:
         st.messages.append({"role": "user", "content": user_text})
@@ -271,8 +307,19 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
             elif msg_type == "error":
                 logger.error("Conversation Relay error: %s", msg.get("description"))
 
+            # Only unhandled types reach the classifier, so a prompt whose
+            # transcript happens to mention "agent speaking" can't match.
+            elif (speaker_kind := speaker_events.classify(msg)) is not None:
+                if speaker_kind == "agent-stop":
+                    st.agent_stop_seen = True
+                    st.playback_done.set()
+                # Full payload logged on purpose: Twilio doesn't document
+                # these messages' shape, so the log is how a mismatch with
+                # speaker_events.classify gets noticed and fixed.
+                logger.info("Speaker event %s: %s", speaker_kind, msg)
+
             else:
-                logger.warning("Unhandled message type: %s", msg_type)
+                logger.warning("Unhandled message type: %s (%s)", msg_type, msg)
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
