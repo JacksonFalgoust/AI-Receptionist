@@ -23,6 +23,11 @@ TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
 
 PORT = int(os.environ.get("PORT", "8080"))
 
+# How long to wait for GuideAnts' reply before speaking a filler phrase to
+# mask the lookup latency. If the reply arrives before this elapses, no
+# filler is spoken at all.
+FILLER_DELAY_SECONDS = float(os.environ.get("FILLER_DELAY_SECONDS", "1.0"))
+
 # Filler phrases spoken before the real answer, to mask GuideAnts lookup
 # latency. Pipe-separated in the env var since phrases contain commas/periods.
 _DEFAULT_FILLER_PHRASES = [

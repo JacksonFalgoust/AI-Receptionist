@@ -20,8 +20,9 @@ question instead starts a fresh reply for what the caller just said, same
 as any other prompt. Playback is actually cut over using Conversation
 Relay's per-frame `preemptible` flag (see respond_to()), not Twilio-native
 interruption. When a caller's utterance looks like a question or request
-(see fillers.py), a short filler phrase is spoken immediately, before the
-real GuideAnts reply, to mask lookup latency.
+(see fillers.py) and GuideAnts' reply doesn't arrive within
+config.FILLER_DELAY_SECONDS, a short filler phrase is spoken while still
+waiting on the same in-flight call, to mask lookup latency.
 
 Only real user prompts and the guide's own replies go into `st.messages`.
 Fillers, stop acknowledgments, mid-reply interjections, and backchannel
@@ -90,7 +91,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
 
     st = CallState()
 
-    async def respond_to(filler: str | None) -> None:
+    async def respond_to(filler_eligible: bool) -> None:
         # Every frame is marked preemptible so that if this turn is still
         # playing when a later trigger-interrupted turn starts, Twilio drops
         # this audio and switches to the new turn's audio immediately. This
@@ -99,12 +100,34 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         # finished.
         start_time = asyncio.get_event_loop().time()
         reply_text = ""
+        filler = None
+        gen = stream_reply(st.messages)
+        # Only utterances that look like a question/request (see fillers.py)
+        # are filler-eligible at all. Among those, race GuideAnts' reply
+        # against the filler delay: if it's already back within
+        # FILLER_DELAY_SECONDS, skip the filler; otherwise speak one and keep
+        # waiting on the same in-flight call.
+        first_chunk = asyncio.ensure_future(gen.__anext__())
         try:
-            if filler:
+            if filler_eligible:
+                done, _ = await asyncio.wait({first_chunk}, timeout=config.FILLER_DELAY_SECONDS)
+                if first_chunk not in done:
+                    filler = fillers.pick(config.FILLER_PHRASES)
+                    if filler:
+                        await websocket.send_json(
+                            {"type": "text", "token": filler + " ", "last": False, "preemptible": True}
+                        )
+            try:
+                first_delta = await first_chunk
+            except StopAsyncIteration:
+                first_delta = None
+            if first_delta is not None:
                 await websocket.send_json(
-                    {"type": "text", "token": filler + " ", "last": False, "preemptible": True}
+                    {"type": "text", "token": first_delta, "last": False, "preemptible": True}
                 )
-            async for delta in stream_reply(st.messages):
+                reply_text += first_delta
+                st.partial_reply = reply_text
+            async for delta in gen:
                 await websocket.send_json(
                     {"type": "text", "token": delta, "last": False, "preemptible": True}
                 )
@@ -112,6 +135,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 st.partial_reply = reply_text
             await websocket.send_json({"type": "text", "token": "", "last": True, "preemptible": True})
         except asyncio.CancelledError:
+            first_chunk.cancel()
             raise
         except Exception:
             logger.exception("Error while streaming guide reply")
@@ -155,8 +179,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
     def start_reply(user_text: str) -> None:
         st.messages.append({"role": "user", "content": user_text})
         st.partial_reply = ""
-        filler = fillers.pick(config.FILLER_PHRASES) if fillers.looks_like_question(user_text) else None
-        st.task = asyncio.create_task(respond_to(filler))
+        st.task = asyncio.create_task(respond_to(fillers.looks_like_question(user_text)))
 
     async def _cancel_and_await(task) -> None:
         if task and not task.done():
