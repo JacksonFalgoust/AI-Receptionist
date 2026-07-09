@@ -64,6 +64,8 @@ env var is unset):
 | `PORT` | `PORT` | `8080` | not read by `app.py` itself — `uvicorn` is started with `--port` on the command line; this constant is unused today |
 | `FILLER_PHRASES` | `FILLER_PHRASES` | a built-in list of 6 phrases (e.g. `"Let me look that up for you."`) | `app.py` (via `fillers.pick`) — pool of filler phrases spoken before the real reply when the caller's utterance looks like a question/request *and* GuideAnts hasn't replied within `FILLER_DELAY_SECONDS`. Pipe-separated (`\|`) in the env var, since phrases contain commas/periods; falls back to the built-in list if unset. |
 | `FILLER_DELAY_SECONDS` | `FILLER_DELAY_SECONDS` | `1.0` | `app.py` — how long to wait for GuideAnts' reply, for a filler-eligible utterance, before speaking a filler phrase. If the reply arrives before this elapses, no filler is spoken at all. |
+| `TURN_PAUSE_SECONDS` | `TURN_PAUSE_SECONDS` | `0.5` | `app.py` (`schedule_turn()`) — how long the caller must stay quiet after a transcribed prompt before the buffered text is committed as their turn; a clientSpeaking-start speaker event during the wait holds the buffer open for the continuation instead (see "Turn-pause buffering" below). The only latency this feature adds to an ordinary turn. |
+| `TURN_RESUME_GRACE_SECONDS` | `TURN_RESUME_GRACE_SECONDS` | `1.5` | `app.py` — after the caller resumes speaking mid-buffer and then stops again, how long to wait for the continuation's transcript (which trails the clientSpeaking-stop event by STT finalization time) before giving up and committing the buffered text alone. |
 | `EXTRA_BACKCHANNEL_PHRASES` | `EXTRA_BACKCHANNEL_PHRASES` | `[]` (empty) | `app.py` (via `fillers.is_backchannel`) — comma-separated phrases, on top of the built-in `fillers.BACKCHANNEL_PHRASES`, that count as pure acknowledgment noise and should never get a guide reply. |
 | `EXTRA_STOP_PHRASES` | `EXTRA_STOP_PHRASES` | `[]` (empty) | `app.py` (via `barge_in.should_interrupt`/`is_stop_command`) — comma-separated phrases, on top of the built-in `barge_in.STOP_PHRASES`, that also cancel an in-flight reply when heard mid-reply. |
 | `STOP_ACK_PHRASES` | `STOP_ACK_PHRASES` | a built-in list of 4 phrases (e.g. `"Okay."`) | `app.py` (via `fillers.pick`) — pool of short local acknowledgments spoken (instead of a GuideAnts reply) when a stop/wait phrase cancels an in-flight reply. Pipe-separated (`\|`) in the env var; falls back to the built-in list if unset. |
@@ -142,17 +144,19 @@ Twilio opens exactly one WebSocket connection here per call, immediately after `
 - `playback_done: asyncio.Event` — set by the WS loop whenever an agent-stopped speaker event arrives; awaited by `respond_to()`'s playback hold. Cleared by `respond_to()` only at the start of the hold, so stale sets (the welcome greeting ending, or a filler finishing while GuideAnts was still generating) can't release a later hold early.
 - `agent_stop_seen: bool` — `True` once any agent-stop speaker event has been recognized this call. Until then `respond_to()` paces on the estimate alone, so an account/edge whose speaker events never arrive (or arrive in a shape `speaker_events.classify` doesn't recognize) behaves exactly as before this feature.
 - `partial_reply: str` — the real (GuideAnts-sourced) reply text streamed so far in the current turn, never including the filler. Reset to `""` at the start of every turn; read into `st.messages` and `st.interrupted_reply` if a trigger utterance cancels the turn before it finishes.
+- `pending_text: str` / `pending_commit` — caller text transcribed but not yet committed as a turn, and the timer task that will commit it. Twilio finalizes a prompt at each brief pause, so one spoken turn can arrive as several prompt messages; these hold the fragments together until the caller has actually stopped talking. See "Turn-pause buffering" below.
+- `client_speaking: bool` — whether the caller is currently speaking, per the clientSpeaking speaker events. Stays `False` if those events never arrive (or aren't recognized), so such a call degrades to the plain `TURN_PAUSE_SECONDS` debounce instead of misbehaving.
 
 **Inbound message types** (sent by Twilio Conversation Relay):
 
 | `type` | Key fields | Handling |
 |---|---|---|
 | `setup` | `callSid`, `from`, `to` | Logged only; no state change. First message on every connection. |
-| `prompt` | `voicePrompt` (caller's transcribed speech) | If a reply *is* already streaming: `barge_in.should_interrupt()` checks whether this is a stop/wait phrase or a new question. If so, the in-flight reply is cancelled; a stop/wait phrase then just gets a local acknowledgment and silence, a new question starts a fresh reply for this utterance (see "Selective barge-in" below). Otherwise the text is just logged — not spoken, not acted on, not recorded anywhere. If no reply is streaming: `fillers.is_backchannel()` catches pure acknowledgment noise (e.g. "ok", "yeah") and it's just logged, never recorded into `messages` either — this also covers the case where STT finishes transcribing a short "ok" just *after* the reply already finished. Otherwise a new reply starts (`start_reply()`), which also decides via `fillers.looks_like_question()` whether to prepend a filler phrase. |
+| `prompt` | `voicePrompt` (caller's transcribed speech) | If a reply *is* already streaming: `barge_in.should_interrupt()` checks whether this is a stop/wait phrase or a new question. If so, the in-flight reply is cancelled; a stop/wait phrase then just gets a local acknowledgment and silence, a new question starts a fresh reply for this utterance (see "Selective barge-in" below). Otherwise the text is just logged — not spoken, not acted on, not recorded anywhere. If no reply is streaming: text merging into an already-buffered turn skips further classification (a mid-turn fragment is a continuation, not noise); otherwise `fillers.is_backchannel()` catches pure acknowledgment noise (e.g. "ok", "yeah") and it's just logged, never recorded into `messages` either — this also covers the case where STT finishes transcribing a short "ok" just *after* the reply already finished. Anything else is buffered by `schedule_turn()` and committed as the caller's turn only after `TURN_PAUSE_SECONDS` of further silence (see "Turn-pause buffering" below); the commit calls `start_reply()`, which also decides via `fillers.looks_like_question()` whether to prepend a filler phrase. |
 | `interrupt` | `utteranceUntilInterrupt` | Not expected given `interruptible="none"` — logged only, no state change. Caller speech during agent speech arrives as `prompt` instead (see above); Twilio itself never auto-pauses. |
 | `dtmf` | `digit` | Logged only — not acted on (no IVR menu implemented; see SETUP.md's "not implemented" list). |
 | `error` | `description` | Logged as an error. Connection is not closed by this app. |
-| speaker events | undocumented by Twilio | Any type not listed above is run through `speaker_events.classify()`, which loosely recognizes the `agentSpeaking`/`clientSpeaking` start/stop notifications subscribed via `events="speaker-events"`. An agent-stop sets `st.agent_stop_seen` and `st.playback_done` (releasing `respond_to()`'s playback hold — see above); every recognized event is logged with its full payload, since Twilio doesn't document the shape and the log is how a mismatch with the classifier gets noticed. Because only unhandled types reach the classifier, a caller's `prompt` whose transcript mentions "agent speaking" can never match. |
+| speaker events | undocumented by Twilio | Any type not listed above is run through `speaker_events.classify()`, which loosely recognizes the `agentSpeaking`/`clientSpeaking` start/stop notifications subscribed via `events="speaker-events"`. An agent-stop sets `st.agent_stop_seen` and `st.playback_done` (releasing `respond_to()`'s playback hold — see above). A client-start/stop updates `st.client_speaking` and re-arms the pending-turn commit timer if a turn is buffered: start holds the buffer open for the caller's continuation, stop gives that continuation's transcript `TURN_RESUME_GRACE_SECONDS` to arrive (see "Turn-pause buffering" below). Every recognized event is logged with its full payload, since Twilio doesn't document the shape and the log is how a mismatch with the classifier gets noticed. Because only unhandled types reach the classifier, a caller's `prompt` whose transcript mentions "agent speaking" can never match. |
 | anything else | — | Logged as a warning (with the full payload), ignored. |
 
 Non-JSON frames are logged and skipped rather than crashing the loop.
@@ -163,6 +167,49 @@ Non-JSON frames are logged and skipped rather than crashing the loop.
 {"type": "text", "token": "", "last": true, "preemptible": true}
 ```
 On the call's first turn, `guide_client.stream_reply` yields the whole reply as one token frame (that turn is non-streaming, to capture the conversation id — see `guide_client.py` above), so the filler phrase (sent as its own frame first, see below) is what masks the wait. On turns 2+, `stream_reply` forwards whatever granularity GuideAnts' SSE stream actually emits — `respond_to()` sends one Twilio `text` frame per `response.output_text.delta` event, so *if* GuideAnts streams multiple incremental deltas, the caller starts hearing the reply as soon as the first ones arrive, without waiting for the whole answer. **In practice, verified against a live local GuideAnts instance, this depends entirely on the underlying model/provider**: some configurations (e.g. this project's demo guide, `deepseek/deepseek-v4-flash:nitro`) buffer the full generation server-side and emit it as a single SSE burst once complete — same latency as non-streaming, just wrapped in SSE framing. The code is correct either way (it forwards exactly what arrives), but don't assume streaming alone buys lower time-to-first-audio without confirming the configured model actually streams incrementally. Every frame carries `preemptible: true` — see "Selective barge-in" below for why.
+
+### Turn-pause buffering (`schedule_turn()`)
+
+Twilio finalizes a `prompt` at each pause in caller speech, so a caller who
+takes a brief mid-sentence breath produces two prompts. Before this feature,
+the first half was answered as the whole turn and the second half arrived
+mid-reply and was ignored. Instead, every prompt that would start a new turn
+goes through `schedule_turn()`, which appends the text to `st.pending_text`
+and (re)arms a commit timer; when the timer fires, the buffered text is
+committed as one turn via `start_reply()`. The timer's window depends on
+what the caller is doing, per the `clientSpeaking` speaker events:
+
+- **Caller quiet** (the normal case): `TURN_PAUSE_SECONDS` (default 0.5s) —
+  the only latency this feature adds to an ordinary turn.
+- **clientSpeaking-start arrives while text is buffered** — the caller
+  resumed. This includes resuming *before* the first fragment's transcript
+  even lands (the ordering actually observed on live calls: off, on, then
+  the prompt), which is why `schedule_turn()` also checks
+  `st.client_speaking` at buffer time. The commit is pushed out to a 10s
+  ceiling (`PENDING_TURN_CEILING_SECONDS`), which only fires — with a
+  warning — if the matching stop event is lost.
+- **clientSpeaking-stop with text buffered**: re-armed to
+  `TURN_RESUME_GRACE_SECONDS` (default 1.5s), since the continuation's
+  transcript trails the stop event by STT finalization time. If the
+  "resume" was just untranscribable noise, this is also what bounds the
+  extra dead air before the buffered text is committed alone.
+
+A prompt arriving while text is buffered merges into it and re-arms the
+timer — even one that alone would look like a backchannel, since a mid-turn
+fragment is a continuation, not noise. Stop/wait phrases are exempt from all
+of this: the barge-in check still runs immediately per prompt, so "stop"
+cuts playback with no added delay. A mid-reply trigger that is a *new
+question* is scheduled through the same buffer after the old reply is
+cancelled, so an interrupting question can also be spoken with pauses (the
+old audio keeps playing up to `TURN_PAUSE_SECONDS` longer before the new
+reply's frames preempt it).
+
+If speaker events never arrive (or arrive in a shape
+`speaker_events.classify` doesn't recognize), `st.client_speaking` stays
+`False` and the whole feature degrades to a plain `TURN_PAUSE_SECONDS`
+debounce — same graceful-degradation posture as the agent-stop playback
+hold. On disconnect, the pending timer is cancelled *before* the reply task,
+so it can't fire mid-teardown and start a reply nothing would cancel.
 
 ### `start_reply()` / `respond_to()` — the reply pipeline
 
@@ -204,9 +251,10 @@ next differs:
   `start_reply()`. `st.interrupted_reply` stays set, and is picked up by
   whatever real question the caller asks next.
 - **A new question** (`fillers.looks_like_question()`, and not itself a stop
-  phrase) → `start_reply(text)` runs for the new utterance exactly as if it
-  were a fresh prompt, immediately consuming `st.interrupted_reply` via
-  `build_input()`.
+  phrase) → the new utterance is scheduled exactly as if it were a fresh
+  prompt (`schedule_turn()` — so it too can be spoken with brief pauses, see
+  "Turn-pause buffering" above), and the reply that starts once it commits
+  consumes `st.interrupted_reply` via `build_input()`.
 - **Anything else** (statement, backchannel, noise) → logged and ignored,
   exactly as before this feature.
 
@@ -317,8 +365,13 @@ naturally instead of repeating itself or guessing. The mechanism:
 2. Twilio POSTs to `/twiml`. App returns `<Connect><ConversationRelay url="wss://.../ws" .../></Connect>`.
 3. Twilio opens the WS, speaks `WELCOME_GREETING` to the caller immediately (handled entirely by Twilio, not by this app), then sends `setup`.
 4. Caller speaks. Twilio transcribes it and sends `prompt` with `voicePrompt`.
-5. `app.py` logs it to `messages`, builds this turn's input via `build_input()` (folding in an interruption note if the previous reply was cut short), and calls `guide_client.stream_reply`. If the utterance looks like a question/request (`fillers.looks_like_question()`) and GuideAnts hasn't replied within `config.FILLER_DELAY_SECONDS`, a random filler phrase is sent as its own spoken token while still waiting on the same in-flight call, masking the wait. On the call's first turn the reply is fetched non-streaming and sent to Twilio as one `text` frame (capturing the conversation id along the way); on later turns it streams in as many small deltas, each forwarded to Twilio as its own frame as soon as it arrives. Twilio speaks it via TTS, with `interruptible="none"` so nothing Twilio hears from the caller during this stops playback.
-6. If the caller talks during the reply, Twilio still transcribes it and sends it as another `prompt` (`report_input_during_agent_speech="speech"`) rather than an `interrupt`. If it's a stop/wait phrase (`barge_in.is_stop_command()`), the in-flight reply is cancelled and a short local acknowledgment is spoken instead — no GuideAnts call. If it's a new question, the in-flight reply is cancelled and a fresh reply starts for it immediately (repeat from step 4). Either way, the reply text streamed so far is remembered as `st.interrupted_reply` for the next real question. Otherwise (non-trigger speech) the current reply keeps playing to the end and the utterance is just logged.
+   One spoken turn can arrive as several prompts (Twilio finalizes at each
+   pause), so `schedule_turn()` buffers them and commits the merged text as
+   the turn only after `TURN_PAUSE_SECONDS` of caller silence, holding
+   longer if the clientSpeaking speaker events say the caller resumed — see
+   "Turn-pause buffering" above.
+5. On commit, `app.py` logs it to `messages`, builds this turn's input via `build_input()` (folding in an interruption note if the previous reply was cut short), and calls `guide_client.stream_reply`. If the utterance looks like a question/request (`fillers.looks_like_question()`) and GuideAnts hasn't replied within `config.FILLER_DELAY_SECONDS`, a random filler phrase is sent as its own spoken token while still waiting on the same in-flight call, masking the wait. On the call's first turn the reply is fetched non-streaming and sent to Twilio as one `text` frame (capturing the conversation id along the way); on later turns it streams in as many small deltas, each forwarded to Twilio as its own frame as soon as it arrives. Twilio speaks it via TTS, with `interruptible="none"` so nothing Twilio hears from the caller during this stops playback.
+6. If the caller talks during the reply, Twilio still transcribes it and sends it as another `prompt` (`report_input_during_agent_speech="speech"`) rather than an `interrupt`. If it's a stop/wait phrase (`barge_in.is_stop_command()`), the in-flight reply is cancelled and a short local acknowledgment is spoken instead — no GuideAnts call. If it's a new question, the in-flight reply is cancelled and the question is scheduled as a fresh turn through the same turn-pause buffer (repeat from step 4). Either way, the reply text streamed so far is remembered as `st.interrupted_reply` for the next real question. Otherwise (non-trigger speech) the current reply keeps playing to the end and the utterance is just logged.
 7. Once the reply finishes normally, the real reply is logged to `messages` (the filler, if any, is never logged). `messages` grows for the life of the call as a debug record only — GuideAnts' own memory of the conversation lives server-side, keyed by `st.guide.conversation_id`.
 8. Repeat from step 4 for each new turn. Non-trigger speech heard mid-reply (step 6) is never recorded anywhere and is not automatically revisited — if it was itself a real question, it is only answered if the caller asks it again after the current reply finishes.
 9. Caller hangs up → WS disconnects → in-flight task is cancelled, local connection state is discarded. (The conversation itself remains in GuideAnts; only this app's handle to it — `st.guide.conversation_id` — is lost, so a later call, even from the same caller, always starts a new conversation.)

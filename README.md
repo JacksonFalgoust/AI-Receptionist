@@ -51,9 +51,17 @@ this code. This app is just the phone/WebSocket bridge.
    - speaker events (`events="speaker-events"`) — notifications that the
      agent or caller started/stopped speaking; the agent-stopped event is
      how the app knows a reply actually finished playing (with a word-count
-     estimate as fallback and ceiling — see `speech_timing.py`)
-4. On each `prompt`, if no reply is currently in flight, `/ws` sends just the
-   caller's latest utterance to the GuideAnts guide
+     estimate as fallback and ceiling — see `speech_timing.py`), and the
+     client started/stopped events are how it knows a caller who paused
+     briefly has resumed talking (see step 4)
+4. Twilio finalizes a `prompt` at each pause in caller speech, so one spoken
+   turn can arrive as several prompts. On each `prompt`, if no reply is
+   currently in flight, `/ws` buffers the text and commits it as the
+   caller's turn only after `TURN_PAUSE_SECONDS` (default 0.5s) of further
+   silence — if a clientSpeaking-started event arrives first, the caller
+   just took a breath mid-sentence, and the continuation is merged into the
+   same turn instead of the first half being answered alone. The committed
+   turn is sent as just the caller's latest utterance to the GuideAnts guide
    (`guide_client.stream_reply`) — never a resent transcript. On a call's
    first turn this is a single non-streaming call, which returns a
    `conversation` id this app holds for the rest of the call; every later
