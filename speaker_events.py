@@ -26,6 +26,14 @@ _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 _STOP_HINTS = ("stop", "end", "finish", "complete", "done")
 _START_HINTS = ("start", "begin")
 
+# Twilio's actual live wire shape (observed on real calls, 2026-07-09) is
+# {"type": "info", "name": "agentSpeaking", "value": "on"|"off"} -- the
+# direction is a bare on/off value rather than a start/stop word. Matched by
+# exact string equality, not substring, so words that merely contain "on"
+# (e.g. "conversation") can't false-positive.
+_STOP_VALUES = ("off",)
+_START_VALUES = ("on",)
+
 _MAX_DEPTH = 3
 
 
@@ -60,8 +68,12 @@ def classify(msg) -> str | None:
         speaker = "client"
     else:
         return None
-    if any(hint in s for s in strings for hint in _STOP_HINTS):
+    if any(hint in s for s in strings for hint in _STOP_HINTS) or any(
+        s in _STOP_VALUES for s in strings
+    ):
         return f"{speaker}-stop"
-    if any(hint in s for s in strings for hint in _START_HINTS):
+    if any(hint in s for s in strings for hint in _START_HINTS) or any(
+        s in _START_VALUES for s in strings
+    ):
         return f"{speaker}-start"
     return f"{speaker}-unknown"

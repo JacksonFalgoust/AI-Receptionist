@@ -43,6 +43,21 @@ def test_agent_event_without_direction_is_unknown():
     assert speaker_events.classify(msg) == "agent-unknown"
 
 
+def test_live_wire_shape_value_on_off():
+    # The exact payloads Twilio actually sends on real calls (observed live):
+    # direction is a bare on/off "value", not a start/stop word.
+    assert speaker_events.classify({"type": "info", "name": "agentSpeaking", "value": "on"}) == "agent-start"
+    assert speaker_events.classify({"type": "info", "name": "agentSpeaking", "value": "off"}) == "agent-stop"
+    assert speaker_events.classify({"type": "info", "name": "clientSpeaking", "value": "on"}) == "client-start"
+    assert speaker_events.classify({"type": "info", "name": "clientSpeaking", "value": "off"}) == "client-stop"
+
+
+def test_on_matched_exactly_not_as_substring():
+    # "conversation" contains "on"; it must not read as a start signal.
+    msg = {"type": "info", "name": "agentSpeaking", "source": "conversation"}
+    assert speaker_events.classify(msg) == "agent-unknown"
+
+
 def test_unrelated_message_is_none():
     assert speaker_events.classify({"type": "prompt", "voicePrompt": "hello there"}) is None
 

@@ -1,6 +1,6 @@
 fastapi>=0.115
 uvicorn[standard]>=0.32
-openai>=1.40
+openai>=2.0
 twilio>=9.0
 python-dotenv>=1.0
 pytest>=8.0

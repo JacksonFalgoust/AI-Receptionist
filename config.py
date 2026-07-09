@@ -9,6 +9,11 @@ GUIDEANTS_PUB_ID = os.environ.get("GUIDEANTS_PUB_ID", "")
 GUIDEANTS_API_KEY = os.environ.get("GUIDEANTS_API_KEY", "anonymous")
 GUIDEANTS_MODEL = os.environ.get("GUIDEANTS_MODEL", "guide")
 
+# Request timeout for calls to GuideAnts. The openai SDK's default (600s,
+# 2 retries) is dead air on a live phone call, so this app uses a much
+# tighter budget and a single retry (set in guide_client._get_client()).
+GUIDEANTS_TIMEOUT_SECONDS = float(os.environ.get("GUIDEANTS_TIMEOUT_SECONDS", "30"))
+
 # Average TTS speaking rate, used to estimate how long Twilio will take to
 # speak a reply (see speech_timing.py). Twilio's agent-stopped speaker event
 # is the primary "reply finished playing" signal; this estimate paces the

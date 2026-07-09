@@ -28,12 +28,14 @@ from creating the GuideAnts guide through placing a real phone call.
    - **API Key** — copy the generated key once (it's only shown at creation);
      this is `GUIDEANTS_API_KEY`.
 5. Open the guide's **APIs** config tab (in the Publish dialog) and:
-   - Turn on **"Enable Wire API"**, and check the **"Chat Completions"**
-     endpoint checkbox. Both are required — the OpenAI-compatible endpoint
-     returns `403 endpoint_disabled` if either is off. (Not on by default.)
-   - Leave `GUIDEANTS_MODEL=guide` as-is — `guide` is the fixed alias key for
-     the chat/completions endpoint, not the underlying model name shown in the
-     alias mapping. You can confirm the exact alias to use by calling
+   - Turn on **"Enable Wire API"**, and check the **"Responses"** endpoint
+     checkbox (not "Chat Completions" — this app uses the Responses endpoint
+     for its explicit conversation-id continuation, see ARCHITECTURE.md).
+     Both are required — the OpenAI-compatible endpoint returns
+     `403 endpoint_disabled` if either is off. (Not on by default.)
+   - Leave `GUIDEANTS_MODEL=guide` as-is — `guide` is the fixed alias key,
+     not the underlying model name shown in the alias mapping. You can
+     confirm the exact alias to use by calling
      `GET {GUIDEANTS_BASE_URL}/api/published/openai/{pubId}/v1/models` — it
      lists the valid `id`s (`guide`, `embeddings`, `image`, etc.).
    - Confirm the OpenAI-compatible base path shown there matches
@@ -143,7 +145,11 @@ Try these to see the filler-phrase and selective-barge-in behavior:
   local acknowledgment (e.g. "Okay.") — not a new guide reply.
 - **Ask a different question while the guide is still answering a previous
   one.** The current answer should cut off and a fresh reply should start for
-  your new question.
+  your new question. Check the conversation in the GuideAnts UI afterward —
+  your new question's turn should show an interruption note prefixed to it
+  (e.g. "[Note: your previous reply was interrupted...]"), and the whole call
+  should still be **one** conversation, not two. See ARCHITECTURE.md's
+  "Interruption notes" section for what this looks like and its caveats.
 - **Make a plain statement** (not a stop phrase or a question) while the
   guide is mid-answer. It should *not* get cut off; it keeps playing all the
   way to the end, and what you said is not recorded or acted on.
