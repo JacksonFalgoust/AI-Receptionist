@@ -35,6 +35,25 @@ PORT = int(os.environ.get("PORT", "8080"))
 # filler is spoken at all.
 FILLER_DELAY_SECONDS = float(os.environ.get("FILLER_DELAY_SECONDS", "1.0"))
 
+# Twilio finalizes a `prompt` at each pause in caller speech, so a caller who
+# takes a brief mid-sentence breath used to have their turn split in two: the
+# first half was answered as the whole turn and the second half arrived
+# mid-reply and was ignored. Instead, app.py buffers each transcribed prompt
+# and only commits the turn after this much further caller silence; a
+# clientSpeaking-start speaker event during the wait holds the buffer open
+# for the caller's continuation (see app.py's schedule_turn()). Raising this
+# tolerates longer pauses but delays the start of every reply by the same
+# amount.
+TURN_PAUSE_SECONDS = float(os.environ.get("TURN_PAUSE_SECONDS", "0.5"))
+
+# When the caller resumes speaking during that wait, their continuation's
+# transcript only arrives after STT finalization, which trails the
+# clientSpeaking-stop event -- so once they stop again, wait this long
+# (instead of TURN_PAUSE_SECONDS) for the transcript before giving up and
+# committing the buffered text alone. Also bounds the extra dead air when
+# the "resume" was just untranscribable noise.
+TURN_RESUME_GRACE_SECONDS = float(os.environ.get("TURN_RESUME_GRACE_SECONDS", "1.5"))
+
 # Filler phrases spoken before the real answer, to mask GuideAnts lookup
 # latency. Pipe-separated in the env var since phrases contain commas/periods.
 _DEFAULT_FILLER_PHRASES = [

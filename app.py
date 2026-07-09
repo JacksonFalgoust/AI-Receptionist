@@ -29,6 +29,15 @@ When a caller's utterance looks like a question or request
 config.FILLER_DELAY_SECONDS, a short filler phrase is spoken while still
 waiting on the same in-flight call, to mask lookup latency.
 
+Twilio finalizes a "prompt" at each pause in caller speech, so one spoken
+turn can arrive as several prompt messages. Prompts that would start a new
+turn are therefore buffered (schedule_turn()) and committed only after
+config.TURN_PAUSE_SECONDS of continued caller silence, with the
+clientSpeaking speaker events holding the buffer open while the caller is
+still (or again) audibly speaking -- so a caller can take a brief breath
+mid-sentence without the first half being answered and the second half
+ignored. Stop/wait phrases are exempt: they still cut playback immediately.
+
 Conversation memory lives server-side in GuideAnts, keyed by a conversation
 id captured on the call's first turn (see guide_client.GuideSession) and
 passed back as the `conversation` parameter on every later turn -- so only
@@ -62,6 +71,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("voice_receptionist")
 
 app = FastAPI()
+
+# Ceiling on holding a buffered turn while the caller is (per clientSpeaking
+# events) still audibly speaking. Normally the commit timer is re-armed by
+# the coming clientSpeaking-stop event or continuation prompt long before
+# this elapses; it only fires if a stop event is lost, so a stuck "on" can't
+# hold the turn open forever.
+PENDING_TURN_CEILING_SECONDS = 10.0
 
 
 @app.post("/twiml")
@@ -117,6 +133,18 @@ class CallState:
     # then the hold uses the word-count estimate alone, so an account/shape
     # that never emits recognizable events behaves exactly as before.
     agent_stop_seen: bool = False
+    # Caller text transcribed but not yet committed as a turn, plus the timer
+    # task that will commit it (see schedule_turn()). Twilio finalizes a
+    # prompt at each brief pause, so one spoken turn can arrive as several
+    # prompt messages; these hold the fragments together until the caller has
+    # actually stopped talking.
+    pending_text: str = ""
+    pending_commit: object = None  # asyncio.Task | None
+    # Whether the caller is currently speaking, per the clientSpeaking
+    # speaker events. Stays False if those events never arrive (or aren't
+    # recognized), so such a call degrades to the plain TURN_PAUSE_SECONDS
+    # debounce instead of misbehaving.
+    client_speaking: bool = False
 
 
 @app.websocket("/ws")
@@ -252,6 +280,42 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         st.playback_text = ""
         st.task = asyncio.create_task(respond_to(input_text, fillers.looks_like_question(user_text)))
 
+    def _arm_commit(delay: float) -> None:
+        if st.pending_commit and not st.pending_commit.done():
+            st.pending_commit.cancel()
+        st.pending_commit = asyncio.create_task(_commit_pending_after(delay))
+
+    async def _commit_pending_after(delay: float) -> None:
+        await asyncio.sleep(delay)
+        # No awaits from here on, so a commit that has passed the sleep can't
+        # interleave with the WS loop: the text is taken and the reply started
+        # atomically. (A re-armed timer that fires after this finds
+        # pending_text empty and does nothing.)
+        text, st.pending_text = st.pending_text, ""
+        if not text:
+            return
+        if st.client_speaking:
+            logger.warning(
+                "Committing buffered turn while caller still speaking (%.0fs ceiling hit): %r",
+                delay,
+                text,
+            )
+        else:
+            logger.info("Caller stayed quiet %.1fs; committing turn: %r", delay, text)
+        start_reply(text)
+
+    def schedule_turn(user_text: str) -> None:
+        # Twilio finalizes a prompt at each pause in caller speech, so this
+        # transcript may only be the first half of the caller's turn. Buffer
+        # it and commit only after TURN_PAUSE_SECONDS of further silence; if
+        # the caller is already speaking again by the time it lands (they
+        # resumed before STT finished finalizing), hold the buffer instead --
+        # the coming clientSpeaking-stop event re-arms the real window.
+        st.pending_text = f"{st.pending_text} {user_text}".strip()
+        _arm_commit(
+            PENDING_TURN_CEILING_SECONDS if st.client_speaking else config.TURN_PAUSE_SECONDS
+        )
+
     async def _cancel_and_await(task) -> None:
         if task and not task.done():
             task.cancel()
@@ -335,12 +399,18 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                                     )
                             else:
                                 logger.info("Interrupting active reply for a new question: %r", text)
-                                start_reply(text)
+                                schedule_turn(text)
                         else:
                             # Logged only, never sent to GuideAnts or added to
                             # st.messages -- this utterance wasn't a trigger,
                             # so it's treated as noise, not a real turn.
                             logger.info("Ignored caller speech during active reply (not acted on): %r", text)
+                    elif st.pending_text:
+                        # A turn is already buffered awaiting the pause
+                        # window, so this is the caller continuing that same
+                        # turn -- merge it, even if this fragment alone would
+                        # look like a backchannel ("...yeah" mid-sentence).
+                        schedule_turn(text)
                     elif fillers.is_backchannel(text, config.EXTRA_BACKCHANNEL_PHRASES):
                         # STT can finish transcribing a short "ok" after the
                         # reply has already finished playing, so this branch
@@ -351,7 +421,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                         # for the same reason as above.
                         logger.info("Ignored backchannel utterance (not acted on): %r", text)
                     else:
-                        start_reply(text)
+                        schedule_turn(text)
 
             elif msg_type == "interrupt":
                 logger.info("Received interrupt message (unexpected with interruptible=none): %s", msg.get("utteranceUntilInterrupt"))
@@ -368,6 +438,25 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 if speaker_kind == "agent-stop":
                     st.agent_stop_seen = True
                     st.playback_done.set()
+                elif speaker_kind == "client-start":
+                    st.client_speaking = True
+                    # The caller resumed while a turn was buffered: hold the
+                    # buffer for their continuation instead of committing a
+                    # half-finished turn. The ceiling applies only while
+                    # they're audibly speaking -- the coming stop event
+                    # re-arms the real window below.
+                    if st.pending_text:
+                        _arm_commit(PENDING_TURN_CEILING_SECONDS)
+                elif speaker_kind == "client-stop":
+                    st.client_speaking = False
+                    # The continuation's transcript trails this event by STT
+                    # finalization time, so give it TURN_RESUME_GRACE_SECONDS
+                    # (longer than the plain pause window) to arrive before
+                    # committing what we have. A stop with nothing buffered
+                    # is just the normal end of an utterance whose prompt
+                    # hasn't arrived yet -- nothing to re-arm.
+                    if st.pending_text:
+                        _arm_commit(config.TURN_RESUME_GRACE_SECONDS)
                 # Full payload logged on purpose: Twilio doesn't document
                 # these messages' shape, so the log is how a mismatch with
                 # speaker_events.classify gets noticed and fixed.
@@ -379,4 +468,9 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
     finally:
+        # Pending-turn timer first: were it still alive, it could fire during
+        # the await below and start_reply() a brand-new task that cancel_task()
+        # already missed.
+        timer, st.pending_commit = st.pending_commit, None
+        await _cancel_and_await(timer)
         await cancel_task()
