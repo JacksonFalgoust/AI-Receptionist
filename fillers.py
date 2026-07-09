@@ -80,7 +80,7 @@ REQUEST_LEAD_PHRASES = (
 # Stripped from the front before starter checks, so "okay so what time..." is
 # evaluated as "what time...".
 LEADING_FILLERS = frozenset(
-    {"um", "uh", "er", "ah", "okay", "ok", "so", "well", "hey", "yeah", "like", "oh"}
+    {"um", "uh", "er", "ah", "okay", "ok", "so", "well", "hey", "yeah", "like", "oh", "alright"}
 )
 
 # Whole-utterance acknowledgments/backchannel: no request content of their
