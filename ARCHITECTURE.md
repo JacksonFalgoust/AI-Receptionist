@@ -166,7 +166,7 @@ Non-JSON frames are logged and skipped rather than crashing the loop.
 {"type": "text", "token": "Hello there!", "last": false, "preemptible": true}
 {"type": "text", "token": "", "last": true, "preemptible": true}
 ```
-On the call's first turn, `guide_client.stream_reply` yields the whole reply as one token frame (that turn is non-streaming, to capture the conversation id — see `guide_client.py` above), so the filler phrase (sent as its own frame first, see below) is what masks the wait. On turns 2+, `stream_reply` forwards whatever granularity GuideAnts' SSE stream actually emits — `respond_to()` sends one Twilio `text` frame per `response.output_text.delta` event, so *if* GuideAnts streams multiple incremental deltas, the caller starts hearing the reply as soon as the first ones arrive, without waiting for the whole answer. **In practice, verified against a live local GuideAnts instance, this depends entirely on the underlying model/provider**: some configurations (e.g. this project's demo guide, `deepseek/deepseek-v4-flash:nitro`) buffer the full generation server-side and emit it as a single SSE burst once complete — same latency as non-streaming, just wrapped in SSE framing. The code is correct either way (it forwards exactly what arrives), but don't assume streaming alone buys lower time-to-first-audio without confirming the configured model actually streams incrementally. Every frame carries `preemptible: true` — see "Selective barge-in" below for why.
+On the call's first turn, `guide_client.stream_reply` yields the whole reply as one token frame (that turn is non-streaming, to capture the conversation id — see `guide_client.py` above), so the filler phrase (sent as its own frame first, see below) is what masks the wait. On turns 2+, `stream_reply` forwards whatever granularity GuideAnts' SSE stream actually emits — `respond_to()` sends one Twilio `text` frame per `response.output_text.delta` event, so the caller starts hearing the reply as soon as the first tokens arrive, without waiting for the whole answer. Verified live (2026-07-10, current GuideAnts build): a long reply arrives as ~120 incremental deltas spread over ~6.5s, first delta ~3.3s in. **Caveat: this depends on the deployed GuideAnts build being current** — an outdated `guideants-webapi-ui` image (pre-dating GuideAnts' wire-streaming fixes) emits the entire reply as a single SSE burst after generation completes, regardless of which model the guide uses, which looks exactly like "streaming doesn't work." If replies seem to arrive all at once, rebuild/update the GuideAnts container before blaming the model or this app; `check_streaming.py` at this repo's root prints per-delta timings to check either way. Every frame carries `preemptible: true` — see "Selective barge-in" below for why.
 
 ### Turn-pause buffering (`schedule_turn()`)
 
@@ -316,16 +316,16 @@ naturally instead of repeating itself or guessing. The mechanism:
    will believe the caller heard the whole reply.
 5. **Long partials are truncated to their last ~150 characters** before
    being quoted, so the note may start mid-sentence.
-6. **The note only has a real window to fire if GuideAnts streams
-   incrementally.** If the configured model buffers and emits the whole
-   reply as one SSE burst (verified true for this project's demo guide —
-   see the streaming caveat in "Outbound message shape" above), a barge-in
-   almost always either lands before any text has arrived (`partial_reply`
-   still empty) or after the whole reply already arrived and was cleared
-   during the post-generation playback hold — both produce no note, same as
-   rough edge #4. The mechanism is still correct and exercised by
-   `test_guide_client.py`'s `build_input` tests; it just may rarely fire in
-   practice with a non-incrementally-streaming model.
+6. **The note only has a real window to fire while text is still
+   streaming in.** With a current GuideAnts build, deltas arrive
+   incrementally over several seconds (see "Outbound message shape" above),
+   so a mid-generation barge-in genuinely captures a partial reply. But on
+   a deployment that emits the whole reply as one SSE burst (e.g. an
+   outdated GuideAnts image — same section), a barge-in almost always
+   either lands before any text has arrived (`partial_reply` still empty)
+   or after the whole reply already arrived and was cleared during the
+   post-generation playback hold — both produce no note, same as rough
+   edge #4.
 
 ---
 

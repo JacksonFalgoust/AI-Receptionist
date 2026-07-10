@@ -78,11 +78,11 @@ this code. This app is just the phone/WebSocket bridge.
    the caller's utterance looks like a question or request (see `fillers.py`)
    *and* GuideAnts hasn't replied within `FILLER_DELAY_SECONDS` (default 1s)
    — this is what masks GuideAnts lookup latency without adding a filler to
-   fast replies. Later turns *can* start speaking sooner, since tokens are
-   forwarded as they stream in — but this depends on the underlying model
-   actually streaming incrementally; some models return the whole reply as
-   one SSE burst, in which case latency is about the same as turn 1's (see
-   ARCHITECTURE.md).
+   fast replies. Later turns start speaking sooner, since tokens are
+   forwarded as they stream in. (If replies seem to arrive all at once
+   instead, the GuideAnts container image is likely outdated — see the
+   streaming caveat in ARCHITECTURE.md, and `check_streaming.py` to
+   verify.)
 5. If a `prompt` arrives *while* a reply is already streaming, Twilio does not
    stop or pause TTS on its own (`interruptible="none"`) — but this app does
    act on it if it's a stop/wait phrase ("stop", "wait", "hold on", ...) or a
