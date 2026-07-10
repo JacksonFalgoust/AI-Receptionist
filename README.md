@@ -15,7 +15,7 @@ Caller ⇄ Twilio number ⇄ Conversation Relay ⇄ this app (/twiml, /ws) ⇄ G
 | File | Purpose |
 |---|---|
 | `app.py` | FastAPI server: `POST /twiml` returns the TwiML that opens the relay; `WS /ws` is the Conversation Relay message loop. |
-| `guide_client.py` | Fetches replies from the GuideAnts guide using the `openai` SDK pointed at GuideAnts' OpenAI-compatible Responses endpoint (first turn of a call non-streaming to capture a conversation id, later turns streamed — see below). |
+| `guide_client.py` | Fetches replies from the GuideAnts guide using the `openai` SDK pointed at GuideAnts' OpenAI-compatible Responses endpoint. Every turn streams, including the first — the conversation id is captured directly off the stream (see below). |
 | `fillers.py` | Pure logic for the filler-phrase feature: `looks_like_question` decides whether a caller's utterance looks like a question or request that warrants a short filler phrase before the real reply; `pick` returns a random filler phrase from a list; `is_backchannel` decides whether an utterance (e.g. "ok", "yeah") is pure acknowledgment noise that should never get a guide reply. |
 | `barge_in.py` | Pure logic for selective barge-in: `should_interrupt` decides whether a caller's utterance heard mid-reply (a stop/wait phrase, or a new question) should cancel the in-flight reply; a stop/wait phrase then gets a local acknowledgment, a new question starts a fresh reply. |
 | `speech_timing.py` | Pure logic: `estimate_seconds` estimates how long Twilio's TTS will take to speak a given text, from its word count — the fallback pacing signal when Twilio's speaker events aren't available. |
@@ -62,27 +62,27 @@ this code. This app is just the phone/WebSocket bridge.
    just took a breath mid-sentence, and the continuation is merged into the
    same turn instead of the first half being answered alone. The committed
    turn is sent as just the caller's latest utterance to the GuideAnts guide
-   (`guide_client.stream_reply`) — never a resent transcript. On a call's
-   first turn this is a single non-streaming call, which returns a
-   `conversation` id this app holds for the rest of the call; every later
-   turn streams the reply token-by-token and passes that id back so GuideAnts
-   continues the same server-side conversation. Each token is forwarded to
-   Twilio as its own frame as it arrives:
+   (`guide_client.stream_reply`) — never a resent transcript. Every turn,
+   including the call's first, streams the reply token-by-token; the
+   `conversation` id this app holds for the rest of the call is captured
+   directly off the stream's `response.created`/`response.completed` events
+   the first time a turn doesn't already have one, and passed back on every
+   later turn so GuideAnts continues the same server-side conversation. Each
+   token is forwarded to Twilio as its own frame as it arrives:
    ```json
    {"type": "text", "token": "Hello ", "last": false}
    {"type": "text", "token": "there!", "last": false}
    {"type": "text", "token": "", "last": true}
    ```
-   Turn 1 still arrives all at once, so a short filler phrase (e.g. "Let me
-   look that up for you.") is spoken first, before the real reply, whenever
-   the caller's utterance looks like a question or request (see `fillers.py`)
-   *and* GuideAnts hasn't replied within `FILLER_DELAY_SECONDS` (default 1s)
-   — this is what masks GuideAnts lookup latency without adding a filler to
-   fast replies. Later turns start speaking sooner, since tokens are
-   forwarded as they stream in. (If replies seem to arrive all at once
-   instead, the GuideAnts container image is likely outdated — see the
-   streaming caveat in ARCHITECTURE.md, and `check_streaming.py` to
-   verify.)
+   A short filler phrase (e.g. "Let me look that up for you.") is spoken
+   first, before the real reply, whenever the caller's utterance looks like a
+   question or request (see `fillers.py`) *and* GuideAnts hasn't replied
+   within `FILLER_DELAY_SECONDS` (default 1s) — this masks GuideAnts lookup
+   latency without adding a filler to fast replies, and covers the gap before
+   the first token arrives on any turn, including the first. (If replies seem
+   to arrive all at once instead of incrementally, the GuideAnts container
+   image is likely outdated — see the streaming caveat in ARCHITECTURE.md,
+   and `check_streaming.py` to verify.)
 5. If a `prompt` arrives *while* a reply is already streaming, Twilio does not
    stop or pause TTS on its own (`interruptible="none"`) — but this app does
    act on it if it's a stop/wait phrase ("stop", "wait", "hold on", ...) or a
@@ -113,18 +113,20 @@ placing a call.
 ## Manual verification without a phone call
 
 With the server running and `.env` pointed at a real published guide, confirm
-GuideAnts is reachable directly. First turn (non-streaming, to get a
-`conversation` id):
+GuideAnts is reachable directly. First turn, streaming (a current GuideAnts
+build echoes the `conversation` id in the streamed events themselves):
 
 ```
-curl http://localhost:5107/api/published/openai/<pubId>/v1/responses ^
+curl -N http://localhost:5107/api/published/openai/<pubId>/v1/responses ^
   -H "Authorization: Bearer <key-or-anonymous>" -H "Content-Type: application/json" ^
-  -d "{\"model\":\"<alias>\",\"input\":\"Hi, my name is Jackson. What are your hours?\"}"
+  -d "{\"model\":\"<alias>\",\"input\":\"Hi, my name is Jackson. What are your hours?\",\"stream\":true}"
 ```
 
-You should see a JSON object with `output[0]`'s text and a `"conversation":
-"conv_..."` field — copy that id. Then continue the same conversation,
-streaming, referencing a fact only turn 1 mentioned:
+You should see a stream of `response.output_text.delta` events (`-N` disables
+curl's output buffering so they print as they arrive); the `response.created`
+and `response.completed` events both carry `"conversation": "conv_..."` —
+copy that id. Then continue the same conversation, referencing a fact only
+turn 1 mentioned:
 
 ```
 curl -N http://localhost:5107/api/published/openai/<pubId>/v1/responses ^
@@ -132,8 +134,10 @@ curl -N http://localhost:5107/api/published/openai/<pubId>/v1/responses ^
   -d "{\"model\":\"<alias>\",\"input\":\"What did I say my name was?\",\"conversation\":\"conv_...\",\"stream\":true}"
 ```
 
-You should see a stream of `response.output_text.delta` events (`-N`
-disables curl's output buffering so they print as they arrive), and the
-final answer should say "Jackson" — proof the conversation continued
+The final answer should say "Jackson" — proof the conversation continued
 server-side with no history resent. If both of these work, `/ws` will work
-too.
+too. (If your GuideAnts build predates the streamed `conversation` field, the
+first curl above will stream fine but omit that field from the JSON payloads
+— in that case, drop `"stream":true` from the first call only to get the id
+from the non-streaming response body instead, same as this app's
+`stream_missing_conversation` fallback in `guide_client.py`.)

@@ -46,28 +46,38 @@ def _bad_request_error(code: str) -> openai.BadRequestError:
     return openai.BadRequestError(code, response=response, body={"code": code, "message": code})
 
 
-def test_first_turn_is_non_streaming_and_captures_conversation(monkeypatch):
-    fake_response = SimpleNamespace(id="resp_x", conversation="conv_abc", output_text="Hello there!")
-    create = AsyncMock(return_value=fake_response)
+def test_first_turn_streams_and_captures_conversation_from_created_event(monkeypatch):
+    events = [
+        SimpleNamespace(type="response.created", response=SimpleNamespace(conversation="conv_abc")),
+        SimpleNamespace(type="response.output_text.delta", delta="Hel"),
+        SimpleNamespace(type="response.output_text.delta", delta="lo"),
+        SimpleNamespace(type="response.completed", response=SimpleNamespace(conversation="conv_abc")),
+    ]
+    stream = FakeStream(events)
+    create = AsyncMock(return_value=stream)
     fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession()
     deltas = asyncio.run(_collect(guide_client.stream_reply("hi", session)))
 
-    assert deltas == ["Hello there!"]
+    assert deltas == ["Hel", "lo"]
     assert session.conversation_id == "conv_abc"
+    assert session.stream_missing_conversation is False
+    assert stream.closed
     _, kwargs = create.call_args
-    assert kwargs.get("stream") is not True
+    assert kwargs["stream"] is True
     assert "conversation" not in kwargs
     assert kwargs["input"] == "hi"
 
 
 def test_first_turn_accepts_object_shaped_conversation(monkeypatch):
-    fake_response = SimpleNamespace(
-        id="resp_x", conversation=SimpleNamespace(id="conv_abc"), output_text="Hi!"
-    )
-    create = AsyncMock(return_value=fake_response)
+    events = [
+        SimpleNamespace(type="response.created", response=SimpleNamespace(conversation=SimpleNamespace(id="conv_abc"))),
+        SimpleNamespace(type="response.completed", response=SimpleNamespace(conversation=SimpleNamespace(id="conv_abc"))),
+    ]
+    stream = FakeStream(events)
+    create = AsyncMock(return_value=stream)
     fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
@@ -75,6 +85,25 @@ def test_first_turn_accepts_object_shaped_conversation(monkeypatch):
     asyncio.run(_collect(guide_client.stream_reply("hi", session)))
 
     assert session.conversation_id == "conv_abc"
+
+
+def test_conversation_captured_from_completed_when_created_lacks_it(monkeypatch):
+    events = [
+        SimpleNamespace(type="response.created", response=SimpleNamespace(conversation=None)),
+        SimpleNamespace(type="response.output_text.delta", delta="Hi"),
+        SimpleNamespace(type="response.completed", response=SimpleNamespace(conversation="conv_late")),
+    ]
+    stream = FakeStream(events)
+    create = AsyncMock(return_value=stream)
+    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+
+    session = GuideSession()
+    deltas = asyncio.run(_collect(guide_client.stream_reply("hi", session)))
+
+    assert deltas == ["Hi"]
+    assert session.conversation_id == "conv_late"
+    assert session.stream_missing_conversation is False
 
 
 def test_continuation_turn_streams_with_conversation_param(monkeypatch):
@@ -102,9 +131,14 @@ def test_continuation_turn_streams_with_conversation_param(monkeypatch):
     assert session.conversation_id == "conv_abc"
 
 
-def test_lost_conversation_recovers_with_fresh_non_streaming_call(monkeypatch):
-    fresh_response = SimpleNamespace(id="resp_y", conversation="conv_new", output_text="Fresh reply")
-    create = AsyncMock(side_effect=[_bad_request_error("conversation_not_found"), fresh_response])
+def test_lost_conversation_recovers_with_fresh_streaming_call(monkeypatch):
+    retry_events = [
+        SimpleNamespace(type="response.created", response=SimpleNamespace(conversation="conv_new")),
+        SimpleNamespace(type="response.output_text.delta", delta="Fresh reply"),
+        SimpleNamespace(type="response.completed", response=SimpleNamespace(conversation="conv_new")),
+    ]
+    retry_stream = FakeStream(retry_events)
+    create = AsyncMock(side_effect=[_bad_request_error("conversation_not_found"), retry_stream])
     fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
@@ -117,7 +151,10 @@ def test_lost_conversation_recovers_with_fresh_non_streaming_call(monkeypatch):
     first_kwargs = create.call_args_list[0].kwargs
     second_kwargs = create.call_args_list[1].kwargs
     assert first_kwargs["conversation"] == "conv_stale"
+    assert first_kwargs["stream"] is True
     assert "conversation" not in second_kwargs
+    assert second_kwargs["stream"] is True
+    assert retry_stream.closed
 
 
 def test_other_bad_request_errors_propagate(monkeypatch):
@@ -153,9 +190,42 @@ def test_cancellation_closes_stream(monkeypatch):
     assert stream.closed
 
 
-def test_missing_conversation_id_keeps_non_streaming_mode(monkeypatch):
-    fake_response = SimpleNamespace(id="resp_x", conversation=None, output_text="ok")
-    create = AsyncMock(return_value=fake_response)
+def test_aclose_after_first_delta_closes_underlying_stream(monkeypatch):
+    # Mirrors a barge-in mid-reply: the caller has already consumed one delta
+    # (the generator is suspended at a `yield`, not blocked inside an await)
+    # and then closes the generator outright. `stream_reply` wraps its inner
+    # `_stream_turn` generator in `contextlib.aclosing` specifically so this
+    # still closes the underlying SSE stream deterministically.
+    events = [
+        SimpleNamespace(type="response.output_text.delta", delta="Hel"),
+        SimpleNamespace(type="response.output_text.delta", delta="lo"),
+    ]
+    stream = FakeStream(events)
+    create = AsyncMock(return_value=stream)
+    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+
+    async def scenario():
+        session = GuideSession(conversation_id="conv_abc")
+        gen = guide_client.stream_reply("hi", session)
+        first = await gen.__anext__()
+        await gen.aclose()
+        return first
+
+    first = asyncio.run(scenario())
+    assert first == "Hel"
+    assert stream.closed
+
+
+def test_missing_conversation_falls_back_to_non_streaming_next_turn(monkeypatch):
+    turn1_events = [
+        SimpleNamespace(type="response.created", response=SimpleNamespace(conversation=None)),
+        SimpleNamespace(type="response.output_text.delta", delta="ok"),
+        SimpleNamespace(type="response.completed", response=SimpleNamespace(conversation=None)),
+    ]
+    turn1_stream = FakeStream(turn1_events)
+    turn2_response = SimpleNamespace(id="resp_x", conversation="conv_new", output_text="ok again")
+    create = AsyncMock(side_effect=[turn1_stream, turn2_response])
     fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
@@ -164,10 +234,16 @@ def test_missing_conversation_id_keeps_non_streaming_mode(monkeypatch):
 
     assert deltas == ["ok"]
     assert session.conversation_id is None
+    assert session.stream_missing_conversation is True
 
-    # Next turn should stay on the non-streaming path (no `conversation` kwarg).
-    asyncio.run(_collect(guide_client.stream_reply("hi again", session)))
+    # Next turn falls back to the non-streaming path to obtain an id.
+    deltas2 = asyncio.run(_collect(guide_client.stream_reply("hi again", session)))
+    assert deltas2 == ["ok again"]
+    assert session.conversation_id == "conv_new"
     assert create.call_count == 2
+    second_kwargs = create.call_args_list[1].kwargs
+    assert second_kwargs.get("stream") is not True
+    assert "conversation" not in second_kwargs
     assert "conversation" not in create.call_args_list[1].kwargs
 
 

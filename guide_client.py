@@ -2,17 +2,23 @@
 wire API, using the /v1/responses endpoint with server-side conversation
 continuation.
 
-Turn 1 of a call is a single non-streaming responses.create() call: the
-streaming path returns a random resp_ id and never echoes back the
-conversation id, so the only way to obtain a durable continuation handle is a
-non-streaming response body. Turn 2+ pass that handle back via the
-`conversation` parameter and stream token deltas over SSE.
+Every turn, including turn 1, is a streaming responses.create() call.
+GuideAnts' streamed `response.created`/`response.completed` events carry the
+`conversation` id, so it's captured directly from the stream -- no separate
+non-streaming round trip is needed to establish continuation.
+
+As a safety net for an older GuideAnts build whose stream doesn't carry the
+id yet, if a turn with no conversation id completes without one, the session
+is marked `stream_missing_conversation` and the *next* such turn falls back
+to a single non-streaming call to obtain the id; turns after that stream
+normally again.
 
 If GuideAnts no longer recognizes a conversation id (e.g. it restarted), the
 next call automatically falls back to starting a fresh conversation --
 earlier context for that call is lost, but the caller still gets an answer.
 """
 
+import contextlib
 import logging
 from dataclasses import dataclass
 from typing import AsyncIterator
@@ -54,6 +60,10 @@ class GuideSession:
     """Per-call continuation handle for one GuideAnts conversation."""
 
     conversation_id: str | None = None
+    # Set when a streamed turn with no conversation id completed without one
+    # -- signals an older GuideAnts build; the next such turn falls back to
+    # a non-streaming call to obtain the id.
+    stream_missing_conversation: bool = False
 
 
 def build_input(user_text: str, interrupted_partial: str | None) -> str:
@@ -88,6 +98,8 @@ def _is_lost_conversation(err: "openai.BadRequestError") -> bool:
 
 
 async def _start_conversation(client: AsyncOpenAI, input_text: str, session: GuideSession) -> AsyncIterator[str]:
+    """Non-streaming fallback for establishing a conversation id against an
+    older GuideAnts build whose streamed events don't carry one yet."""
     response = await client.responses.create(
         model=config.GUIDEANTS_MODEL,
         input=input_text,
@@ -95,13 +107,53 @@ async def _start_conversation(client: AsyncOpenAI, input_text: str, session: Gui
     session.conversation_id = _extract_conversation_id(response)
     if session.conversation_id is None:
         logger.warning(
-            "GuideAnts response %s carried no conversation id; continuation will "
-            "keep using the non-streaming path",
+            "GuideAnts response %s carried no conversation id even on the "
+            "non-streaming path",
             getattr(response, "id", "?"),
         )
     text = response.output_text
     if text:
         yield text
+
+
+async def _stream_turn(client: AsyncOpenAI, user_text: str, session: GuideSession) -> AsyncIterator[str]:
+    """Stream one turn's reply, capturing the conversation id from
+    `response.created`/`response.completed` if the session doesn't have one
+    yet. Raises openai.BadRequestError on GuideAnts 4xx responses (including
+    a lost-conversation error); callers handle retry/fallback."""
+    had_conversation_id = session.conversation_id is not None
+    kwargs = {"model": config.GUIDEANTS_MODEL, "input": user_text, "stream": True}
+    if had_conversation_id:
+        kwargs["conversation"] = session.conversation_id
+
+    stream = await client.responses.create(**kwargs)
+
+    completed = False
+    async with stream:
+        async for event in stream:
+            etype = getattr(event, "type", "")
+            if etype == "response.output_text.delta":
+                delta = getattr(event, "delta", None)
+                if delta:
+                    yield delta
+            elif etype in ("response.created", "response.completed"):
+                if etype == "response.completed":
+                    completed = True
+                if session.conversation_id is None:
+                    session.conversation_id = _extract_conversation_id(getattr(event, "response", None))
+            elif etype in ("response.failed", "error"):
+                raise RuntimeError(f"GuideAnts stream reported failure: {event!r}")
+            # response.output_item.added / response.content_part.added /
+            # response.output_text.done / response.output_item.done:
+            # structural events, nothing to forward.
+
+    if not had_conversation_id and completed and session.conversation_id is None:
+        session.stream_missing_conversation = True
+        logger.warning(
+            "GuideAnts stream completed without a conversation id -- possibly "
+            "an older GuideAnts build; falling back to a non-streaming call "
+            "next turn to obtain one"
+        )
 
 
 async def stream_reply(user_text: str, session: GuideSession) -> AsyncIterator[str]:
@@ -113,42 +165,36 @@ async def stream_reply(user_text: str, session: GuideSession) -> AsyncIterator[s
     """
     client = _get_client()
 
-    if session.conversation_id is None:
+    if session.conversation_id is None and session.stream_missing_conversation:
         async for delta in _start_conversation(client, user_text, session):
             yield delta
         return
 
-    try:
-        stream = await client.responses.create(
-            model=config.GUIDEANTS_MODEL,
-            input=user_text,
-            conversation=session.conversation_id,
-            stream=True,
-        )
-    except openai.BadRequestError as err:
-        if not _is_lost_conversation(err):
-            raise
-        logger.warning(
-            "GuideAnts no longer recognizes conversation %s (%s); starting a "
-            "fresh conversation for this call -- prior context is lost",
-            session.conversation_id,
-            getattr(err, "code", None),
-        )
-        session.conversation_id = None
-        async for delta in _start_conversation(client, user_text, session):
-            yield delta
-        return
+    # `_stream_turn` is a nested async generator holding the actual SSE
+    # connection open (via its own `async with stream:`). `async for ... yield`
+    # does not delegate cancellation the way sync `yield from` does, so if
+    # this generator is closed mid-turn (barge-in), nothing would otherwise
+    # close the inner one -- wrap it in `aclosing` so `.aclose()` here
+    # deterministically closes the underlying stream too.
+    lost_conversation = False
+    async with contextlib.aclosing(_stream_turn(client, user_text, session)) as gen:
+        try:
+            async for delta in gen:
+                yield delta
+            return
+        except openai.BadRequestError as err:
+            if session.conversation_id is None or not _is_lost_conversation(err):
+                raise
+            logger.warning(
+                "GuideAnts no longer recognizes conversation %s (%s); starting a "
+                "fresh conversation for this call -- prior context is lost",
+                session.conversation_id,
+                getattr(err, "code", None),
+            )
+            session.conversation_id = None
+            lost_conversation = True
 
-    async with stream:
-        async for event in stream:
-            etype = getattr(event, "type", "")
-            if etype == "response.output_text.delta":
-                delta = getattr(event, "delta", None)
-                if delta:
-                    yield delta
-            elif etype in ("response.failed", "error"):
-                raise RuntimeError(f"GuideAnts stream reported failure: {event!r}")
-            # response.created / response.output_item.added /
-            # response.content_part.added / response.output_text.done /
-            # response.output_item.done / response.completed: structural
-            # events, nothing to forward.
+    if lost_conversation:
+        async with contextlib.aclosing(stream_reply(user_text, session)) as retry_gen:
+            async for delta in retry_gen:
+                yield delta
