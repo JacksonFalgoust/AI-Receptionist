@@ -13,41 +13,46 @@ import time
 import guide_client
 
 
+async def run_turn(label: str, user_text: str, session: guide_client.GuideSession) -> None:
+    """Drive one turn through the real guide_client.stream_reply path (the
+    same function app.py calls) and report per-delta timing, so it's visible
+    whether *this* turn streamed incrementally or arrived as one burst."""
+    print(f"=== {label}: {user_text!r} ===")
+    start = time.monotonic()
+    delta_times = []
+    async for delta in guide_client.stream_reply(user_text, session):
+        t = time.monotonic() - start
+        delta_times.append(t)
+        print(f"{t:6.3f}s  delta_len={len(delta):<4} {delta!r}")
+
+    print(f"conversation id after {label}: {session.conversation_id!r}")
+    if not delta_times:
+        print(f"RESULT ({label}): 0 delta events -- empty reply.")
+    elif len(delta_times) == 1:
+        print(f"RESULT ({label}): 1 delta event -- buffered / not incremental.")
+    else:
+        span = delta_times[-1] - delta_times[0]
+        print(f"RESULT ({label}): {len(delta_times)} delta events spread over {span:.3f}s -- incremental streaming.")
+    print()
+
+
 async def main():
     prompt = sys.argv[1] if len(sys.argv) > 1 else (
         "Describe your full menu in extreme, exhaustive detail, at least 10 sentences."
     )
 
     session = guide_client.GuideSession()
-    async for _ in guide_client.stream_reply("Hi, my name is Jackson.", session):
-        pass  # turn 1: just establish a conversation id
+    await run_turn("turn 1", "Describe your full menu in extreme, exhaustive detail, at least 10 sentences.", session)
 
-    client = guide_client._get_client()
-    start = time.monotonic()
-    stream = await client.responses.create(
-        model=guide_client.config.GUIDEANTS_MODEL,
-        input=prompt,
-        conversation=session.conversation_id,
-        stream=True,
-    )
+    if session.conversation_id is None:
+        print(
+            "RESULT: streamed turn 1 carried no conversation id -- old "
+            "GuideAnts build? (see stream_missing_conversation fallback in "
+            "guide_client.py)"
+        )
+        sys.exit(1)
 
-    delta_events = []
-    async with stream:
-        async for event in stream:
-            t = time.monotonic() - start
-            etype = getattr(event, "type", "")
-            delta = getattr(event, "delta", None)
-            dlen = len(delta) if delta else 0
-            print(f"{t:6.3f}s  {etype:35s} delta_len={dlen}")
-            if etype == "response.output_text.delta":
-                delta_events.append(t)
-
-    print()
-    if len(delta_events) <= 1:
-        print(f"RESULT: {len(delta_events)} delta event(s) -- buffered / not incremental.")
-    else:
-        span = delta_events[-1] - delta_events[0]
-        print(f"RESULT: {len(delta_events)} delta events spread over {span:.3f}s -- incremental streaming.")
+    await run_turn("turn 2", prompt, session)
 
 
 asyncio.run(main())
