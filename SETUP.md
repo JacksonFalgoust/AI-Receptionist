@@ -43,19 +43,39 @@ from creating the GuideAnts guide through placing a real phone call.
 6. Make sure the GuideAnts backend is running and reachable at the host/port
    you'll put in `GUIDEANTS_BASE_URL` (default dev: `http://localhost:5107`).
 7. **Wire up the reservation tool** so the guide can check availability and
-   book rentals (optional — skip if this demo doesn't need Booqable):
-   - In the guide's tool/API config, import
-     `guide-demo/booqable-reservations-openapi.json` from this repo as an
-     OpenAPI tool.
-   - Its `servers[0].url` is `http://host.docker.internal:8080/api/reservations`
-     — correct as-is if GuideAnts runs in Docker and this app runs on the
-     host at port 8080 (the default, see step 5 below). If GuideAnts runs
-     outside Docker, change it to `http://localhost:8080/api/reservations`
-     before importing.
-   - Set the tool's `X-Api-Key` auth value to the same string you'll put in
-     this app's `RECEPTIONIST_API_KEY` (step 3).
-   - If you re-import this schema later after editing it, re-import replaces
-     the stored copy in GuideAnts — the file on disk isn't read live.
+   book rentals (optional — skip if this demo doesn't need Booqable). Decide
+   `RECEPTIONIST_API_KEY` now (any string you invent — you'll paste it twice,
+   once here and once into `.env` in step 3) before starting:
+   1. In the guide editor, open its **Tools** section and click **+ Add Tool
+      Source**.
+   2. In the picker, choose **Web API** ("Connect to an HTTP API with server
+      URL, auth, and operations").
+   3. On the **Schema** tab:
+      - **Server URL**: `http://host.docker.internal:8080/api/reservations`
+        — correct as-is if GuideAnts runs in Docker and this app runs on the
+        host at port 8080 (the default, see step 5 below). If GuideAnts runs
+        outside Docker, use `http://localhost:8080/api/reservations`
+        instead.
+      - **OpenAPI Specification (JSON)**: paste the full contents of
+        `guide-demo/booqable-reservations-openapi.json` from this repo.
+   4. Switch to the **Authentication** tab, click **Add Auth**, and set:
+      - **Authentication Type**: `Service HTTP Header (for API keys...)`
+      - **Header Name**: `X-Api-Key`
+      - **Secret Value**: the same string you're using for
+        `RECEPTIONIST_API_KEY`. This field is write-only — you won't be able
+        to view it again after saving, only overwrite it.
+   5. Save. The four operations (`listCatalog`, `checkAvailability`,
+      `createReservation`, `cancelReservation`) should appear as tools the
+      guide can call.
+   6. **If you edit `booqable-reservations-openapi.json` later**, re-paste it
+      into the same Schema tab and save — the file on disk isn't read live,
+      and there's no auto-sync. A stale copy is a common source of confusing
+      guide behavior (e.g. the guide asking for fields that don't exist, or
+      not knowing about fields that do) that looks like a code bug but isn't
+      — see ARCHITECTURE.md's "`POST /api/reservations` request shape" for
+      a real example (and why this OpenAPI schema deliberately uses flat
+      `customer_name`/`customer_email`/`customer_phone` fields instead of a
+      nested `customer` object).
 
 ## 2. Install this project's dependencies
 

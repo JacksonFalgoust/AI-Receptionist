@@ -129,6 +129,14 @@ LLM should never see the real Booqable key. `reservations_api.py` wraps
 `booqable_client.BooqableClient`/`reservations.py`'s find/check/book/reserve
 workflow so GuideAnts never has to speak Booqable's JSON:API format directly.
 
+`POST /api/reservations` takes flat `customer_name`/`customer_email`/
+`customer_phone` fields (not a nested `customer` object — GuideAnts' OpenAPI
+tool-schema converter can't see into nested object properties) and requires
+at least one of `customer_email`/`customer_phone`. See
+[ARCHITECTURE.md](ARCHITECTURE.md#post-apireservations-request-shape) for
+why, and for a couple of non-obvious Booqable v4 quirks around how phone
+numbers actually get stored.
+
 ## Setup
 
 **See [SETUP.md](SETUP.md) for the complete, step-by-step guide** to getting
