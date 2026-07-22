@@ -6,8 +6,8 @@ import httpx
 import openai
 import pytest
 
-import guide_client
-from guide_client import GuideSession, build_input
+from app import guide_client
+from app.guide_client import GuideSession, build_input
 
 
 async def _collect(aiter):

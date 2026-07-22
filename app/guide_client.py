@@ -26,7 +26,7 @@ from typing import AsyncIterator
 import openai
 from openai import AsyncOpenAI
 
-import config
+from . import config
 
 logger = logging.getLogger("voice_receptionist.guide")
 

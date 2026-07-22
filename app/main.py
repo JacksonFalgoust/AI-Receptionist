@@ -60,13 +60,9 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 from twilio.twiml.voice_response import Connect, VoiceResponse
 
-import barge_in
-import config
-import fillers
-import speaker_events
-import speech_timing
-from guide_client import GuideSession, build_input, stream_reply
-from reservations_api import router as reservations_router
+from . import barge_in, config, fillers, speaker_events, speech_timing
+from .guide_client import GuideSession, build_input, stream_reply
+from .reservations_api import router as reservations_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("voice_receptionist")

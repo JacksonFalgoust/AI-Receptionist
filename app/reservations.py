@@ -4,8 +4,8 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import config
-from booqable_client import BooqableClient, BooqableError
+from . import config
+from .booqable_client import BooqableClient, BooqableError
 
 RECEPTIONIST_TAG = "ai-receptionist"
 
