@@ -2,9 +2,9 @@ from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
-import config
-import reservations_api
-from app import app
+from app import config
+from app import reservations_api
+from app.main import app
 
 client = TestClient(app)
 
@@ -135,7 +135,7 @@ def test_cancel_reservation_happy_path(monkeypatch):
 
 
 def test_booqable_ping_is_not_gated_by_receptionist_key(monkeypatch):
-    from booqable_client import BooqableError
+    from app.booqable_client import BooqableError
 
     class FailingClient:
         def __init__(self):

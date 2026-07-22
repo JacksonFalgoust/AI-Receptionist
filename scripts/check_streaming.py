@@ -1,8 +1,8 @@
 """Diagnostic: shows whether a GuideAnts guide streams SSE deltas
 incrementally or buffers the whole reply into one burst.
 
-Run from this repo root (needs guide_client.py + a filled-in .env):
-python check_streaming.py "some prompt that produces a long reply"
+Run from this repo root (needs a filled-in .env):
+python -m scripts.check_streaming "some prompt that produces a long reply"
 
 Not part of the app -- safe to delete once you're done comparing models.
 """
@@ -10,13 +10,14 @@ import asyncio
 import sys
 import time
 
-import guide_client
+from app import guide_client
 
 
 async def run_turn(label: str, user_text: str, session: guide_client.GuideSession) -> None:
     """Drive one turn through the real guide_client.stream_reply path (the
-    same function app.py calls) and report per-delta timing, so it's visible
-    whether *this* turn streamed incrementally or arrived as one burst."""
+    same function app/main.py calls) and report per-delta timing, so it's
+    visible whether *this* turn streamed incrementally or arrived as one
+    burst."""
     print(f"=== {label}: {user_text!r} ===")
     start = time.monotonic()
     delta_times = []

@@ -4,7 +4,7 @@ from typing import Any
 
 import httpx
 
-import config
+from . import config
 
 
 class BooqableError(Exception):

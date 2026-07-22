@@ -1,4 +1,4 @@
-import speech_timing
+from app import speech_timing
 
 
 def test_estimate_seconds_counts_words_at_given_rate():

@@ -1,4 +1,4 @@
-import speaker_events
+from app import speaker_events
 
 
 def test_info_style_agent_started():

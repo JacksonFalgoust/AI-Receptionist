@@ -12,7 +12,7 @@ import re
 import string
 from typing import Iterable
 
-import fillers
+from . import fillers
 
 STOP_PHRASES = frozenset(
     {

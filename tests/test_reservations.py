@@ -1,8 +1,8 @@
 import asyncio
 from unittest.mock import AsyncMock
 
-from booqable_client import BooqableClient
-from reservations import find_or_create_customer
+from app.booqable_client import BooqableClient
+from app.reservations import find_or_create_customer
 
 
 def _customer(id_: str, *, name: str, email: str | None = None, phone: str | None = None) -> dict:

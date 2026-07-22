@@ -13,9 +13,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
-import config
-import reservations
-from booqable_client import BooqableClient, BooqableError
+from . import config, reservations
+from .booqable_client import BooqableClient, BooqableError
 
 router = APIRouter()
 

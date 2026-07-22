@@ -79,7 +79,7 @@ from creating the GuideAnts guide through placing a real phone call.
 
 ## 2. Install this project's dependencies
 
-1. Open a terminal in this folder.
+1. Open a terminal at the repository root.
 2. Install dependencies:
    ```
    pip install -r requirements.txt
@@ -87,7 +87,7 @@ from creating the GuideAnts guide through placing a real phone call.
 
 ## 3. Fill in `.env`
 
-Copy `.env.example` to `.env` in this folder and fill in the values from step 1:
+Copy `.env.example` to `.env` in the repository root and fill in the values from step 1:
 
 ```
 GUIDEANTS_BASE_URL=http://localhost:5107
@@ -159,9 +159,9 @@ curl http://localhost:8080/api/booqable/ping
 Conversation Relay requires a public `wss://` URL — it will not connect to
 `localhost`.
 
-1. Start the app locally:
+1. Start the app locally (from the repository root):
    ```
-   uvicorn app:app --host 0.0.0.0 --port 8080
+   uvicorn app.main:app --host 0.0.0.0 --port 8080
    ```
 2. In another terminal, tunnel it:
    ```
