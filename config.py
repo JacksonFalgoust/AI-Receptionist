@@ -102,3 +102,21 @@ STOP_ACK_PHRASES = [
     for p in os.environ.get("STOP_ACK_PHRASES", "").split("|")
     if p.strip()
 ] or _DEFAULT_STOP_ACK_PHRASES
+
+# Booqable reservation API (/api/reservations/*, /api/booqable/ping) -- lets
+# the GuideAnts guide check availability and book rentals through this app
+# instead of talking to Booqable directly.
+BOOQABLE_COMPANY_URL = os.environ.get(
+    "BOOQABLE_COMPANY_URL", "https://smart-apps-innovations.booqable.com"
+).rstrip("/")
+BOOQABLE_BASE_URL = BOOQABLE_COMPANY_URL + "/api/4"
+BOOQABLE_API_KEY = os.environ.get("BOOQABLE_API_KEY", "")
+
+# Shared secret the GuideAnts guide sends as X-Api-Key when calling
+# /api/reservations/*. Distinct from BOOQABLE_API_KEY -- the LLM must never
+# see the real Booqable key.
+RECEPTIONIST_API_KEY = os.environ.get("RECEPTIONIST_API_KEY", "")
+
+# Timezone naive starts_at/stops_at values from the caller/guide are
+# interpreted in, before being converted to UTC for Booqable.
+BOOQABLE_TIMEZONE = os.environ.get("BOOQABLE_TIMEZONE", "America/New_York")

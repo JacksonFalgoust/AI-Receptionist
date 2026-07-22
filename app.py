@@ -66,11 +66,13 @@ import fillers
 import speaker_events
 import speech_timing
 from guide_client import GuideSession, build_input, stream_reply
+from reservations_api import router as reservations_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("voice_receptionist")
 
 app = FastAPI()
+app.include_router(reservations_router)
 
 # Ceiling on holding a buffered turn while the caller is (per clientSpeaking
 # events) still audibly speaking. Normally the commit timer is re-armed by

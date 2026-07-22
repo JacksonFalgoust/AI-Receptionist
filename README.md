@@ -22,6 +22,9 @@ Caller ⇄ Twilio number ⇄ Conversation Relay ⇄ this app (/twiml, /ws) ⇄ G
 | `speaker_events.py` | Pure logic: `classify` recognizes Twilio's speaker-event messages (`agentSpeaking`/`clientSpeaking` start/stop) — the agent-stopped event is the real "reply finished playing" signal. |
 | `config.py` | Loads settings from `.env`. |
 | `.env.example` | Template for required configuration — copy to `.env`. |
+| `reservations_api.py` | FastAPI router: `/api/reservations/*` + `/api/booqable/ping`, the tool surface GuideAnts calls to check availability and book rentals. See "Reservation API" below. |
+| `reservations.py` | Booqable business logic (catalog, availability, create/cancel order) behind `reservations_api.py`. |
+| `booqable_client.py` | Thin async HTTP client for Booqable's JSON:API v4, Bearer-token auth. |
 
 All of the receptionist's actual knowledge/behavior (business hours, services,
 tone, FAQs, etc.) lives in the **guide's instructions inside GuideAnts**, not in
@@ -102,6 +105,29 @@ this code. This app is just the phone/WebSocket bridge.
    are just logged and never trigger a guide reply, whether they arrive
    mid-reply or just after — they're genuinely noise, never sent to
    GuideAnts, like fillers and other non-trigger mid-reply speech.
+
+## Reservation API
+
+Separate from the Twilio call bridge above, this app also serves the Booqable
+reservation surface the GuideAnts receptionist guide calls as a tool (via its
+imported OpenAPI schema, `guide-demo/booqable-reservations-openapi.json`) —
+so one running app (`uvicorn app:app --port 8080`) is enough for both the
+phone call and live availability/booking, instead of running a second
+project.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/booqable/ping` | Connectivity check — confirms `BOOQABLE_API_KEY`/`BOOQABLE_COMPANY_URL` are correct. Unauthenticated. |
+| GET | `/api/reservations/catalog` | Live rentable product list (name, `product_id`, price). |
+| GET | `/api/reservations/availability` | Check stock for a product/date-range/quantity. |
+| POST | `/api/reservations` | Find-or-create customer, create order, book items, and (by default) reserve it. |
+| POST | `/api/reservations/{order_id}/cancel` | Cancel a reservation. |
+
+The four `/api/reservations/*` routes require an `X-Api-Key` header matching
+`RECEPTIONIST_API_KEY` — a secret distinct from `BOOQABLE_API_KEY`, since the
+LLM should never see the real Booqable key. `reservations_api.py` wraps
+`booqable_client.BooqableClient`/`reservations.py`'s find/check/book/reserve
+workflow so GuideAnts never has to speak Booqable's JSON:API format directly.
 
 ## Setup
 
