@@ -1,0 +1,120 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "AI Receptionist Reservations",
+    "version": "1.0.0",
+    "description": "Reservation-facing API exposed by the Twilio demo app (app.py + reservations_api.py), alongside its Conversation Relay bridge. This wraps Booqable (JSON:API, v4) with business logic — the voice receptionist should call THIS API, never Booqable directly, so it never sees the real BOOQABLE_API_KEY."
+  },
+  "servers": [
+    {
+      "url": "http://host.docker.internal:8080/api/reservations",
+      "description": "GuideAnts runs as a Docker container; host.docker.internal is how a container reaches a port on the host machine. The app itself runs bare (no Docker) on port 8080 alongside the Twilio WS bridge. If GuideAnts ever runs outside Docker, change this to http://localhost:8080/api/reservations."
+    }
+  ],
+  "security": [
+    { "ApiKeyAuth": [] }
+  ],
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Api-Key",
+        "description": "Shared secret set as RECEPTIONIST_API_KEY on the backend. This is a separate key from BOOQABLE_API_KEY — the LLM must only ever know this one."
+      }
+    }
+  },
+  "paths": {
+    "/catalog": {
+      "get": {
+        "operationId": "listCatalog",
+        "summary": "List rentable products the caller can book",
+        "description": "Use this to look up the product_id needed for availability checks and reservations. Prices are in USD.",
+        "responses": {
+          "200": { "description": "Live product catalog", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/availability": {
+      "get": {
+        "operationId": "checkAvailability",
+        "summary": "Check whether a product is available for a date range and quantity",
+        "description": "Call this before promising a reservation, and again immediately before creating one, since stock can be taken by another booking in between.",
+        "parameters": [
+          { "name": "product_id", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "starts_at", "in": "query", "required": true, "schema": { "type": "string" }, "description": "ISO 8601 date/time, e.g. 2026-08-01T09:00:00" },
+          { "name": "stops_at", "in": "query", "required": true, "schema": { "type": "string" }, "description": "ISO 8601 date/time, e.g. 2026-08-02T17:00:00" },
+          { "name": "quantity", "in": "query", "required": false, "schema": { "type": "integer", "default": 1 } },
+          { "name": "location_id", "in": "query", "required": false, "schema": { "type": "string" }, "description": "Defaults to the account's existing location" }
+        ],
+        "responses": {
+          "200": { "description": "Availability status: available, partial, unavailable, or unknown", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/": {
+      "post": {
+        "operationId": "createReservation",
+        "summary": "Create a reservation for a caller",
+        "description": "Finds or creates the customer, creates the order, books the requested items, and — unless auto_reserve is set to false — immediately reserves it. Only call this after confirming the products, dates, and price with the caller. If the response shows reserved=false with a reserve_error (e.g. items became unavailable), tell the caller and offer alternatives rather than retrying blindly.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["customer", "starts_at", "stops_at", "items"],
+                "properties": {
+                  "customer": {
+                    "type": "object",
+                    "required": ["name"],
+                    "description": "At least one of email or phone is required in addition to name.",
+                    "properties": {
+                      "name": { "type": "string" },
+                      "email": { "type": "string" },
+                      "phone": { "type": "string" }
+                    },
+                    "anyOf": [
+                      { "required": ["email"] },
+                      { "required": ["phone"] }
+                    ]
+                  },
+                  "starts_at": { "type": "string", "description": "ISO 8601 date/time" },
+                  "stops_at": { "type": "string", "description": "ISO 8601 date/time" },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["product_id", "quantity"],
+                      "properties": {
+                        "product_id": { "type": "string", "description": "From listCatalog" },
+                        "quantity": { "type": "integer", "minimum": 1 }
+                      }
+                    }
+                  },
+                  "location_id": { "type": "string", "description": "Defaults to the account's existing location" },
+                  "auto_reserve": { "type": "boolean", "default": true, "description": "Set false to leave as a draft order for staff review instead of reserving immediately" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Reservation result, including order_id, pricing, and whether it was actually reserved", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/{order_id}/cancel": {
+      "post": {
+        "operationId": "cancelReservation",
+        "summary": "Cancel a reservation",
+        "parameters": [
+          { "name": "order_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Cancellation result", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    }
+  }
+}

@@ -42,6 +42,20 @@ from creating the GuideAnts guide through placing a real phone call.
      `{GUIDEANTS_BASE_URL}/api/published/openai/{pubId}/v1`.
 6. Make sure the GuideAnts backend is running and reachable at the host/port
    you'll put in `GUIDEANTS_BASE_URL` (default dev: `http://localhost:5107`).
+7. **Wire up the reservation tool** so the guide can check availability and
+   book rentals (optional — skip if this demo doesn't need Booqable):
+   - In the guide's tool/API config, import
+     `guide-demo/booqable-reservations-openapi.json` from this repo as an
+     OpenAPI tool.
+   - Its `servers[0].url` is `http://host.docker.internal:8080/api/reservations`
+     — correct as-is if GuideAnts runs in Docker and this app runs on the
+     host at port 8080 (the default, see step 5 below). If GuideAnts runs
+     outside Docker, change it to `http://localhost:8080/api/reservations`
+     before importing.
+   - Set the tool's `X-Api-Key` auth value to the same string you'll put in
+     this app's `RECEPTIONIST_API_KEY` (step 3).
+   - If you re-import this schema later after editing it, re-import replaces
+     the stored copy in GuideAnts — the file on disk isn't read live.
 
 ## 2. Install this project's dependencies
 
@@ -86,6 +100,24 @@ FILLER_DELAY_SECONDS=1.0
   the built-in list in `fillers.py`) that count as pure acknowledgment noise
   ("ok", "yeah", "got it", ...) and should never get a guide reply, whether
   heard mid-reply or just after it finishes. Optional.
+
+If you wired up the reservation tool in step 1.7, also fill in:
+
+```
+BOOQABLE_COMPANY_URL=<your Booqable account URL, e.g. https://yourco.booqable.com>
+BOOQABLE_API_KEY=<Booqable API key>
+RECEPTIONIST_API_KEY=<a separate secret you invent — never reuse BOOQABLE_API_KEY>
+BOOQABLE_TIMEZONE=America/New_York
+```
+
+`RECEPTIONIST_API_KEY` must match whatever you set as the tool's `X-Api-Key`
+value inside GuideAnts (step 1.7) — this app rejects `/api/reservations/*`
+calls that don't send a matching header, and the LLM must never be given
+`BOOQABLE_API_KEY` directly. Verify the Booqable side is reachable with:
+
+```
+curl http://localhost:8080/api/booqable/ping
+```
 
 ## 4. Twilio account setup
 
