@@ -20,25 +20,19 @@ from booqable_client import BooqableClient, BooqableError
 router = APIRouter()
 
 
-class ReservationCustomer(BaseModel):
-    name: str
-    email: str | None = None
-    phone: str | None = None
-
-    @model_validator(mode="after")
-    def _require_email_or_phone(self) -> "ReservationCustomer":
-        if not self.email and not self.phone:
-            raise ValueError("customer requires at least one of email or phone")
-        return self
-
-
 class ReservationItem(BaseModel):
     product_id: str = Field(description="Booqable product id, from /api/reservations/catalog")
     quantity: int = Field(gt=0)
 
 
 class ReservationRequest(BaseModel):
-    customer: ReservationCustomer
+    # Flat rather than a nested "customer" object: the GuideAnts OpenAPI-to-tool-schema
+    # converter (OpenApiHelper.cs) only reads top-level requestBody properties/required --
+    # a nested object's own properties/required (and anyOf) never reach the LLM's tool
+    # definition, so the guide had no way to know email/phone existed as fields at all.
+    customer_name: str
+    customer_email: str | None = None
+    customer_phone: str | None = None
     starts_at: str = Field(description="ISO 8601 date/time, e.g. 2026-08-01T09:00:00")
     stops_at: str = Field(description="ISO 8601 date/time, e.g. 2026-08-02T17:00:00")
     items: list[ReservationItem]
@@ -47,6 +41,12 @@ class ReservationRequest(BaseModel):
         default=True,
         description="If true, reserve immediately. If false, leave as a draft order for staff review.",
     )
+
+    @model_validator(mode="after")
+    def _require_email_or_phone(self) -> "ReservationRequest":
+        if not self.customer_email and not self.customer_phone:
+            raise ValueError("customer_email or customer_phone is required")
+        return self
 
 
 async def require_receptionist_key(x_api_key: str | None = Header(default=None)) -> None:
@@ -119,7 +119,7 @@ async def create_reservation_endpoint(body: ReservationRequest) -> dict[str, Any
     try:
         return await reservations.create_reservation(
             client,
-            customer=body.customer.model_dump(),
+            customer={"name": body.customer_name, "email": body.customer_email, "phone": body.customer_phone},
             location_id=body.location_id,
             starts_at=body.starts_at,
             stops_at=body.stops_at,

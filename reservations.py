@@ -127,20 +127,45 @@ async def list_catalog(client: BooqableClient) -> list[dict[str, Any]]:
     return catalog
 
 
+def _normalize_phone(value: str) -> str:
+    """Digits only, with a leading US country code stripped, so '+1 (555) 123-4567'
+    and '555-123-4567' compare equal."""
+    digits = "".join(ch for ch in value if ch.isdigit())
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    return digits
+
+
+def _customer_phone(attrs: dict[str, Any]) -> str | None:
+    """Booqable v4 has no top-level 'phone' attribute (POST attributes.phone -> 400
+    unknown_attribute) and attributes.properties is read-only (400 unwritable_attribute).
+    Phone numbers are set via the Rails-style nested attributes.properties_attributes on
+    create, and read back in the properties bag under a lowercased key -- e.g. sending
+    properties_attributes: [{"type": "Property::Phone", "name": "Phone", "value": "+1..."}]
+    reads back as properties: {"phone": "+1..."}. Verified against a live throwaway
+    customer (created and archived during development)."""
+    return (attrs.get("properties") or {}).get("phone")
+
+
 async def find_or_create_customer(
     client: BooqableClient, *, name: str, email: str | None = None, phone: str | None = None
 ) -> dict[str, Any]:
-    if email:
+    normalized_phone = _normalize_phone(phone) if phone else None
+    if email or normalized_phone:
         existing = await client.list_all("customers", params={"filter[archived][eq]": "false"})
         for candidate in existing:
-            if (client.attrs(candidate).get("email") or "").lower() == email.lower():
+            attrs = client.attrs(candidate)
+            if email and (attrs.get("email") or "").lower() == email.lower():
+                return candidate
+            candidate_phone = _customer_phone(attrs)
+            if normalized_phone and candidate_phone and _normalize_phone(candidate_phone) == normalized_phone:
                 return candidate
 
     attributes: dict[str, Any] = {"name": name, "legal_type": "person", "tag_list": [RECEPTIONIST_TAG]}
     if email:
         attributes["email"] = email
     if phone:
-        attributes["phone"] = phone
+        attributes["properties_attributes"] = [{"type": "Property::Phone", "name": "Phone", "value": phone}]
     response = await client.post("customers", json=client.resource("customers", attributes))
     return response["data"]
 

@@ -56,29 +56,18 @@
       "post": {
         "operationId": "createReservation",
         "summary": "Create a reservation for a caller",
-        "description": "Finds or creates the customer, creates the order, books the requested items, and — unless auto_reserve is set to false — immediately reserves it. Only call this after confirming the products, dates, and price with the caller. If the response shows reserved=false with a reserve_error (e.g. items became unavailable), tell the caller and offer alternatives rather than retrying blindly.",
+        "description": "Finds or creates the customer, creates the order, books the requested items, and — unless auto_reserve is set to false — immediately reserves it. Only call this after confirming the products, dates, and price with the caller. Before calling: you must have collected customer_name plus at least one of customer_email or customer_phone — ask the caller for whichever they haven't given you yet. If the response shows reserved=false with a reserve_error (e.g. items became unavailable), tell the caller and offer alternatives rather than retrying blindly.",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["customer", "starts_at", "stops_at", "items"],
+                "required": ["customer_name", "starts_at", "stops_at", "items"],
                 "properties": {
-                  "customer": {
-                    "type": "object",
-                    "required": ["name"],
-                    "description": "At least one of email or phone is required in addition to name.",
-                    "properties": {
-                      "name": { "type": "string" },
-                      "email": { "type": "string" },
-                      "phone": { "type": "string" }
-                    },
-                    "anyOf": [
-                      { "required": ["email"] },
-                      { "required": ["phone"] }
-                    ]
-                  },
+                  "customer_name": { "type": "string", "description": "The caller's full name" },
+                  "customer_email": { "type": "string", "description": "The caller's email. Optional only if customer_phone is provided instead." },
+                  "customer_phone": { "type": "string", "description": "The caller's phone number. Optional only if customer_email is provided instead." },
                   "starts_at": { "type": "string", "description": "ISO 8601 date/time" },
                   "stops_at": { "type": "string", "description": "ISO 8601 date/time" },
                   "items": {
