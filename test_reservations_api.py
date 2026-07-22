@@ -83,7 +83,8 @@ def test_create_reservation_happy_path(monkeypatch):
         "/api/reservations",
         headers={"X-Api-Key": "secret"},
         json={
-            "customer": {"name": "Jane Doe", "phone": "+15551234567"},
+            "customer_name": "Jane Doe",
+            "customer_phone": "+15551234567",
             "starts_at": "2026-08-01T09:00:00",
             "stops_at": "2026-08-02T17:00:00",
             "items": [{"product_id": "prod_1", "quantity": 1}],
@@ -107,7 +108,7 @@ def test_create_reservation_rejects_customer_without_email_or_phone(monkeypatch)
         "/api/reservations",
         headers={"X-Api-Key": "secret"},
         json={
-            "customer": {"name": "Jane Doe"},
+            "customer_name": "Jane Doe",
             "starts_at": "2026-08-01T09:00:00",
             "stops_at": "2026-08-02T17:00:00",
             "items": [{"product_id": "prod_1", "quantity": 1}],
