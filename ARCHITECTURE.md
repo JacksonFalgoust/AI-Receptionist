@@ -359,6 +359,65 @@ GuideAnts (tool call) ⇄ this app (/api/reservations/*) ⇄ Booqable JSON:API v
   `config.BOOQABLE_API_KEY`, plus `resource()`/`attrs()` helpers for building
   and reading JSON:API envelopes.
 
+### `POST /api/reservations` request shape
+
+The body takes flat `customer_name` (required), `customer_email`, and
+`customer_phone` fields (`ReservationRequest` in `reservations_api.py`) —
+**not** a nested `customer: {name, email, phone}` object, even though that
+would be the more natural shape. This is a deliberate workaround, not a
+style choice: GuideAnts' OpenAPI-to-tool-schema converter
+(`OpenApiHelper.cs`, `GetToolDefinitionsFromSchema`, in the GuideAnts repo)
+only reads top-level `requestBody` `properties`/`required` — it has no
+handling for a nested object property's own `properties`/`required`
+(unlike array items, which it does flatten), and no handling for `anyOf`
+at any level. A nested `customer` object is therefore invisible to the
+LLM's tool definition beyond its bare `description` string; the model has
+no structural way to know `name`/`email`/`phone` exist as sub-fields. Flat
+top-level fields are fully supported by the converter (confirmed via its
+own test suite) and are what the guide can actually see and fill in.
+
+A `model_validator` on `ReservationRequest` requires at least one of
+`customer_email`/`customer_phone` (422 if neither is given) — this is the
+real enforcement; the OpenAPI schema's property descriptions are only a
+hint to the model, not something GuideAnts validates before calling the
+tool.
+
+### Booqable v4 customer quirks (not documented anywhere obvious)
+
+Discovered by trial against a live account, not from Booqable's docs, which
+don't spell this out clearly for v4:
+
+- **There is no top-level `phone` attribute on the `customers` resource.**
+  `POST /customers` with `attributes.phone` fails with `400
+  unknown_attribute`. `attributes.properties` is also read-only —
+  `attributes.properties` fails with `400 unwritable_attribute`.
+- **The correct way to set a phone number** is Rails-style nested
+  attributes, side-posted on create/update:
+  ```json
+  {"data": {"type": "customers", "attributes": {
+    "name": "...",
+    "properties_attributes": [{"type": "Property::Phone", "name": "Phone", "value": "+1..."}]
+  }}}
+  ```
+  This mirrors Booqable's older v1 REST API, which used the same
+  `properties_attributes` pattern explicitly.
+- **It reads back under a lowercased key**, regardless of the `name` casing
+  used to write it: `attributes.properties` comes back as `{"phone":
+  "+1..."}`, not `{"Phone": "+1..."}`. `find_or_create_customer`'s
+  `_customer_phone()` helper and its own write path both account for this
+  asymmetry.
+- Booqable itself only requires `name` when creating a customer — `email`
+  and `phone` are both fully optional on Booqable's side. The "must have
+  email or phone" rule is this app's own business rule (see above), not a
+  Booqable requirement.
+
+`find_or_create_customer` dedupes by email (case-insensitive exact match)
+or phone (digits-only comparison with a leading US country code stripped,
+so `"+1 (555) 123-4567"` and `"555-123-4567"` match) against the full list
+of non-archived customers — there's no server-side filter for either, so
+this re-fetches and scans the whole customer list on every reservation.
+Fine at small scale, worth revisiting if the customer base grows.
+
 **Auth**: the four `/api/reservations/*` routes require an `X-Api-Key` header
 matching `config.RECEPTIONIST_API_KEY` — deliberately a *different* secret
 from `BOOQABLE_API_KEY`, so the LLM calling this API can never obtain the
