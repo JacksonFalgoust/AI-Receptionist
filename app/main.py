@@ -338,6 +338,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
             msg_type = msg.get("type")
 
             if msg_type == "setup":
+                st.guide.caller_phone = msg.get("from")
                 logger.info(
                     "Call setup: callSid=%s from=%s to=%s",
                     msg.get("callSid"),

@@ -52,6 +52,41 @@
         }
       }
     },
+    "/customers": {
+      "get": {
+        "operationId": "listCustomers",
+        "summary": "List existing customers",
+        "description": "Use this to look someone up by name, phone, or email. Never read the full list back to a caller -- only use it to find a specific match.",
+        "responses": {
+          "200": { "description": "Live customer list", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      },
+      "post": {
+        "operationId": "createCustomer",
+        "summary": "Register a caller as a customer, without booking a reservation",
+        "description": "Finds an existing customer by email or phone rather than creating a duplicate -- always safe to call even if the caller might already exist. Use this for a caller who wants a callback (e.g. to buy a product, get a service, or speak to a person) rather than a reservation. Set note to a short reason for the callback, e.g. 'wants to buy an e-bike' or 'asked to speak to a person', so staff know why when they call back.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["customer_name"],
+                "properties": {
+                  "customer_name": { "type": "string", "description": "The caller's full name" },
+                  "customer_email": { "type": "string", "description": "The caller's email, if given" },
+                  "customer_phone": { "type": "string", "description": "The caller's phone number, if given" },
+                  "note": { "type": "string", "description": "Why the caller wants follow-up, e.g. 'wants to buy an e-bike' or 'asked to speak to a person'" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "The registered customer, including customer_id and whether the note was recorded", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
     "/": {
       "post": {
         "operationId": "createReservation",

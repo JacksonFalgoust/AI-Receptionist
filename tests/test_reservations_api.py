@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app import config
 from app import reservations_api
+from app.booqable_client import BooqableError
 from app.main import app
 
 client = TestClient(app)
@@ -118,6 +119,58 @@ def test_create_reservation_rejects_customer_without_email_or_phone(monkeypatch)
     assert response.status_code == 422
 
 
+def test_list_customers_happy_path(monkeypatch):
+    monkeypatch.setattr(config, "RECEPTIONIST_API_KEY", "secret")
+    monkeypatch.setattr(reservations_api, "BooqableClient", lambda: object())
+    fake_customers = [{"customer_id": "cust_1", "name": "Jane Doe", "email": None, "phone": "+15551234567"}]
+    monkeypatch.setattr(reservations_api.reservations, "list_customers", AsyncMock(return_value=fake_customers))
+
+    response = client.get("/api/reservations/customers", headers={"X-Api-Key": "secret"})
+
+    assert response.status_code == 200
+    assert response.json() == {"customers": fake_customers}
+
+
+def test_list_customers_rejects_missing_api_key(monkeypatch):
+    monkeypatch.setattr(config, "RECEPTIONIST_API_KEY", "secret")
+    response = client.get("/api/reservations/customers")
+    assert response.status_code == 401
+
+
+def test_create_customer_happy_path(monkeypatch):
+    monkeypatch.setattr(config, "RECEPTIONIST_API_KEY", "secret")
+    monkeypatch.setattr(reservations_api, "BooqableClient", lambda: object())
+    fake_result = {
+        "customer_id": "cust_1",
+        "name": "Jane Doe",
+        "email": None,
+        "phone": "+15551234567",
+        "note_recorded": True,
+    }
+    register_mock = AsyncMock(return_value=fake_result)
+    monkeypatch.setattr(reservations_api.reservations, "register_customer", register_mock)
+
+    response = client.post(
+        "/api/reservations/customers",
+        headers={"X-Api-Key": "secret"},
+        json={
+            "customer_name": "Jane Doe",
+            "customer_phone": "+15551234567",
+            "note": "wants to buy an e-bike",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == fake_result
+    assert register_mock.call_args.kwargs["note"] == "wants to buy an e-bike"
+
+
+def test_create_customer_rejects_missing_api_key(monkeypatch):
+    monkeypatch.setattr(config, "RECEPTIONIST_API_KEY", "secret")
+    response = client.post("/api/reservations/customers", json={"customer_name": "Jane Doe"})
+    assert response.status_code == 401
+
+
 def test_cancel_reservation_happy_path(monkeypatch):
     monkeypatch.setattr(config, "RECEPTIONIST_API_KEY", "secret")
     monkeypatch.setattr(reservations_api, "BooqableClient", lambda: object())
@@ -135,8 +188,6 @@ def test_cancel_reservation_happy_path(monkeypatch):
 
 
 def test_booqable_ping_is_not_gated_by_receptionist_key(monkeypatch):
-    from app.booqable_client import BooqableError
-
     class FailingClient:
         def __init__(self):
             raise BooqableError("BOOQABLE_API_KEY is not configured")
