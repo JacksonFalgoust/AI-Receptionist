@@ -360,3 +360,23 @@ async def cancel_reservation(client: BooqableClient, order_id: str) -> dict[str,
         ),
     )
     return {"order_id": order_id, "previous_status": status, "status": "canceled"}
+
+
+async def get_order_contact(client: BooqableClient, order_id: str) -> dict[str, Any]:
+    """Look up the customer contact info attached to a reservation, for
+    sending them a follow-up (e.g. a payment link)."""
+    order = (await client.get(f"orders/{order_id}"))["data"]
+    order_attrs = client.attrs(order)
+    customer_id = order_attrs.get("customer_id")
+    if not customer_id:
+        raise BooqableError(f"Order {order_id} has no linked customer")
+    customer = (await client.get(f"customers/{customer_id}"))["data"]
+    customer_attrs = client.attrs(customer)
+    return {
+        "order_id": order_id,
+        "customer_id": customer_id,
+        "name": customer_attrs.get("name"),
+        "phone": _customer_phone(customer_attrs),
+        "email": customer_attrs.get("email"),
+        "grand_total_usd": (order_attrs.get("grand_total_in_cents") or 0) / 100,
+    }

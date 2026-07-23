@@ -1,10 +1,13 @@
 import asyncio
 from unittest.mock import AsyncMock
 
+import pytest
+
 from app.booqable_client import BooqableClient, BooqableError
 from app.reservations import (
     add_customer_note,
     find_or_create_customer,
+    get_order_contact,
     list_customers,
     register_customer,
 )
@@ -175,3 +178,36 @@ def test_register_customer_note_failure_is_non_fatal():
     assert result["customer_id"] == "cust_3"
     assert result["note_recorded"] is False
     assert "note_error" in result
+
+
+def test_get_order_contact_returns_phone_and_total():
+    client = object.__new__(BooqableClient)
+    order = {
+        "type": "orders",
+        "id": "order_1",
+        "attributes": {"customer_id": "cust_1", "grand_total_in_cents": 12345},
+    }
+    customer = _customer("cust_1", name="Jane Doe", email="jane@example.com", phone="+15551234567")
+    client.get = AsyncMock(side_effect=[{"data": order}, {"data": customer}])
+
+    result = asyncio.run(get_order_contact(client, "order_1"))
+
+    assert result == {
+        "order_id": "order_1",
+        "customer_id": "cust_1",
+        "name": "Jane Doe",
+        "phone": "+15551234567",
+        "email": "jane@example.com",
+        "grand_total_usd": 123.45,
+    }
+    client.get.assert_any_call("orders/order_1")
+    client.get.assert_any_call("customers/cust_1")
+
+
+def test_get_order_contact_raises_when_no_linked_customer():
+    client = object.__new__(BooqableClient)
+    order = {"type": "orders", "id": "order_2", "attributes": {"grand_total_in_cents": 0}}
+    client.get = AsyncMock(return_value={"data": order})
+
+    with pytest.raises(BooqableError):
+        asyncio.run(get_order_contact(client, "order_2"))

@@ -13,8 +13,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
-from . import config, reservations
+from . import config, payments, reservations
 from .booqable_client import BooqableClient, BooqableError
+from .twilio_client import TwilioSmsClient, TwilioSmsError
 
 router = APIRouter()
 
@@ -46,6 +47,13 @@ class ReservationRequest(BaseModel):
         if not self.customer_email and not self.customer_phone:
             raise ValueError("customer_email or customer_phone is required")
         return self
+
+
+class SendPaymentLinkRequest(BaseModel):
+    phone: str | None = Field(
+        default=None,
+        description="Override phone number to text. Defaults to the phone number on file for the reservation.",
+    )
 
 
 class CustomerRequest(BaseModel):
@@ -176,4 +184,21 @@ async def cancel_reservation_endpoint(order_id: str) -> dict[str, Any]:
     try:
         return await reservations.cancel_reservation(client, order_id)
     except BooqableError as exc:
+        raise HTTPException(status_code=exc.status_code or 502, detail=str(exc)) from exc
+
+
+@router.post("/api/reservations/{order_id}/send-payment-link", dependencies=[Depends(require_receptionist_key)])
+async def send_payment_link_endpoint(order_id: str, body: SendPaymentLinkRequest) -> dict[str, Any]:
+    """Text the caller a payment link for their reservation so they can pay before
+    arrival. Currently a placeholder/test link -- no real charge is processed yet
+    (see docs/PAYMENT_LINK_OPTIONS.md)."""
+    booqable_client = BooqableClient()
+    try:
+        twilio_client = TwilioSmsClient()
+        return await payments.send_payment_link(
+            booqable_client, twilio_client, order_id=order_id, phone=body.phone
+        )
+    except BooqableError as exc:
+        raise HTTPException(status_code=exc.status_code or 502, detail=str(exc)) from exc
+    except TwilioSmsError as exc:
         raise HTTPException(status_code=exc.status_code or 502, detail=str(exc)) from exc

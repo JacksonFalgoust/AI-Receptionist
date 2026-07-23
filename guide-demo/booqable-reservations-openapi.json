@@ -139,6 +139,32 @@
           "200": { "description": "Cancellation result", "content": { "application/json": { "schema": { "type": "object" } } } }
         }
       }
+    },
+    "/{order_id}/send-payment-link": {
+      "post": {
+        "operationId": "sendPaymentLink",
+        "summary": "Text the caller a payment link for their reservation",
+        "description": "Sends an SMS with a link so the caller can pay before arrival. This is currently a placeholder/test link -- no real charge is processed yet. Defaults to texting the phone number already on file for the reservation; only pass phone to override it.",
+        "parameters": [
+          { "name": "order_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "phone": { "type": "string", "description": "Override phone number to text, if different from the one on file" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "order_id, the phone number texted, and the payment link sent", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
     }
   }
 }
