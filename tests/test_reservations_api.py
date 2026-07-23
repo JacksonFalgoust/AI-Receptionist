@@ -171,6 +171,37 @@ def test_create_customer_rejects_missing_api_key(monkeypatch):
     assert response.status_code == 401
 
 
+def test_find_reservations_happy_path(monkeypatch):
+    monkeypatch.setattr(config, "RECEPTIONIST_API_KEY", "secret")
+    monkeypatch.setattr(reservations_api, "BooqableClient", lambda: object())
+    fake_result = {
+        "customer_found": True,
+        "customer_name": "Jane Doe",
+        "reservations": [{"order_id": "order_1", "status": "reserved", "items": [{"name": "Cruiser", "quantity": 1}]}],
+    }
+    find_mock = AsyncMock(return_value=fake_result)
+    monkeypatch.setattr(reservations_api.reservations, "find_reservations", find_mock)
+
+    response = client.get(
+        "/api/reservations/lookup",
+        headers={"X-Api-Key": "secret"},
+        params={"customer_phone": "+15551234567"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == fake_result
+    assert find_mock.call_args.kwargs["phone"] == "+15551234567"
+
+
+def test_find_reservations_rejects_missing_contact_info(monkeypatch):
+    monkeypatch.setattr(config, "RECEPTIONIST_API_KEY", "secret")
+    monkeypatch.setattr(reservations_api, "BooqableClient", lambda: object())
+
+    response = client.get("/api/reservations/lookup", headers={"X-Api-Key": "secret"})
+
+    assert response.status_code == 422
+
+
 def test_cancel_reservation_happy_path(monkeypatch):
     monkeypatch.setattr(config, "RECEPTIONIST_API_KEY", "secret")
     monkeypatch.setattr(reservations_api, "BooqableClient", lambda: object())

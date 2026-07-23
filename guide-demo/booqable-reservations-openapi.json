@@ -52,6 +52,20 @@
         }
       }
     },
+    "/lookup": {
+      "get": {
+        "operationId": "findReservations",
+        "summary": "Find a caller's active reservations by the email or phone they booked with",
+        "description": "Use this to cancel a rental without asking the caller for a confirmation number -- pass the phone number or email they booked with (get_caller_phone_number for their own number). Returns customer_found=false and no reservations if nothing matches. Each reservation includes the order_id needed for cancelReservation, plus the items, dates, and price to read back and confirm with the caller before canceling.",
+        "parameters": [
+          { "name": "customer_email", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "customer_phone", "in": "query", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Matching customer and their active reservations", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
     "/customers": {
       "get": {
         "operationId": "listCustomers",
