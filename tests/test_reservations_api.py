@@ -187,6 +187,84 @@ def test_cancel_reservation_happy_path(monkeypatch):
     assert response.json() == fake_result
 
 
+def test_send_payment_link_happy_path(monkeypatch):
+    monkeypatch.setattr(config, "RECEPTIONIST_API_KEY", "secret")
+    monkeypatch.setattr(reservations_api, "BooqableClient", lambda: object())
+    monkeypatch.setattr(reservations_api, "TwilioSmsClient", lambda: object())
+    fake_result = {
+        "order_id": "order_1",
+        "sent_to": "+15551234567",
+        "payment_link": "https://example.com/pay/order_1",
+    }
+    monkeypatch.setattr(reservations_api.payments, "send_payment_link", AsyncMock(return_value=fake_result))
+
+    response = client.post(
+        "/api/reservations/order_1/send-payment-link", headers={"X-Api-Key": "secret"}, json={}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == fake_result
+
+
+def test_send_payment_link_passes_phone_override(monkeypatch):
+    monkeypatch.setattr(config, "RECEPTIONIST_API_KEY", "secret")
+    monkeypatch.setattr(reservations_api, "BooqableClient", lambda: object())
+    monkeypatch.setattr(reservations_api, "TwilioSmsClient", lambda: object())
+    send_mock = AsyncMock(return_value={"order_id": "order_1", "sent_to": "+15559998888", "payment_link": "x"})
+    monkeypatch.setattr(reservations_api.payments, "send_payment_link", send_mock)
+
+    response = client.post(
+        "/api/reservations/order_1/send-payment-link",
+        headers={"X-Api-Key": "secret"},
+        json={"phone": "+15559998888"},
+    )
+
+    assert response.status_code == 200
+    assert send_mock.call_args.kwargs["phone"] == "+15559998888"
+
+
+def test_send_payment_link_rejects_missing_api_key(monkeypatch):
+    monkeypatch.setattr(config, "RECEPTIONIST_API_KEY", "secret")
+    response = client.post("/api/reservations/order_1/send-payment-link", json={})
+    assert response.status_code == 401
+
+
+def test_send_payment_link_reports_booqable_failure(monkeypatch):
+    monkeypatch.setattr(config, "RECEPTIONIST_API_KEY", "secret")
+    monkeypatch.setattr(reservations_api, "BooqableClient", lambda: object())
+    monkeypatch.setattr(reservations_api, "TwilioSmsClient", lambda: object())
+    monkeypatch.setattr(
+        reservations_api.payments,
+        "send_payment_link",
+        AsyncMock(side_effect=BooqableError("No phone number on file for order order_1")),
+    )
+
+    response = client.post(
+        "/api/reservations/order_1/send-payment-link", headers={"X-Api-Key": "secret"}, json={}
+    )
+
+    assert response.status_code == 502
+
+
+def test_send_payment_link_reports_twilio_failure(monkeypatch):
+    from app.twilio_client import TwilioSmsError
+
+    monkeypatch.setattr(config, "RECEPTIONIST_API_KEY", "secret")
+    monkeypatch.setattr(reservations_api, "BooqableClient", lambda: object())
+    monkeypatch.setattr(reservations_api, "TwilioSmsClient", lambda: object())
+    monkeypatch.setattr(
+        reservations_api.payments,
+        "send_payment_link",
+        AsyncMock(side_effect=TwilioSmsError("Invalid 'To' Phone Number", status_code=400)),
+    )
+
+    response = client.post(
+        "/api/reservations/order_1/send-payment-link", headers={"X-Api-Key": "secret"}, json={}
+    )
+
+    assert response.status_code == 400
+
+
 def test_booqable_ping_is_not_gated_by_receptionist_key(monkeypatch):
     class FailingClient:
         def __init__(self):

@@ -120,3 +120,13 @@ RECEPTIONIST_API_KEY = os.environ.get("RECEPTIONIST_API_KEY", "")
 # Timezone naive starts_at/stops_at values from the caller/guide are
 # interpreted in, before being converted to UTC for Booqable.
 BOOQABLE_TIMEZONE = os.environ.get("BOOQABLE_TIMEZONE", "America/New_York")
+
+# Outbound SMS (/api/reservations/{order_id}/send-payment-link) -- lets the
+# receptionist text a payment link after booking. TWILIO_AUTH_TOKEN (above)
+# doubles as the REST API auth token here.
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
+TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER", "")
+
+# Placeholder until real Stripe/Booqable payment-link generation exists (see
+# docs/PAYMENT_LINK_OPTIONS.md) -- not a real checkout URL yet.
+PAYMENT_LINK_BASE_URL = os.environ.get("PAYMENT_LINK_BASE_URL", "https://example.com/pay").rstrip("/")
