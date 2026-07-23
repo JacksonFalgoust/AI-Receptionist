@@ -169,6 +169,22 @@ async def create_reservation_endpoint(body: ReservationRequest) -> dict[str, Any
         raise HTTPException(status_code=exc.status_code or 502, detail=str(exc)) from exc
 
 
+@router.get("/api/reservations/lookup", dependencies=[Depends(require_receptionist_key)])
+async def find_reservations_endpoint(
+    customer_email: str | None = None,
+    customer_phone: str | None = None,
+) -> dict[str, Any]:
+    """Find a caller's active reservations by the email or phone they booked with --
+    lets the receptionist cancel a rental without asking for an order id."""
+    if not customer_email and not customer_phone:
+        raise HTTPException(status_code=422, detail="customer_email or customer_phone is required")
+    client = BooqableClient()
+    try:
+        return await reservations.find_reservations(client, email=customer_email, phone=customer_phone)
+    except BooqableError as exc:
+        raise HTTPException(status_code=exc.status_code or 502, detail=str(exc)) from exc
+
+
 @router.post("/api/reservations/{order_id}/cancel", dependencies=[Depends(require_receptionist_key)])
 async def cancel_reservation_endpoint(order_id: str) -> dict[str, Any]:
     """Cancel a reservation made through this API."""

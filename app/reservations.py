@@ -147,19 +147,30 @@ def _customer_phone(attrs: dict[str, Any]) -> str | None:
     return (attrs.get("properties") or {}).get("phone")
 
 
+async def find_customer(
+    client: BooqableClient, *, email: str | None = None, phone: str | None = None
+) -> dict[str, Any] | None:
+    """Look up an existing customer by email or phone, without creating one."""
+    normalized_phone = _normalize_phone(phone) if phone else None
+    if not email and not normalized_phone:
+        return None
+    existing = await client.list_all("customers", params={"filter[archived][eq]": "false"})
+    for candidate in existing:
+        attrs = client.attrs(candidate)
+        if email and (attrs.get("email") or "").lower() == email.lower():
+            return candidate
+        candidate_phone = _customer_phone(attrs)
+        if normalized_phone and candidate_phone and _normalize_phone(candidate_phone) == normalized_phone:
+            return candidate
+    return None
+
+
 async def find_or_create_customer(
     client: BooqableClient, *, name: str, email: str | None = None, phone: str | None = None
 ) -> dict[str, Any]:
-    normalized_phone = _normalize_phone(phone) if phone else None
-    if email or normalized_phone:
-        existing = await client.list_all("customers", params={"filter[archived][eq]": "false"})
-        for candidate in existing:
-            attrs = client.attrs(candidate)
-            if email and (attrs.get("email") or "").lower() == email.lower():
-                return candidate
-            candidate_phone = _customer_phone(attrs)
-            if normalized_phone and candidate_phone and _normalize_phone(candidate_phone) == normalized_phone:
-                return candidate
+    existing = await find_customer(client, email=email, phone=phone)
+    if existing:
+        return existing
 
     attributes: dict[str, Any] = {"name": name, "legal_type": "person", "tag_list": [RECEPTIONIST_TAG]}
     if email:
@@ -360,3 +371,51 @@ async def cancel_reservation(client: BooqableClient, order_id: str) -> dict[str,
         ),
     )
     return {"order_id": order_id, "previous_status": status, "status": "canceled"}
+
+
+def _order_line_items(client: BooqableClient, included: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Booked-product lines for an order (line_type=charge with an item_id) --
+    excludes deposit/section/custom-charge lines, which have no item_id."""
+    items = []
+    for line in included:
+        if line.get("type") != "lines":
+            continue
+        attrs = client.attrs(line)
+        if attrs.get("line_type") == "charge" and attrs.get("item_id"):
+            items.append({"name": attrs.get("title"), "quantity": attrs.get("quantity")})
+    return items
+
+
+async def find_reservations(
+    client: BooqableClient, *, email: str | None = None, phone: str | None = None
+) -> dict[str, Any]:
+    """Find a caller's active reservations by the email or phone they booked with,
+    so they can be canceled without needing an order id / confirmation number."""
+    customer = await find_customer(client, email=email, phone=phone)
+    if not customer:
+        return {"customer_found": False, "reservations": []}
+
+    orders = await client.list_all("orders", params={"filter[customer_id][eq]": customer["id"]})
+    active_orders = [order for order in orders if client.attrs(order).get("status") in CANCELABLE_STATUSES]
+
+    found: list[dict[str, Any]] = []
+    for order in active_orders:
+        detail = await client.get(f"orders/{order['id']}", params={"include": "lines"})
+        attrs = client.attrs(detail["data"])
+        found.append(
+            {
+                "order_id": order["id"],
+                "status": attrs.get("status"),
+                "starts_at": attrs.get("starts_at"),
+                "stops_at": attrs.get("stops_at"),
+                "items": _order_line_items(client, detail.get("included") or []),
+                "price_usd": (attrs.get("grand_total_in_cents") or 0) / 100,
+            }
+        )
+    found.sort(key=lambda r: r["starts_at"] or "")
+
+    return {
+        "customer_found": True,
+        "customer_name": client.attrs(customer).get("name"),
+        "reservations": found,
+    }
