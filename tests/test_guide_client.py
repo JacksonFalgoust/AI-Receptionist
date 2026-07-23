@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -245,6 +246,187 @@ def test_missing_conversation_falls_back_to_non_streaming_next_turn(monkeypatch)
     assert second_kwargs.get("stream") is not True
     assert "conversation" not in second_kwargs
     assert "conversation" not in create.call_args_list[1].kwargs
+
+
+def _function_call_item(call_id: str, name: str = "get_caller_phone_number", arguments: str = "{}"):
+    return SimpleNamespace(type="function_call", call_id=call_id, name=name, arguments=arguments)
+
+
+def test_execute_tool_returns_caller_phone():
+    session = GuideSession(caller_phone="+15551234567")
+    result = guide_client._execute_tool("get_caller_phone_number", "{}", session)
+    assert json.loads(result) == {"phone_number": "+15551234567"}
+
+
+def test_execute_tool_returns_null_when_caller_phone_unknown():
+    session = GuideSession(caller_phone=None)
+    result = guide_client._execute_tool("get_caller_phone_number", "{}", session)
+    assert json.loads(result) == {"phone_number": None}
+
+
+def test_execute_tool_unknown_tool_returns_error():
+    result = guide_client._execute_tool("mystery_tool", "{}", GuideSession())
+    assert "error" in json.loads(result)
+
+
+def test_streamed_tool_call_round_trip_yields_only_text(monkeypatch):
+    tool_call_events = [
+        SimpleNamespace(type="response.created", response=SimpleNamespace(conversation="conv_abc")),
+        SimpleNamespace(type="response.output_item.done", item=_function_call_item("call_1")),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(conversation="conv_abc", id="resp_1", output=[]),
+        ),
+    ]
+    text_events = [
+        SimpleNamespace(type="response.output_text.delta", delta="Your number is "),
+        SimpleNamespace(type="response.output_text.delta", delta="555-1234."),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(conversation="conv_abc", id="resp_2", output=[]),
+        ),
+    ]
+    tool_call_stream = FakeStream(tool_call_events)
+    text_stream = FakeStream(text_events)
+    create = AsyncMock(side_effect=[tool_call_stream, text_stream])
+    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+
+    session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
+    deltas = asyncio.run(_collect(guide_client.stream_reply("what's my number?", session)))
+
+    assert deltas == ["Your number is ", "555-1234."]
+    assert create.call_count == 2
+    first_kwargs = create.call_args_list[0].kwargs
+    second_kwargs = create.call_args_list[1].kwargs
+    assert first_kwargs["input"] == "what's my number?"
+    # The tool is declared on the guide in GuideAnts (a Client Actions tool
+    # source), not attached by this app -- no `tools` kwarg is sent.
+    assert "tools" not in first_kwargs
+    assert "tools" not in second_kwargs
+    assert second_kwargs["conversation"] == "conv_abc"
+    assert second_kwargs["input"] == [
+        {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": json.dumps({"phone_number": "+15551234567"}),
+        }
+    ]
+    assert tool_call_stream.closed
+    assert text_stream.closed
+
+
+def test_function_call_backstop_from_completed_output(monkeypatch):
+    # No response.output_item.done event at all -- only response.completed's
+    # embedded response.output carries the function_call. Covers a GuideAnts
+    # build that doesn't stream discrete tool-call output_item events.
+    tool_call_events = [
+        SimpleNamespace(type="response.created", response=SimpleNamespace(conversation="conv_abc")),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(conversation="conv_abc", id="resp_1", output=[_function_call_item("call_9")]),
+        ),
+    ]
+    text_events = [
+        SimpleNamespace(type="response.output_text.delta", delta="Sure."),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(conversation="conv_abc", id="resp_2", output=[]),
+        ),
+    ]
+    create = AsyncMock(side_effect=[FakeStream(tool_call_events), FakeStream(text_events)])
+    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+
+    session = GuideSession(conversation_id="conv_abc", caller_phone="555")
+    deltas = asyncio.run(_collect(guide_client.stream_reply("ok", session)))
+
+    assert deltas == ["Sure."]
+    assert create.call_count == 2
+    second_input = create.call_args_list[1].kwargs["input"]
+    assert second_input[0]["call_id"] == "call_9"
+
+
+def test_tool_loop_stops_at_iteration_bound(monkeypatch):
+    def tool_call_stream(call_id: str) -> FakeStream:
+        return FakeStream(
+            [
+                SimpleNamespace(type="response.output_item.done", item=_function_call_item(call_id)),
+                SimpleNamespace(
+                    type="response.completed",
+                    response=SimpleNamespace(conversation="conv_abc", id=f"resp_{call_id}", output=[]),
+                ),
+            ]
+        )
+
+    create = AsyncMock(side_effect=[tool_call_stream(f"call_{i}") for i in range(10)])
+    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+
+    session = GuideSession(conversation_id="conv_abc")
+    deltas = asyncio.run(_collect(guide_client.stream_reply("hi", session)))
+
+    assert deltas == []
+    assert create.call_count == guide_client._MAX_TOOL_ITERATIONS
+
+
+def test_no_tools_kwarg_sent_on_any_turn(monkeypatch):
+    # The tool is declared on the guide in GuideAnts (a Client Actions tool
+    # source, see guide-demo/caller-phone-client-tool.json) -- this app never
+    # attaches a `tools` kwarg itself, on any of the three request shapes it
+    # can send (first turn, continuation, or the non-streaming fallback).
+    events = [
+        SimpleNamespace(type="response.created", response=SimpleNamespace(conversation="conv_abc")),
+        SimpleNamespace(type="response.completed", response=SimpleNamespace(conversation="conv_abc", output=[])),
+    ]
+    create = AsyncMock(return_value=FakeStream(events))
+    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+
+    session = GuideSession()
+    asyncio.run(_collect(guide_client.stream_reply("hi", session)))
+    assert "tools" not in create.call_args.kwargs
+
+    session2 = GuideSession(conversation_id="conv_abc")
+    asyncio.run(_collect(guide_client.stream_reply("hi", session2)))
+    assert "tools" not in create.call_args.kwargs
+
+    non_streaming_response = SimpleNamespace(id="resp_x", conversation="conv_new", output_text="ok", output=[])
+    create.side_effect = [non_streaming_response]
+    session3 = GuideSession(stream_missing_conversation=True)
+    deltas = asyncio.run(_collect(guide_client.stream_reply("hi", session3)))
+    assert deltas == ["ok"]
+    assert "tools" not in create.call_args.kwargs
+
+
+def test_aclose_during_tool_round_trip_closes_active_stream(monkeypatch):
+    # Mirrors test_cancellation_closes_stream, but the cancellation lands
+    # while the *second* request (the tool-output follow-up) is in flight --
+    # both nested aclosing layers must still close whichever stream is live.
+    gate = asyncio.Event()
+    tool_call_events = [
+        SimpleNamespace(type="response.output_item.done", item=_function_call_item("call_1")),
+        SimpleNamespace(type="response.completed", response=SimpleNamespace(conversation="conv_abc", output=[])),
+    ]
+    tool_call_stream = FakeStream(tool_call_events)
+    text_stream = FakeStream([SimpleNamespace(type="response.output_text.delta", delta="Sure")], gate=gate)
+    create = AsyncMock(side_effect=[tool_call_stream, text_stream])
+    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+
+    async def scenario():
+        session = GuideSession(conversation_id="conv_abc")
+        gen = guide_client.stream_reply("what's my number", session)
+        task = asyncio.ensure_future(gen.__anext__())
+        await asyncio.sleep(0)  # let the task run the tool round-trip up to the gated second stream
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await gen.aclose()
+
+    asyncio.run(scenario())
+    assert tool_call_stream.closed
+    assert text_stream.closed
 
 
 def test_build_input_no_note_when_no_interruption():

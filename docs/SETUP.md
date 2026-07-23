@@ -64,9 +64,9 @@ from creating the GuideAnts guide through placing a real phone call.
       - **Secret Value**: the same string you're using for
         `RECEPTIONIST_API_KEY`. This field is write-only — you won't be able
         to view it again after saving, only overwrite it.
-   5. Save. The four operations (`listCatalog`, `checkAvailability`,
-      `createReservation`, `cancelReservation`) should appear as tools the
-      guide can call.
+   5. Save. The six operations (`listCatalog`, `checkAvailability`,
+      `createReservation`, `cancelReservation`, `listCustomers`,
+      `createCustomer`) should appear as tools the guide can call.
    6. **If you edit `booqable-reservations-openapi.json` later**, re-paste it
       into the same Schema tab and save — the file on disk isn't read live,
       and there's no auto-sync. A stale copy is a common source of confusing
@@ -76,6 +76,35 @@ from creating the GuideAnts guide through placing a real phone call.
       a real example (and why this OpenAPI schema deliberately uses flat
       `customer_name`/`customer_email`/`customer_phone` fields instead of a
       nested `customer` object).
+
+8. **Wire up the caller's-phone-number tool** so the guide can get the
+   caller's own number without asking for it (optional, but the callback flow
+   and reservation phone step in the guide's instructions both reference it):
+   1. In the guide editor's **Tools** section, click **+ Add Tool Source**
+      again.
+   2. In the picker, choose **Client Actions** this time, not Web API — this
+      marks the tool as one the *connecting client* (this app) answers,
+      rather than one GuideAnts calls itself. See ARCHITECTURE.md's
+      "Client-side tool calls" section for why this specific tool needs that
+      distinction (in short: GuideAnts' own outgoing tool-call requests carry
+      no per-call identifier, so a normal Web API tool couldn't return the
+      right caller's number when multiple calls are active at once).
+   3. On the **Schema** tab, paste the full contents of
+      `guide-demo/caller-phone-client-tool.json` from this repo. Its
+      `servers[0].url` is `client://voice-receptionist` — leave this as-is;
+      unlike the Web API server URL, it's never actually dialed, it just
+      marks the source as client-handled.
+   4. No Authentication tab entry is needed — GuideAnts never sends a real
+      HTTP request for this tool.
+   5. Save. `get_caller_phone_number` should appear as a tool the guide can
+      call, alongside the Booqable operations.
+   6. **If you edit `caller-phone-client-tool.json` later**, re-paste it into
+      the same Schema tab and save, for the same reason as step 7.6 above.
+   7. This tool is only answered on a real call through this app — testing
+      the guide directly in GuideAnts' own chat UI won't resolve it, since
+      that path doesn't go through `app/guide_client.py`. The guide's
+      instructions already account for this (they fall back to just asking
+      the caller for a number).
 
 ## 2. Install this project's dependencies
 
@@ -212,6 +241,19 @@ Try these to see the filler-phrase and selective-barge-in behavior:
 - **Make a plain statement** (not phrased as a question or request) as a
   fresh prompt and notice no filler phrase plays — the reply just starts
   directly.
+
+If you wired up the reservation tool (step 1.7), try these too:
+
+- **Book a rental.** When the guide asks for your phone number, it should ask
+  whether to use the number you're calling from or a different one — not just
+  assume one. Answer either way and confirm it uses the right number in the
+  confirmation and in the resulting order in Booqable.
+- **Say "I'd like to buy a bike"** (or "can you service my bike?", or "can I
+  talk to a person?"). The guide should offer to have someone call you back,
+  ask for your name, then use your caller-ID number **without asking** — this
+  is the one place it should use the number automatically. Check Booqable
+  afterward: a customer should exist with a note describing the request (e.g.
+  "wants to buy an e-bike").
 
 ## Optional hardening (not implemented, not required for the demo)
 

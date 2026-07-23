@@ -48,6 +48,18 @@ class ReservationRequest(BaseModel):
         return self
 
 
+class CustomerRequest(BaseModel):
+    # Flat, not a nested "customer" object -- same GuideAnts OpenAPI-to-tool-schema
+    # converter limitation documented on ReservationRequest above.
+    customer_name: str
+    customer_email: str | None = None
+    customer_phone: str | None = None
+    note: str | None = Field(
+        default=None,
+        description="Why the caller wants follow-up, e.g. 'wants to buy an e-bike' or 'asked to speak to a person'.",
+    )
+
+
 async def require_receptionist_key(x_api_key: str | None = Header(default=None)) -> None:
     """Shared secret for the voice-receptionist agent -- distinct from BOOQABLE_API_KEY,
     which must never be exposed to the calling LLM."""
@@ -109,6 +121,34 @@ async def reservations_availability(
     except BooqableError as exc:
         raise HTTPException(status_code=exc.status_code or 502, detail=str(exc)) from exc
     return {**result, "location_id": location["id"]}
+
+
+@router.get("/api/reservations/customers", dependencies=[Depends(require_receptionist_key)])
+async def list_customers_endpoint() -> dict[str, Any]:
+    """List existing customers, for the receptionist to look someone up."""
+    client = BooqableClient()
+    try:
+        return {"customers": await reservations.list_customers(client)}
+    except BooqableError as exc:
+        raise HTTPException(status_code=exc.status_code or 502, detail=str(exc)) from exc
+
+
+@router.post("/api/reservations/customers", dependencies=[Depends(require_receptionist_key)])
+async def create_customer_endpoint(body: CustomerRequest) -> dict[str, Any]:
+    """Register a caller as a customer without booking a reservation. Finds an
+    existing match by email/phone rather than duplicating. Optionally records
+    an accompanying note (e.g. why they want a callback)."""
+    client = BooqableClient()
+    try:
+        return await reservations.register_customer(
+            client,
+            name=body.customer_name,
+            email=body.customer_email,
+            phone=body.customer_phone,
+            note=body.note,
+        )
+    except BooqableError as exc:
+        raise HTTPException(status_code=exc.status_code or 502, detail=str(exc)) from exc
 
 
 @router.post("/api/reservations", dependencies=[Depends(require_receptionist_key)])

@@ -170,6 +170,55 @@ async def find_or_create_customer(
     return response["data"]
 
 
+def _customer_summary(client: BooqableClient, customer: dict[str, Any]) -> dict[str, Any]:
+    attrs = client.attrs(customer)
+    return {
+        "customer_id": customer["id"],
+        "name": attrs.get("name"),
+        "email": attrs.get("email"),
+        "phone": _customer_phone(attrs),
+    }
+
+
+async def list_customers(client: BooqableClient) -> list[dict[str, Any]]:
+    """Live customer list, for the receptionist to look someone up by name/phone/email."""
+    customers = await client.list_all("customers", params={"filter[archived][eq]": "false"})
+    return [_customer_summary(client, customer) for customer in customers]
+
+
+async def add_customer_note(client: BooqableClient, customer_id: str, body: str) -> dict[str, Any]:
+    """Attach a free-text note to a customer (Booqable v4 Notes resource --
+    owner_id/owner_type, lowercase resource-name owner_type, not v1's
+    notable_id/notable_type)."""
+    response = await client.post(
+        "notes",
+        json=client.resource("notes", {"body": body, "owner_id": customer_id, "owner_type": "customers"}),
+    )
+    return response["data"]
+
+
+async def register_customer(
+    client: BooqableClient,
+    *,
+    name: str,
+    email: str | None = None,
+    phone: str | None = None,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """Find-or-create a customer without booking a reservation, optionally
+    recording why (e.g. a buy/service/callback request) as a note. Note
+    failures are non-fatal -- the customer is still registered."""
+    customer = await find_or_create_customer(client, name=name, email=email, phone=phone)
+    result = {**_customer_summary(client, customer), "note_recorded": False}
+    if note:
+        try:
+            await add_customer_note(client, customer["id"], note)
+            result["note_recorded"] = True
+        except BooqableError as exc:
+            result["note_error"] = str(exc)
+    return result
+
+
 async def check_product_availability(
     client: BooqableClient,
     *,

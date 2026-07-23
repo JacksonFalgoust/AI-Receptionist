@@ -1,0 +1,42 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Caller Phone Number (Client Action)",
+    "version": "1.0.0",
+    "description": "A client-side tool, not a real HTTP API -- GuideAnts never calls the server URL below. Paste this as a 'Client Actions' tool source (Add Tool Source > Client Actions) rather than 'Web API'. When the guide calls get_caller_phone_number, GuideAnts hands the call back unresolved to whichever client is on that conversation; the Twilio demo app (app/guide_client.py) answers it directly with the current call's caller ID, which only it knows. See docs/ARCHITECTURE.md's 'Client-side tool calls' section."
+  },
+  "servers": [
+    {
+      "url": "client://voice-receptionist",
+      "description": "The client:// scheme is what marks this as a Client Actions source in GuideAnts -- it is never actually dialed."
+    }
+  ],
+  "paths": {
+    "/get-caller-phone-number": {
+      "get": {
+        "operationId": "get_caller_phone_number",
+        "summary": "Get the phone number of the caller currently on this call",
+        "description": "Takes no arguments. Use this to get the caller's own phone number, e.g. to offer it as a reservation or callback number instead of asking for it. May return a null phone_number if it isn't available for this call.",
+        "responses": {
+          "200": {
+            "description": "The caller's phone number",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "phone_number": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "The caller's phone number as provided by Twilio caller ID, or null if unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
