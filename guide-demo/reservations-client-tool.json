@@ -1,29 +1,16 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "AI Receptionist Reservations",
+    "title": "AI Receptionist Reservations (Client Action)",
     "version": "1.0.0",
-    "description": "Reservation-facing API exposed by the Twilio demo app (app.py + reservations_api.py), alongside its Conversation Relay bridge. This wraps Booqable (JSON:API, v4) with business logic — the voice receptionist should call THIS API, never Booqable directly, so it never sees the real BOOQABLE_API_KEY."
+    "description": "Client-side reservation tools, not a real HTTP API -- GuideAnts never calls the server URL below. Paste this as a 'Client Actions' tool source (Add Tool Source > Client Actions) rather than 'Web API', the same way guide-demo/caller-phone-client-tool.json is set up. When the guide calls one of these operations, GuideAnts hands the call back unresolved to whichever client is on that conversation; the Twilio demo app (app/guide_client.py's _run_reservation_tool) executes it directly against Booqable (via app/reservations.py / app/payments.py) and returns the result -- there is no longer an HTTP endpoint (like the old /api/reservations/*) that anyone else could call these operations through. See docs/ARCHITECTURE.md's 'Client-side tool calls' section."
   },
   "servers": [
     {
-      "url": "http://host.docker.internal:8080/api/reservations",
-      "description": "GuideAnts runs as a Docker container; host.docker.internal is how a container reaches a port on the host machine. The app itself runs bare (no Docker) on port 8080 alongside the Twilio WS bridge. If GuideAnts ever runs outside Docker, change this to http://localhost:8080/api/reservations."
+      "url": "client://voice-receptionist",
+      "description": "The client:// scheme is what marks this as a Client Actions source in GuideAnts -- it is never actually dialed."
     }
   ],
-  "security": [
-    { "ApiKeyAuth": [] }
-  ],
-  "components": {
-    "securitySchemes": {
-      "ApiKeyAuth": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "X-Api-Key",
-        "description": "Shared secret set as RECEPTIONIST_API_KEY on the backend. This is a separate key from BOOQABLE_API_KEY — the LLM must only ever know this one."
-      }
-    }
-  },
   "paths": {
     "/catalog": {
       "get": {

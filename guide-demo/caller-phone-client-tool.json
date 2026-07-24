@@ -7,7 +7,7 @@
   },
   "servers": [
     {
-      "url": "client://voice-receptionist",
+      "url": "client://caller-phone",
       "description": "The client:// scheme is what marks this as a Client Actions source in GuideAnts -- it is never actually dialed."
     }
   ],

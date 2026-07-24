@@ -42,8 +42,8 @@ Caller ⇄ Twilio ⇄ ───────────────────�
 | [app/speech_timing.py](../app/speech_timing.py) | One pure function, `estimate_seconds`, used by `app/main.py` to estimate how long Twilio's TTS will take to speak a given text from its word count. Fallback pacing until the first agent-stopped speaker event is recognized on a call, and the basis of the ceiling on waiting for one. No I/O. |
 | [app/speaker_events.py](../app/speaker_events.py) | One pure function, `classify`, used by `app/main.py` to recognize Twilio's speaker-event WS messages (`agentSpeaking`/`clientSpeaking` start/stop, subscribed via `events="speaker-events"` in the TwiML). Matches loosely since Twilio doesn't document the exact JSON shape — unit-tested in `tests/test_speaker_events.py`. No I/O. |
 | [app/main.py](../app/main.py) | FastAPI app with the two endpoints Twilio talks to: `POST /twiml` and `WS /ws`. All call-handling logic lives here; also mounts `reservations_api.router`. |
-| [app/reservations_api.py](../app/reservations_api.py) | FastAPI router: `/api/reservations/*` + `/api/booqable/ping` — GuideAnts' tool-calling surface, independent of the Twilio WS path. See "Reservation API" below. |
-| [app/reservations.py](../app/reservations.py) | Booqable business logic (catalog lookup, availability check, create/cancel order) behind `app/reservations_api.py`. |
+| [app/reservations_api.py](../app/reservations_api.py) | FastAPI router: just `/api/booqable/ping`, a manual pre-demo connectivity check. Independent of the Twilio WS path. |
+| [app/reservations.py](../app/reservations.py) | Booqable business logic (catalog lookup, availability check, create/cancel order) called directly by `app/guide_client.py`'s reservation tool handlers. See "Reservation tools" below. |
 | [app/booqable_client.py](../app/booqable_client.py) | Thin async `httpx` wrapper around Booqable's JSON:API v4 (Bearer-token auth). |
 
 ---
@@ -105,26 +105,40 @@ GuideAnts has multiple ways to talk to a published guide:
 - **The OpenAI-wire `chat/completions` endpoint** (used by this app before an earlier change) supports multi-turn conversations, but has no first-class continuation id — it returns a random `chatcmpl_...` id that means nothing to GuideAnts. Continuation instead relies on GuideAnts replaying the client's *entire* sent message history and matching it, message-for-message, against what it actually persisted (`WireConversationResolver.ResolveConversationFromTranscriptAsync` in the GuideAnts repo) — exact-string comparison, a 60-minute activity window, and a hard requirement that *exactly one* server-side conversation match (zero or multiple matches both silently start a brand-new conversation). Any drift between the client's held transcript and what GuideAnts actually persisted — a stray local message, or (worse) a streamed reply cancelled by a barge-in, where GuideAnts persists everything generated so far but the client only has what it received before cancelling — breaks that alignment and starts a new conversation, discarding all prior context, with no error raised.
 - **The Responses endpoint** (used by this app now) returns an explicit `conversation: "conv_..."` id in every response, streaming included, and accepts it back as a request parameter. Continuation is then a simple, exact id lookup, not fuzzy transcript matching — it survives barge-in cancellations, concurrent similar-sounding calls, and any local bookkeeping differences, because none of that matters to how the conversation is found.
 
-### Client-side tool calls: `get_caller_phone_number`
+### Client-side tool calls
 
-The guide can ask this app for the current call's caller ID via one
-client-side function tool, `get_caller_phone_number` (no arguments) — used
-so the guide can offer the caller's own number as a reservation/callback
-number without asking for it. This is deliberately **not** a server-side
-Booqable-style HTTP tool: GuideAnts' outgoing tool-call HTTP requests
-(`ToolCaller.ExecuteWebApiAsync` in the GuideAnts repo) carry only static,
-guide-configured auth (header/query/OAuth) plus whatever arguments the model
-fills in — no conversation, call, or session identifier is ever attached. An
-HTTP endpoint like `/api/reservations/caller` would therefore have no way to
-know *which* call is asking, and would answer identically (or fail) for every
-concurrent call.
+The guide's entire tool surface is client-side: `get_caller_phone_number`
+(no arguments) plus the seven Booqable reservation operations
+(`listCatalog`, `checkAvailability`, `listCustomers`, `createCustomer`,
+`createReservation`, `cancelReservation`, `sendPaymentLink`). None of these
+are server-side Booqable-style HTTP tools GuideAnts calls itself — all of
+them are resolved by whichever client is on the call, i.e. this app, in
+`app/guide_client.py`.
 
-**Declared in GuideAnts, not in this app's code.** The tool's schema
-(`guide-demo/caller-phone-client-tool.json`) is pasted into the guide's
-**Tools** tab as a **Client Actions** tool source — the same "Add Tool
-Source" flow used for the Booqable operations, except its `servers[0].url`
-uses a `client://` scheme instead of `https://` (see SETUP.md step 1.8).
-GuideAnts classifies any tool source by that URL scheme
+`get_caller_phone_number` needed this from the start: GuideAnts' outgoing
+tool-call HTTP requests (`ToolCaller.ExecuteWebApiAsync` in the GuideAnts
+repo) carry only static, guide-configured auth (header/query/OAuth) plus
+whatever arguments the model fills in — no conversation, call, or session
+identifier is ever attached. An HTTP endpoint like `/api/reservations/caller`
+would therefore have no way to know *which* call is asking, and would answer
+identically (or fail) for every concurrent call.
+
+The reservation operations used to be a **Web API** tool source instead —
+GuideAnts called `/api/reservations/*` on this app directly, authenticated
+with a shared `X-Api-Key`/`RECEPTIONIST_API_KEY` header. That meant a working
+copy of that header was enough to check availability or create/cancel a
+reservation from anywhere, not just from an active call through this app.
+Moving them to Client Actions closes that off: GuideAnts never dials out for
+them at all, there's no HTTP endpoint or shared secret to leak or replay, and
+`app/reservations.py`/`app/payments.py`'s Booqable business logic is now only
+reachable through `app/guide_client.py`'s in-process tool dispatch, mid-call.
+
+**Declared in GuideAnts, not in this app's code.** Each tool's schema
+(`guide-demo/caller-phone-client-tool.json`,
+`guide-demo/reservations-client-tool.json`) is pasted into the guide's
+**Tools** tab as its own **Client Actions** tool source (see SETUP.md step
+1.7); both use a `servers[0].url` with a `client://` scheme instead of
+`https://`. GuideAnts classifies any tool source by that URL scheme
 (`ToolCaller.cs:238`, GuideAnts repo): `client://` resolves to
 `ActionType.ClientHandled`, and tools with that action type are explicitly
 **skipped in GuideAnts' own server-side execution** (`ThreadRun.cs`, comment
@@ -139,10 +153,10 @@ never about correctness or per-call routing (see "Concurrency" below).
 
 - `app/main.py`'s `setup` handler sets `st.guide.caller_phone = msg.get("from")`
   the moment a call connects (see `WS /ws` below) — this is the only producer
-  of the value.
+  of that value, read by the `get_caller_phone_number` handler.
 - This app never attaches a `tools` kwarg to any `responses.create` call —
-  GuideAnts already knows the tool exists from the guide's own persisted
-  config, so it's included on every turn automatically.
+  GuideAnts already knows the tools exist from the guide's own persisted
+  config, so they're included on every turn automatically.
 - When the model emits a `function_call` output item, this app never lets that
   reach Twilio or `respond_to()` as text. Internally:
   - `_stream_turn` watches for a `function_call` item on
@@ -152,13 +166,22 @@ never about correctness or per-call routing (see "Concurrency" below).
     than as its own streamed event.
   - `_stream_reply_with_tools` is the loop that actually drives one caller
     turn: after a streamed request ends, if it collected any `function_call`s,
-    it resolves each via `_execute_tool` (for `get_caller_phone_number`, just
-    `json.dumps({"phone_number": session.caller_phone})` — `null` if the
-    `setup` message never carried a `from`, never an error) and immediately
-    issues a follow-up `responses.create` whose `input` is the list of
-    `{"type": "function_call_output", "call_id": ..., "output": ...}` results,
-    still passing the same `conversation` id. This repeats — a single turn
-    can involve more than one tool round-trip — capped at
+    it resolves each via `_execute_tool` — `get_caller_phone_number` just
+    returns `json.dumps({"phone_number": session.caller_phone})` (`null` if
+    the `setup` message never carried a `from`); the seven reservation tool
+    names are dispatched to `_run_reservation_tool`, which builds a
+    `BooqableClient` (and a `TwilioSmsClient` for `sendPaymentLink`) and calls
+    straight into `app/reservations.py`/`app/payments.py` — the same
+    find/check/book/reserve/register/cancel/pay logic the old
+    `/api/reservations/*` routes wrapped, just invoked directly instead of
+    over HTTP. A `BooqableError`/`TwilioSmsError` (or a missing required
+    argument) is caught and turned into `json.dumps({"error": ...})` rather
+    than raised — `_execute_tool` never raises, an error result is still a
+    well-formed reply the model can react to. Resolving each call then
+    immediately issues a follow-up `responses.create` whose `input` is the
+    list of `{"type": "function_call_output", "call_id": ..., "output": ...}`
+    results, still passing the same `conversation` id. This repeats — a
+    single turn can involve more than one tool round-trip — capped at
     `_MAX_TOOL_ITERATIONS` (5) so a guide that never stops calling tools can't
     hang the turn forever; hitting the cap just logs a warning and ends the
     turn with whatever text (if any) was produced.
@@ -184,9 +207,10 @@ never about correctness or per-call routing (see "Concurrency" below).
   back on the same request/conversation that carried it, and this app's own
   per-connection state does the rest. This holds regardless of whether the
   schema is UI-declared or attached per-request.
-- **If you edit `caller-phone-client-tool.json` later**, re-paste it into the
-  same Client Actions Schema tab and save — same staleness risk SETUP.md
-  already documents for the Booqable Web API schema.
+- **If you edit `caller-phone-client-tool.json` or
+  `reservations-client-tool.json` later**, re-paste the edited file into its
+  own Client Actions Schema tab and save — the file on disk isn't read live
+  and there's no auto-sync (see SETUP.md step 1.7).
 - **The tool is not available when testing the guide directly in GuideAnts'
   own chat** — that path isn't going through this app's client, so no one
   answers the `function_call`. The guide's instructions tell it to just ask
@@ -431,59 +455,67 @@ naturally instead of repeating itself or guessing. The mechanism:
 
 ---
 
-## Reservation API (app/reservations_api.py, app/reservations.py, app/booqable_client.py)
+## Reservation tools (app/guide_client.py, app/reservations.py, app/payments.py, app/booqable_client.py)
 
-A second, independent inbound surface on the same app/port: GuideAnts calls
-`/api/reservations/*` as a tool (via its imported OpenAPI schema,
-`guide-demo/booqable-reservations-openapi.json`) to check availability, book
-rentals, and register customers in Booqable, and `/api/booqable/ping` as a
-manual connectivity check. None of this touches the Twilio WS path — it's
-plain request/response FastAPI routes, no streaming, no per-call state. (This
-is distinct from the `get_caller_phone_number` client-side tool — see
-"Client-side tool calls" above for why the caller's phone specifically
-couldn't be delivered this way.)
+Booqable availability/booking/customer/payment-link operations are seven of
+the guide's client-side tools (see "Client-side tool calls" above) —
+`listCatalog`, `checkAvailability`, `listCustomers`, `createCustomer`,
+`createReservation`, `cancelReservation`, `sendPaymentLink`. GuideAnts hands
+each unresolved `function_call` back to this app, same as
+`get_caller_phone_number`; there's no `/api/reservations/*` HTTP surface
+anymore (`app/reservations_api.py` now only serves `/api/booqable/ping`, a
+manual connectivity check). None of this touches the Twilio WS path directly
+either — no streaming, no per-call state — it's plain async function calls
+made from inside `_execute_tool`/`_run_reservation_tool` while a tool-call
+round-trip is in flight for some call's turn.
 
 ```
-GuideAnts (tool call) ⇄ this app (/api/reservations/*) ⇄ Booqable JSON:API v4
+GuideAnts (function_call, unresolved) ⇄ this app (app/guide_client.py) ⇄ Booqable JSON:API v4
 ```
 
-- **`app/reservations_api.py`** — the router: request/response models, the
-  `require_receptionist_key` dependency, and the six
-  `/api/reservations/*` routes plus `/api/booqable/ping`. Mounted in
-  `app/main.py` via `app.include_router(reservations_router)`.
+- **`app/guide_client.py`** — `_run_reservation_tool(name, args)` dispatches
+  each of the seven tool names to the matching call below, building a
+  `BooqableClient()` (and, for `sendPaymentLink`, a `TwilioSmsClient()`) per
+  call. `_execute_tool` wraps it: JSON-decodes `arguments`, catches
+  `BooqableError`/`TwilioSmsError`/a missing-argument `KeyError`, and always
+  returns a `json.dumps(...)` string — see "Client-side tool calls" above for
+  how this fits into the tool-call round-trip.
 - **`app/reservations.py`** — the actual find/check/book/reserve/register logic
   against a `BooqableClient`: `list_catalog`, `check_product_availability`,
   `find_or_create_customer`, `create_reservation`, `cancel_reservation`,
-  `list_customers`, `add_customer_note`, `register_customer`, plus small
-  helpers for resolving the account's one active location and mapping a
-  product group to its bookable product.
+  `list_customers`, `add_customer_note`, `register_customer`, `get_order_contact`,
+  plus small helpers for resolving the account's one active location and
+  mapping a product group to its bookable product.
+- **`app/payments.py`** — `send_payment_link` (used by the `sendPaymentLink`
+  tool): looks up the order's contact via `reservations.get_order_contact`,
+  then sends the SMS via `TwilioSmsClient`.
 - **`app/booqable_client.py`** — a thin async `httpx` wrapper around Booqable's
   JSON:API v4 (`{company_url}/api/4`), Bearer-token auth from
   `config.BOOQABLE_API_KEY`, plus `resource()`/`attrs()` helpers for building
   and reading JSON:API envelopes.
 
-### `POST /api/reservations` request shape
+### `createReservation` argument shape
 
-The body takes flat `customer_name` (required), `customer_email`, and
-`customer_phone` fields (`ReservationRequest` in `app/reservations_api.py`) —
-**not** a nested `customer: {name, email, phone}` object, even though that
-would be the more natural shape. This is a deliberate workaround, not a
-style choice: GuideAnts' OpenAPI-to-tool-schema converter
-(`OpenApiHelper.cs`, `GetToolDefinitionsFromSchema`, in the GuideAnts repo)
-only reads top-level `requestBody` `properties`/`required` — it has no
-handling for a nested object property's own `properties`/`required`
+The arguments are flat `customer_name` (required), `customer_email`, and
+`customer_phone` fields — **not** a nested `customer: {name, email, phone}`
+object, even though that would be the more natural shape. This is a
+deliberate workaround, not a style choice: GuideAnts' OpenAPI-to-tool-schema
+converter (`OpenApiHelper.cs`, `GetToolDefinitionsFromSchema`, in the
+GuideAnts repo) only reads top-level `requestBody` `properties`/`required` —
+it has no handling for a nested object property's own `properties`/`required`
 (unlike array items, which it does flatten), and no handling for `anyOf`
 at any level. A nested `customer` object is therefore invisible to the
 LLM's tool definition beyond its bare `description` string; the model has
 no structural way to know `name`/`email`/`phone` exist as sub-fields. Flat
 top-level fields are fully supported by the converter (confirmed via its
-own test suite) and are what the guide can actually see and fill in.
+own test suite) and are what the guide can actually see and fill in — see
+`guide-demo/reservations-client-tool.json`'s `createReservation` schema.
 
-A `model_validator` on `ReservationRequest` requires at least one of
-`customer_email`/`customer_phone` (422 if neither is given) — this is the
-real enforcement; the OpenAPI schema's property descriptions are only a
-hint to the model, not something GuideAnts validates before calling the
-tool.
+`_run_reservation_tool` requires at least one of `customer_email`/
+`customer_phone` for `createReservation` (raising `BooqableError`, turned
+into an `{"error": ...}` tool result, if neither is given) — this is the
+real enforcement; the schema's property descriptions are only a hint to the
+model, not something GuideAnts validates before handing the call back.
 
 ### Booqable v4 customer quirks (not documented anywhere obvious)
 
@@ -521,26 +553,25 @@ of non-archived customers — there's no server-side filter for either, so
 this re-fetches and scans the whole customer list on every reservation.
 Fine at small scale, worth revisiting if the customer base grows.
 
-### `GET`/`POST /api/reservations/customers` — standalone customer operations
+### `listCustomers`/`createCustomer` — standalone customer operations
 
 Lets the guide register a caller as a customer, or look one up, **without**
 booking a reservation — used by the callback flow in the guide's instructions
 (buy/service/talk-to-a-person requests the guide can't complete on the call).
 
-- `GET /api/reservations/customers` (`listCustomers`) returns
-  `reservations.list_customers`'s mapped list (`customer_id`/`name`/`email`/`phone`).
-  The guide's instructions tell it to use this only to look someone up, never
-  to read the whole list back to a caller — it's plain unfiltered data with no
-  access control beyond the shared `X-Api-Key`.
-- `POST /api/reservations/customers` (`createCustomer`) calls
-  `reservations.register_customer`, which just wraps the same
-  `find_or_create_customer` used by `create_reservation` — so it's equally
-  idempotent (dedupes by email/phone, never creates a duplicate) and shares
-  the same flat-body reasoning as `ReservationRequest` above (a nested
-  `customer` object wouldn't reach the LLM's tool definition). It additionally
-  accepts an optional `note`: if given, `register_customer` calls
-  `add_customer_note` to attach it to the customer via Booqable's **Notes**
-  resource — `POST /notes` with
+- `listCustomers` returns `reservations.list_customers`'s mapped list
+  (`customer_id`/`name`/`email`/`phone`). The guide's instructions tell it to
+  use this only to look someone up, never to read the whole list back to a
+  caller — it's plain unfiltered data, gated only by the tool being
+  client-handled (only reachable mid-call, through this app).
+- `createCustomer` calls `reservations.register_customer`, which just wraps
+  the same `find_or_create_customer` used by `create_reservation` — so it's
+  equally idempotent (dedupes by email/phone, never creates a duplicate) and
+  shares the same flat-argument reasoning as `createReservation` above (a
+  nested `customer` object wouldn't reach the LLM's tool definition). It
+  additionally accepts an optional `note`: if given, `register_customer`
+  calls `add_customer_note` to attach it to the customer via Booqable's
+  **Notes** resource — `POST /notes` with
   `{"data": {"type": "notes", "attributes": {"body": ..., "owner_id": "<customer_id>",
   "owner_type": "customers"}}}`. Note v4 uses `owner_id`/`owner_type`
   (`owner_type` lowercase and pluralized, e.g. `"customers"`) — **not** v1's
@@ -549,18 +580,21 @@ booking a reservation — used by the callback flow in the guide's instructions
   registered customer, with `note_recorded: false` and a `note_error` field,
   rather than failing the whole call over a note.
 
-**Auth**: the six `/api/reservations/*` routes require an `X-Api-Key` header
-matching `config.RECEPTIONIST_API_KEY` — deliberately a *different* secret
-from `BOOQABLE_API_KEY`, so the LLM calling this API can never obtain the
-real Booqable key. `/api/booqable/ping` is unauthenticated (it only reports
-whether the key is configured and the account's timezone), same trust level
-as the already-unauthenticated `/twiml`.
+**Auth**: none of the seven reservation tools need one — they're never
+reachable over HTTP at all, only as `function_call`s GuideAnts hands back to
+this app mid-call (see "Client-side tool calls" above), so there's no shared
+secret to configure or leak. `/api/booqable/ping` (the one route that does
+still exist) is unauthenticated (it only reports whether the key is
+configured and the account's timezone), same trust level as the
+already-unauthenticated `/twiml`.
 
 **Config**: `app/config.py` reads `BOOQABLE_COMPANY_URL`, `BOOQABLE_API_KEY`,
-`RECEPTIONIST_API_KEY`, and `BOOQABLE_TIMEZONE` (naive `starts_at`/`stops_at`
-values from the guide are interpreted in this timezone before converting to
-UTC for Booqable) — same pattern as every other setting in this app, plain
-module constants read once from `.env`.
+and `BOOQABLE_TIMEZONE` (naive `starts_at`/`stops_at` values from the guide
+are interpreted in this timezone before converting to UTC for Booqable) —
+same pattern as every other setting in this app, plain module constants read
+once from `.env`. The LLM never sees `BOOQABLE_API_KEY` either way — it's
+only ever read by `BooqableClient`, constructed inside this app's own
+process.
 
 **Origin**: this logic was ported from a separate `AI_Receptionist_seed_data`
 project's backend, which also has a seed console (`/api/seed`, `/api/plan`,
@@ -592,7 +626,7 @@ call path, and stays in that project.
   `response.conversation` here is the durable continuation handle `app/guide_client.py` captures into `GuideSession.conversation_id`. The openai SDK also exposes the concatenated text directly as `response.output_text`.
 - **Streaming response** (`stream: true`, used on every turn including the first): `text/event-stream`, typed events —
   `response.created` → `response.output_item.added` → `response.content_part.added` → repeated `response.output_text.delta` (the actual token text, in `.delta`) → `response.output_text.done` → `response.output_item.done` → `response.completed`. On a current GuideAnts build, both the `response.created` and `response.completed` events' embedded `response` object carry the same `conversation` field as the non-streaming body — `app/guide_client.py` reads it off whichever of those two events arrives first with the session not yet having an id. An older GuideAnts build whose stream predates this omits the field entirely; see the `stream_missing_conversation` fallback in `app/guide_client.py` above.
-- **Tool calls**: the endpoint also supports OpenAI-style `tools`/client-side tool execution (emitted as `function_call` output items). Both tool-source kinds this app uses are declared in the GuideAnts UI, not via a request-level `tools` param — they differ in *who executes them*, decided by the tool source's server-URL scheme (`ToolCaller.cs`, GuideAnts repo): the Booqable reservation/customer operations are a **Web API** source (`https://` scheme, `ActionType.WebApi`) that GuideAnts itself calls against this app's `/api/reservations/*`; `get_caller_phone_number` is a **Client Actions** source (`client://` scheme, `ActionType.ClientHandled`) that GuideAnts never executes — it hands the `function_call` back to this app instead, which answers it in `app/guide_client.py`. See "Client-side tool calls" below for why the caller's phone specifically needed the latter kind.
+- **Tool calls**: the endpoint also supports OpenAI-style `tools`/client-side tool execution (emitted as `function_call` output items). All eight of this app's tools (`get_caller_phone_number` plus the seven Booqable reservation operations) are declared in the GuideAnts UI as **Client Actions** sources (`client://` scheme, `ActionType.ClientHandled`, `ToolCaller.cs`, GuideAnts repo), not via a request-level `tools` param — GuideAnts never executes any of them itself; it hands each `function_call` back to this app instead, which answers it in `app/guide_client.py`. See "Client-side tool calls" below for the full mechanism and why the reservation operations moved here from an earlier Web API tool source.
 - **Errors this app handles specially**: HTTP 400 with `code: "conversation_not_found"` or `code: "invalid_conversation_id"` — GuideAnts no longer recognizes the `conversation` id sent (e.g. it restarted and lost in-memory/db state). `guide_client.stream_reply` catches this, clears the session, and retries once as a fresh conversation (no recap replay — prior context for that call is lost; see "Known gaps" below).
 - **Other errors**: e.g. `403 endpoint_disabled` if the guide's "Enable Wire API" / **"Responses"** toggle isn't turned on in the Publish dialog (see SETUP.md step 1.5 — note this is a different checkbox from "Chat Completions").
 

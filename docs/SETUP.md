@@ -42,69 +42,60 @@ from creating the GuideAnts guide through placing a real phone call.
      `{GUIDEANTS_BASE_URL}/api/published/openai/{pubId}/v1`.
 6. Make sure the GuideAnts backend is running and reachable at the host/port
    you'll put in `GUIDEANTS_BASE_URL` (default dev: `http://localhost:5107`).
-7. **Wire up the reservation tool** so the guide can check availability and
-   book rentals (optional — skip if this demo doesn't need Booqable). Decide
-   `RECEPTIONIST_API_KEY` now (any string you invent — you'll paste it twice,
-   once here and once into `.env` in step 3) before starting:
+7. **Wire up the reservation tools** so the guide can check availability and
+   book rentals (optional — skip if this demo doesn't need Booqable), and the
+   **caller's-phone-number tool** (optional, but the callback flow and
+   reservation phone step in the guide's instructions both reference it).
+   Both are **Client Actions** tool sources — meaning GuideAnts never calls
+   them itself over HTTP; it hands each one back, unresolved, to whichever
+   client (this app) is on the call, which answers it in
+   `app/guide_client.py`. See ARCHITECTURE.md's "Client-side tool calls"
+   section for the full mechanism and why this is more secure than the
+   Web API tool source this demo used to use: there's no HTTP endpoint or
+   shared API key that anyone (or anything) other than an active call
+   through this app could use to invoke a reservation operation.
    1. In the guide editor, open its **Tools** section and click **+ Add Tool
       Source**.
-   2. In the picker, choose **Web API** ("Connect to an HTTP API with server
-      URL, auth, and operations").
-   3. On the **Schema** tab:
-      - **Server URL**: `http://host.docker.internal:8080/api/reservations`
-        — correct as-is if GuideAnts runs in Docker and this app runs on the
-        host at port 8080 (the default, see step 5 below). If GuideAnts runs
-        outside Docker, use `http://localhost:8080/api/reservations`
-        instead.
-      - **OpenAPI Specification (JSON)**: paste the full contents of
-        `guide-demo/booqable-reservations-openapi.json` from this repo.
-   4. Switch to the **Authentication** tab, click **Add Auth**, and set:
-      - **Authentication Type**: `Service HTTP Header (for API keys...)`
-      - **Header Name**: `X-Api-Key`
-      - **Secret Value**: the same string you're using for
-        `RECEPTIONIST_API_KEY`. This field is write-only — you won't be able
-        to view it again after saving, only overwrite it.
-   5. Save. The six operations (`listCatalog`, `checkAvailability`,
+   2. In the picker, choose **Client Actions** ("An action executed by the
+      connecting client"), not **Web API**.
+   3. On the **Schema** tab, paste the full contents of
+      `guide-demo/reservations-client-tool.json` from this repo. Its
+      `servers[0].url` is `client://voice-receptionist` — leave this as-is;
+      unlike a Web API server URL, it's never actually dialed, it just marks
+      the source as client-handled.
+   4. No Authentication tab entry is needed — GuideAnts never sends a real
+      HTTP request for this tool source.
+   5. Save. The seven operations (`listCatalog`, `checkAvailability`,
       `createReservation`, `cancelReservation`, `listCustomers`,
-      `createCustomer`) should appear as tools the guide can call.
-   6. **If you edit `booqable-reservations-openapi.json` later**, re-paste it
-      into the same Schema tab and save — the file on disk isn't read live,
-      and there's no auto-sync. A stale copy is a common source of confusing
+      `createCustomer`, `sendPaymentLink`) should appear as tools the guide
+      can call.
+   6. **If you edit `reservations-client-tool.json` later**, re-paste it into
+      the same Schema tab and save — the file on disk isn't read live, and
+      there's no auto-sync. A stale copy is a common source of confusing
       guide behavior (e.g. the guide asking for fields that don't exist, or
       not knowing about fields that do) that looks like a code bug but isn't
-      — see ARCHITECTURE.md's "`POST /api/reservations` request shape" for
-      a real example (and why this OpenAPI schema deliberately uses flat
+      — see ARCHITECTURE.md's "`createReservation` argument shape" for a
+      real example (and why this schema deliberately uses flat
       `customer_name`/`customer_email`/`customer_phone` fields instead of a
       nested `customer` object).
-
-8. **Wire up the caller's-phone-number tool** so the guide can get the
-   caller's own number without asking for it (optional, but the callback flow
-   and reservation phone step in the guide's instructions both reference it):
-   1. In the guide editor's **Tools** section, click **+ Add Tool Source**
-      again.
-   2. In the picker, choose **Client Actions** this time, not Web API — this
-      marks the tool as one the *connecting client* (this app) answers,
-      rather than one GuideAnts calls itself. See ARCHITECTURE.md's
-      "Client-side tool calls" section for why this specific tool needs that
-      distinction (in short: GuideAnts' own outgoing tool-call requests carry
-      no per-call identifier, so a normal Web API tool couldn't return the
-      right caller's number when multiple calls are active at once).
-   3. On the **Schema** tab, paste the full contents of
-      `guide-demo/caller-phone-client-tool.json` from this repo. Its
-      `servers[0].url` is `client://voice-receptionist` — leave this as-is;
-      unlike the Web API server URL, it's never actually dialed, it just
-      marks the source as client-handled.
-   4. No Authentication tab entry is needed — GuideAnts never sends a real
-      HTTP request for this tool.
-   5. Save. `get_caller_phone_number` should appear as a tool the guide can
-      call, alongside the Booqable operations.
-   6. **If you edit `caller-phone-client-tool.json` later**, re-paste it into
-      the same Schema tab and save, for the same reason as step 7.6 above.
-   7. This tool is only answered on a real call through this app — testing
-      the guide directly in GuideAnts' own chat UI won't resolve it, since
-      that path doesn't go through `app/guide_client.py`. The guide's
-      instructions already account for this (they fall back to just asking
-      the caller for a number).
+   7. Repeat steps 1–2 for a second tool source, then on its **Schema** tab
+      paste the full contents of `guide-demo/caller-phone-client-tool.json`
+      instead. Its `servers[0].url` is `client://caller-phone` — a different
+      bridge identifier from the reservations tool's `client://voice-receptionist`
+      so the two tool sources don't collide in the GuideAnts UI; still no
+      Authentication entry. Save — `get_caller_phone_number` should now
+      appear alongside the Booqable operations. If you edit that file later,
+      re-paste it the same way.
+   8. Both tools are only answered on a real call through this app — testing
+      the guide directly in GuideAnts' own chat UI won't resolve either one,
+      since that path doesn't go through `app/guide_client.py`. The guide's
+      instructions already account for the phone-number tool specifically
+      (they fall back to just asking the caller for a number); the
+      reservation tools will simply appear to hang or error in that UI.
+   9. If you skip this step entirely, also skip filling in the Booqable/Twilio
+      variables in step 3 below — leave `BOOQABLE_API_KEY` unset and the
+      reservation tools will fail closed with a clear config error rather
+      than silently doing nothing.
 
 ## 2. Install this project's dependencies
 
@@ -150,19 +141,20 @@ FILLER_DELAY_SECONDS=1.0
   ("ok", "yeah", "got it", ...) and should never get a guide reply, whether
   heard mid-reply or just after it finishes. Optional.
 
-If you wired up the reservation tool in step 1.7, also fill in:
+If you wired up the reservation tools in step 1.7, also fill in:
 
 ```
 BOOQABLE_COMPANY_URL=<your Booqable account URL, e.g. https://yourco.booqable.com>
 BOOQABLE_API_KEY=<Booqable API key>
-RECEPTIONIST_API_KEY=<a separate secret you invent — never reuse BOOQABLE_API_KEY>
 BOOQABLE_TIMEZONE=America/New_York
 ```
 
-`RECEPTIONIST_API_KEY` must match whatever you set as the tool's `X-Api-Key`
-value inside GuideAnts (step 1.7) — this app rejects `/api/reservations/*`
-calls that don't send a matching header, and the LLM must never be given
-`BOOQABLE_API_KEY` directly. Verify the Booqable side is reachable with:
+`BOOQABLE_API_KEY` is only ever read by this app's own process
+(`app/booqable_client.py`, constructed inside `app/guide_client.py`'s
+reservation tool handlers) — the LLM never sees it, and since the reservation
+tools are Client Actions rather than a Web API source, there's no separate
+shared secret to configure for GuideAnts either. Verify the Booqable side is
+reachable with:
 
 ```
 curl http://localhost:8080/api/booqable/ping
@@ -242,7 +234,7 @@ Try these to see the filler-phrase and selective-barge-in behavior:
   fresh prompt and notice no filler phrase plays — the reply just starts
   directly.
 
-If you wired up the reservation tool (step 1.7), try these too:
+If you wired up the reservation tools (step 1.7), try these too:
 
 - **Book a rental.** When the guide asks for your phone number, it should ask
   whether to use the number you're calling from or a different one — not just

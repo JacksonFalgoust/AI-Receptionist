@@ -27,7 +27,9 @@ from typing import Any, AsyncIterator
 import openai
 from openai import AsyncOpenAI
 
-from . import config
+from . import config, payments, reservations
+from .booqable_client import BooqableClient, BooqableError
+from .twilio_client import TwilioSmsClient, TwilioSmsError
 
 logger = logging.getLogger("voice_receptionist.guide")
 
@@ -109,18 +111,104 @@ def _is_lost_conversation(err: "openai.BadRequestError") -> bool:
     return code in _LOST_CONVERSATION_CODES
 
 
-# get_caller_phone_number is declared as a GuideAnts "Client Actions" tool
-# source (see guide-demo/caller-phone-client-tool.json), not attached by this
-# app -- GuideAnts includes it on the guide's behalf and, being client-handled
-# (a client:// server URL), never executes it itself: it always hands the
+# All of these tools -- get_caller_phone_number plus the Booqable reservation
+# operations below -- are declared as GuideAnts "Client Actions" tool sources
+# (see guide-demo/caller-phone-client-tool.json and
+# guide-demo/reservations-client-tool.json), not attached by this app --
+# GuideAnts includes them on the guide's behalf and, being client-handled (a
+# client:// server URL), never executes them itself: it always hands the
 # function_call back to whichever client is on that conversation. This app
-# only needs to answer it when it arrives.
-def _execute_tool(name: str, arguments: str, session: GuideSession) -> str:
+# only needs to answer it when it arrives. The reservation operations used to
+# be a Web API tool source that GuideAnts called directly against
+# /api/reservations/*; moving them here means there's no HTTP endpoint left
+# for anyone but this app (mid-call) to invoke them through -- see
+# docs/ARCHITECTURE.md's "Client-side tool calls" section.
+_RESERVATION_TOOLS = {
+    "listCatalog",
+    "checkAvailability",
+    "listCustomers",
+    "createCustomer",
+    "createReservation",
+    "cancelReservation",
+    "sendPaymentLink",
+}
+
+
+async def _run_reservation_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Execute one Booqable-backed reservation tool -- the same business
+    logic the old /api/reservations/* routes wrapped (app/reservations.py,
+    app/payments.py), called directly instead of over HTTP. Required
+    arguments missing from `args` raise KeyError, caught by the caller."""
+    client = BooqableClient()
+    if name == "listCatalog":
+        return {"products": await reservations.list_catalog(client)}
+    if name == "checkAvailability":
+        location = await reservations.resolve_location(client, args.get("location_id"))
+        result = await reservations.check_product_availability(
+            client,
+            product_id=args["product_id"],
+            location_id=location["id"],
+            starts_at=args["starts_at"],
+            stops_at=args["stops_at"],
+            quantity=args.get("quantity", 1),
+        )
+        return {**result, "location_id": location["id"]}
+    if name == "listCustomers":
+        return {"customers": await reservations.list_customers(client)}
+    if name == "createCustomer":
+        return await reservations.register_customer(
+            client,
+            name=args["customer_name"],
+            email=args.get("customer_email"),
+            phone=args.get("customer_phone"),
+            note=args.get("note"),
+        )
+    if name == "createReservation":
+        if not args.get("customer_email") and not args.get("customer_phone"):
+            raise BooqableError("customer_email or customer_phone is required")
+        return await reservations.create_reservation(
+            client,
+            customer={
+                "name": args["customer_name"],
+                "email": args.get("customer_email"),
+                "phone": args.get("customer_phone"),
+            },
+            location_id=args.get("location_id"),
+            starts_at=args["starts_at"],
+            stops_at=args["stops_at"],
+            items=args["items"],
+            auto_reserve=args.get("auto_reserve", True),
+        )
+    if name == "cancelReservation":
+        return await reservations.cancel_reservation(client, args["order_id"])
+    if name == "sendPaymentLink":
+        twilio_client = TwilioSmsClient()
+        return await payments.send_payment_link(
+            client, twilio_client, order_id=args["order_id"], phone=args.get("phone")
+        )
+    raise KeyError(name)
+
+
+async def _execute_tool(name: str, arguments: str, session: GuideSession) -> str:
     """Run one client-side tool call and return its result as the string to
     send back as a function_call_output. Never raises -- an error result is
     still a well-formed reply the model can react to."""
     if name == "get_caller_phone_number":
         return json.dumps({"phone_number": session.caller_phone})
+    if name in _RESERVATION_TOOLS:
+        try:
+            args = json.loads(arguments) if arguments else {}
+        except json.JSONDecodeError:
+            logger.warning("Guide sent malformed arguments for %r: %r", name, arguments)
+            return json.dumps({"error": "malformed arguments"})
+        try:
+            result = await _run_reservation_tool(name, args)
+        except (BooqableError, TwilioSmsError) as exc:
+            logger.warning("Reservation tool %r failed: %s", name, exc)
+            return json.dumps({"error": str(exc)})
+        except KeyError as exc:
+            return json.dumps({"error": f"missing required argument: {exc}"})
+        return json.dumps(result)
     logger.warning("Guide requested unknown tool %r; returning error result", name)
     return json.dumps({"error": f"unknown tool: {name}"})
 
@@ -145,21 +233,22 @@ def _collect_function_calls(output: Any, outcome: "_TurnOutcome") -> None:
             seen.add(item.call_id)
 
 
-def _tool_outputs(outcome: "_TurnOutcome", session: GuideSession) -> list[dict[str, str]]:
-    return [
-        {"type": "function_call_output", "call_id": call_id, "output": _execute_tool(name, arguments, session)}
-        for call_id, name, arguments in outcome.function_calls
-    ]
+async def _tool_outputs(outcome: "_TurnOutcome", session: GuideSession) -> list[dict[str, str]]:
+    outputs = []
+    for call_id, name, arguments in outcome.function_calls:
+        output = await _execute_tool(name, arguments, session)
+        outputs.append({"type": "function_call_output", "call_id": call_id, "output": output})
+    return outputs
 
 
-def _next_tool_input(outcome: "_TurnOutcome", session: GuideSession) -> list[dict[str, str]] | None:
+async def _next_tool_input(outcome: "_TurnOutcome", session: GuideSession) -> list[dict[str, str]] | None:
     """Given one turn's outcome, return the next request's `input` (the
     resolved tool outputs) if the turn ended in a function_call, or None if
     the turn already produced its final text answer -- shared by both the
     streaming and non-streaming tool loops below."""
     if not outcome.function_calls:
         return None
-    return _tool_outputs(outcome, session)
+    return await _tool_outputs(outcome, session)
 
 
 async def _start_conversation(client: AsyncOpenAI, input_text: str, session: GuideSession) -> AsyncIterator[str]:
@@ -185,7 +274,7 @@ async def _start_conversation(client: AsyncOpenAI, input_text: str, session: Gui
         text = response.output_text
         if text:
             yield text
-        next_input = _next_tool_input(outcome, session)
+        next_input = await _next_tool_input(outcome, session)
         if next_input is None:
             return
     logger.warning("Non-streaming tool loop hit its %d-iteration bound; ending the turn", _MAX_TOOL_ITERATIONS)
@@ -266,7 +355,7 @@ async def _stream_reply_with_tools(
         async with contextlib.aclosing(_stream_turn(client, next_input, session, outcome)) as gen:
             async for delta in gen:
                 yield delta
-        next_input = _next_tool_input(outcome, session)
+        next_input = await _next_tool_input(outcome, session)
         if next_input is None:
             return
     logger.warning("Tool-call loop hit its %d-iteration bound; ending the turn", _MAX_TOOL_ITERATIONS)

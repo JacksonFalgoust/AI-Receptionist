@@ -1,7 +1,7 @@
 # Payment link — deferred options
 
-The `send-payment-link` feature (`app/payments.py`, `app/twilio_client.py`,
-`POST /api/reservations/{order_id}/send-payment-link`) currently sends an SMS
+The `sendPaymentLink` reservation tool (`app/payments.py`,
+`app/twilio_client.py`, dispatched from `app/guide_client.py`) currently sends an SMS
 with a **placeholder link** (`PAYMENT_LINK_BASE_URL` + the order id — no real
 checkout page, no charge). Two things were deliberately left out of that first
 pass and are documented here so the path to a real version isn't lost.
