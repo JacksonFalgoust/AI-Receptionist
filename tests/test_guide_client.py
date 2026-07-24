@@ -254,18 +254,227 @@ def _function_call_item(call_id: str, name: str = "get_caller_phone_number", arg
 
 def test_execute_tool_returns_caller_phone():
     session = GuideSession(caller_phone="+15551234567")
-    result = guide_client._execute_tool("get_caller_phone_number", "{}", session)
+    result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
     assert json.loads(result) == {"phone_number": "+15551234567"}
 
 
 def test_execute_tool_returns_null_when_caller_phone_unknown():
     session = GuideSession(caller_phone=None)
-    result = guide_client._execute_tool("get_caller_phone_number", "{}", session)
+    result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
     assert json.loads(result) == {"phone_number": None}
 
 
 def test_execute_tool_unknown_tool_returns_error():
-    result = guide_client._execute_tool("mystery_tool", "{}", GuideSession())
+    result = asyncio.run(guide_client._execute_tool("mystery_tool", "{}", GuideSession()))
+    assert "error" in json.loads(result)
+
+
+def test_execute_tool_list_catalog(monkeypatch):
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    fake_catalog = [{"product_id": "prod_1", "name": "E-Bike"}]
+    monkeypatch.setattr(guide_client.reservations, "list_catalog", AsyncMock(return_value=fake_catalog))
+
+    result = asyncio.run(guide_client._execute_tool("listCatalog", "{}", GuideSession()))
+
+    assert json.loads(result) == {"products": fake_catalog}
+
+
+def test_execute_tool_check_availability(monkeypatch):
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(
+        guide_client.reservations, "resolve_location", AsyncMock(return_value={"id": "loc_1"})
+    )
+    monkeypatch.setattr(
+        guide_client.reservations,
+        "check_product_availability",
+        AsyncMock(return_value={"status": "available", "available": 3, "requested": 1}),
+    )
+
+    result = asyncio.run(
+        guide_client._execute_tool(
+            "checkAvailability",
+            json.dumps(
+                {"product_id": "prod_1", "starts_at": "2026-08-01T09:00:00", "stops_at": "2026-08-02T17:00:00"}
+            ),
+            GuideSession(),
+        )
+    )
+
+    body = json.loads(result)
+    assert body["status"] == "available"
+    assert body["location_id"] == "loc_1"
+
+
+def test_execute_tool_create_reservation_requires_email_or_phone(monkeypatch):
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    create_mock = AsyncMock()
+    monkeypatch.setattr(guide_client.reservations, "create_reservation", create_mock)
+
+    result = asyncio.run(
+        guide_client._execute_tool(
+            "createReservation",
+            json.dumps(
+                {
+                    "customer_name": "Jane Doe",
+                    "starts_at": "2026-08-01T09:00:00",
+                    "stops_at": "2026-08-02T17:00:00",
+                    "items": [{"product_id": "prod_1", "quantity": 1}],
+                }
+            ),
+            GuideSession(),
+        )
+    )
+
+    assert "error" in json.loads(result)
+    create_mock.assert_not_called()
+
+
+def test_execute_tool_create_reservation_happy_path(monkeypatch):
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    fake_result = {"order_id": "order_1", "status": "reserved", "reserved": True}
+    create_mock = AsyncMock(return_value=fake_result)
+    monkeypatch.setattr(guide_client.reservations, "create_reservation", create_mock)
+
+    result = asyncio.run(
+        guide_client._execute_tool(
+            "createReservation",
+            json.dumps(
+                {
+                    "customer_name": "Jane Doe",
+                    "customer_phone": "+15551234567",
+                    "starts_at": "2026-08-01T09:00:00",
+                    "stops_at": "2026-08-02T17:00:00",
+                    "items": [{"product_id": "prod_1", "quantity": 1}],
+                }
+            ),
+            GuideSession(),
+        )
+    )
+
+    assert json.loads(result) == fake_result
+    assert create_mock.call_args.kwargs["customer"] == {
+        "name": "Jane Doe",
+        "email": None,
+        "phone": "+15551234567",
+    }
+
+
+def test_execute_tool_list_customers(monkeypatch):
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    fake_customers = [{"customer_id": "cust_1", "name": "Jane Doe", "email": None, "phone": "+15551234567"}]
+    monkeypatch.setattr(guide_client.reservations, "list_customers", AsyncMock(return_value=fake_customers))
+
+    result = asyncio.run(guide_client._execute_tool("listCustomers", "{}", GuideSession()))
+
+    assert json.loads(result) == {"customers": fake_customers}
+
+
+def test_execute_tool_create_customer(monkeypatch):
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    fake_result = {
+        "customer_id": "cust_1",
+        "name": "Jane Doe",
+        "email": None,
+        "phone": "+15551234567",
+        "note_recorded": True,
+    }
+    register_mock = AsyncMock(return_value=fake_result)
+    monkeypatch.setattr(guide_client.reservations, "register_customer", register_mock)
+
+    result = asyncio.run(
+        guide_client._execute_tool(
+            "createCustomer",
+            json.dumps(
+                {"customer_name": "Jane Doe", "customer_phone": "+15551234567", "note": "wants to buy an e-bike"}
+            ),
+            GuideSession(),
+        )
+    )
+
+    assert json.loads(result) == fake_result
+    assert register_mock.call_args.kwargs["note"] == "wants to buy an e-bike"
+
+
+def test_execute_tool_cancel_reservation(monkeypatch):
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    fake_result = {"order_id": "order_1", "previous_status": "reserved", "status": "canceled"}
+    monkeypatch.setattr(guide_client.reservations, "cancel_reservation", AsyncMock(return_value=fake_result))
+
+    result = asyncio.run(
+        guide_client._execute_tool("cancelReservation", json.dumps({"order_id": "order_1"}), GuideSession())
+    )
+
+    assert json.loads(result) == fake_result
+
+
+def test_execute_tool_send_payment_link(monkeypatch):
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(guide_client, "TwilioSmsClient", lambda: object())
+    fake_result = {"order_id": "order_1", "sent_to": "+15551234567", "payment_link": "https://example.com/pay/order_1"}
+    monkeypatch.setattr(guide_client.payments, "send_payment_link", AsyncMock(return_value=fake_result))
+
+    result = asyncio.run(
+        guide_client._execute_tool("sendPaymentLink", json.dumps({"order_id": "order_1"}), GuideSession())
+    )
+
+    assert json.loads(result) == fake_result
+
+
+def test_execute_tool_send_payment_link_passes_phone_override(monkeypatch):
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(guide_client, "TwilioSmsClient", lambda: object())
+    send_mock = AsyncMock(return_value={"order_id": "order_1", "sent_to": "+15559998888", "payment_link": "x"})
+    monkeypatch.setattr(guide_client.payments, "send_payment_link", send_mock)
+
+    asyncio.run(
+        guide_client._execute_tool(
+            "sendPaymentLink", json.dumps({"order_id": "order_1", "phone": "+15559998888"}), GuideSession()
+        )
+    )
+
+    assert send_mock.call_args.kwargs["phone"] == "+15559998888"
+
+
+def test_execute_tool_booqable_error_returns_error_json(monkeypatch):
+    def raise_error():
+        raise guide_client.BooqableError("BOOQABLE_API_KEY is not configured")
+
+    monkeypatch.setattr(guide_client, "BooqableClient", raise_error)
+
+    result = asyncio.run(guide_client._execute_tool("listCatalog", "{}", GuideSession()))
+
+    assert "error" in json.loads(result)
+
+
+def test_execute_tool_twilio_error_returns_error_json(monkeypatch):
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(guide_client, "TwilioSmsClient", lambda: object())
+    monkeypatch.setattr(
+        guide_client.payments,
+        "send_payment_link",
+        AsyncMock(side_effect=guide_client.TwilioSmsError("Invalid 'To' Phone Number", status_code=400)),
+    )
+
+    result = asyncio.run(
+        guide_client._execute_tool("sendPaymentLink", json.dumps({"order_id": "order_1"}), GuideSession())
+    )
+
+    assert "error" in json.loads(result)
+
+
+def test_execute_tool_malformed_arguments_returns_error(monkeypatch):
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+
+    result = asyncio.run(guide_client._execute_tool("listCatalog", "not json", GuideSession()))
+
+    assert "error" in json.loads(result)
+
+
+def test_execute_tool_missing_required_argument_returns_error(monkeypatch):
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+
+    result = asyncio.run(guide_client._execute_tool("cancelReservation", "{}", GuideSession()))
+
     assert "error" in json.loads(result)
 
 

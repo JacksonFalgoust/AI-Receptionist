@@ -22,8 +22,8 @@ Caller ⇄ Twilio number ⇄ Conversation Relay ⇄ this app (/twiml, /ws) ⇄ G
 | `app/speaker_events.py` | Pure logic: `classify` recognizes Twilio's speaker-event messages (`agentSpeaking`/`clientSpeaking` start/stop) — the agent-stopped event is the real "reply finished playing" signal. |
 | `app/config.py` | Loads settings from `.env`. |
 | `.env.example` | Template for required configuration — copy to `.env`. |
-| `app/reservations_api.py` | FastAPI router: `/api/reservations/*` + `/api/booqable/ping`, the tool surface GuideAnts calls to check availability and book rentals. See "Reservation API" below. |
-| `app/reservations.py` | Booqable business logic (catalog, availability, create/cancel order) behind `app/reservations_api.py`. |
+| `app/reservations_api.py` | FastAPI router: just `/api/booqable/ping`, a manual connectivity check. |
+| `app/reservations.py` | Booqable business logic (catalog, availability, create/cancel order), called directly by `app/guide_client.py`'s reservation tool handlers. See "Reservation tools" below. |
 | `app/booqable_client.py` | Thin async HTTP client for Booqable's JSON:API v4, Bearer-token auth. |
 | `tests/` | Unit tests for the pure-logic and API-router modules above. |
 | `scripts/check_streaming.py` | Diagnostic to check whether a GuideAnts guide streams incrementally (see below). |
@@ -109,34 +109,47 @@ this code. This app is just the phone/WebSocket bridge.
    mid-reply or just after — they're genuinely noise, never sent to
    GuideAnts, like fillers and other non-trigger mid-reply speech.
 
-## Reservation API
+## Reservation tools
 
-Separate from the Twilio call bridge above, this app also serves the Booqable
-reservation surface the GuideAnts receptionist guide calls as a tool (via its
-imported OpenAPI schema, `guide-demo/booqable-reservations-openapi.json`) —
+Separate from the Twilio call bridge above, this app also resolves the
+Booqable reservation operations the GuideAnts receptionist guide calls as
+**Client Actions** tools (via `guide-demo/reservations-client-tool.json`) —
 so one running app (`uvicorn app.main:app --port 8080`) is enough for both the
 phone call and live availability/booking, instead of running a second
-project.
+project. Like `get_caller_phone_number`, GuideAnts never calls these itself
+over HTTP: it hands each `function_call` back to this app mid-call, and
+`app/guide_client.py` answers it directly. This means there is no
+`/api/reservations/*` HTTP endpoint at all — the only route left in
+`app/reservations_api.py` is a manual connectivity check:
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/booqable/ping` | Connectivity check — confirms `BOOQABLE_API_KEY`/`BOOQABLE_COMPANY_URL` are correct. Unauthenticated. |
-| GET | `/api/reservations/catalog` | Live rentable product list (name, `product_id`, price). |
-| GET | `/api/reservations/availability` | Check stock for a product/date-range/quantity. |
-| POST | `/api/reservations` | Find-or-create customer, create order, book items, and (by default) reserve it. |
-| POST | `/api/reservations/{order_id}/cancel` | Cancel a reservation. |
 
-The four `/api/reservations/*` routes require an `X-Api-Key` header matching
-`RECEPTIONIST_API_KEY` — a secret distinct from `BOOQABLE_API_KEY`, since the
-LLM should never see the real Booqable key. `app/reservations_api.py` wraps
-`app/booqable_client.py`'s `BooqableClient`/`app/reservations.py`'s find/check/book/reserve
-workflow so GuideAnts never has to speak Booqable's JSON:API format directly.
+| Tool | Purpose |
+|---|---|
+| `listCatalog` | Live rentable product list (name, `product_id`, price). |
+| `checkAvailability` | Check stock for a product/date-range/quantity. |
+| `listCustomers` | Look up an existing customer by name/phone/email. |
+| `createCustomer` | Register a caller as a customer without booking, optionally with a follow-up note. |
+| `createReservation` | Find-or-create customer, create order, book items, and (by default) reserve it. |
+| `cancelReservation` | Cancel a reservation. |
+| `sendPaymentLink` | Text the caller a payment link for their reservation. |
 
-`POST /api/reservations` takes flat `customer_name`/`customer_email`/
-`customer_phone` fields (not a nested `customer` object — GuideAnts' OpenAPI
-tool-schema converter can't see into nested object properties) and requires
-at least one of `customer_email`/`customer_phone`. See
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#post-apireservations-request-shape) for
+None of these need an API key of their own — since GuideAnts never dials out
+for them, there's no shared secret to configure or leak, unlike the earlier
+Web API tool source this demo used to use. `app/guide_client.py`'s
+`_run_reservation_tool` wraps `app/booqable_client.py`'s
+`BooqableClient`/`app/reservations.py`'s find/check/book/reserve workflow
+(plus `app/payments.py` for `sendPaymentLink`) so the guide never has to
+speak Booqable's JSON:API format directly, and the LLM never sees
+`BOOQABLE_API_KEY` either — only this app's own process reads it.
+
+`createReservation` takes flat `customer_name`/`customer_email`/
+`customer_phone` arguments (not a nested `customer` object — GuideAnts'
+OpenAPI-to-tool-schema converter can't see into nested object properties) and
+requires at least one of `customer_email`/`customer_phone`. See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#createreservation-argument-shape) for
 why, and for a couple of non-obvious Booqable v4 quirks around how phone
 numbers actually get stored.
 
