@@ -333,6 +333,8 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         t, st.task = st.task, None
         await _cancel_and_await(t)
 
+    authenticated = False
+
     try:
         while True:
             raw = await websocket.receive_text()
@@ -351,6 +353,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                     await websocket.close(code=1008)  # policy violation
                     return
 
+                authenticated = True
                 st.guide.caller_phone = msg.get("from")
                 logger.info(
                     "Call setup: callSid=%s from=%s to=%s",
@@ -358,6 +361,19 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                     msg.get("from"),
                     msg.get("to"),
                 )
+
+            elif not authenticated:
+                # No branch below this may touch the guide or any
+                # tool-calling code until a valid `setup` has verified the
+                # token -- otherwise a client could skip `setup` entirely
+                # and drive the guide (including reservation/payment tools)
+                # with zero authentication. Reject exactly like a failed
+                # setup does.
+                logger.warning(
+                    "Rejecting /ws: message type %r before authenticated setup", msg_type
+                )
+                await websocket.close(code=1008)  # policy violation
+                return
 
             elif msg_type == "prompt":
                 text = msg.get("voicePrompt", "") or ""

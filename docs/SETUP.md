@@ -256,9 +256,12 @@ requests with a missing/invalid signature (403), and mints a short-lived,
 HMAC-signed token bound to the call's `CallSid`, embedded in the `wss://` URL
 it returns. `/ws` verifies that token against the `callSid` reported in the
 call's `setup` message and closes the connection if it doesn't match or has
-expired. If `TWILIO_AUTH_TOKEN` is left unset, both checks are skipped (with
-a logged warning) so local/dev use without a token still works as before. See
-`app/twilio_auth.py` for the implementation.
+expired. No other message type is processed — the guide is never touched —
+until a `setup` message has passed that check: a client that sends `prompt`
+(or anything else) before a valid `setup` gets the connection closed the
+same way. If `TWILIO_AUTH_TOKEN` is left unset, both checks are skipped
+(with a logged warning) so local/dev use without a token still works as
+before. See `app/twilio_auth.py` for the implementation.
 
 ## Optional hardening (not implemented, not required for the demo)
 
