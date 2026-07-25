@@ -65,10 +65,10 @@ from creating the GuideAnts guide through placing a real phone call.
       the source as client-handled.
    4. No Authentication tab entry is needed — GuideAnts never sends a real
       HTTP request for this tool source.
-   5. Save. The seven operations (`listCatalog`, `checkAvailability`,
-      `createReservation`, `cancelReservation`, `listCustomers`,
-      `createCustomer`, `sendPaymentLink`) should appear as tools the guide
-      can call.
+   5. Save. The eight operations (`listCatalog`, `checkAvailability`,
+      `createReservation`, `findReservations`, `cancelReservation`,
+      `listCustomers`, `createCustomer`, `sendPaymentLink`) should appear as
+      tools the guide can call.
    6. **If you edit `reservations-client-tool.json` later**, re-paste it into
       the same Schema tab and save — the file on disk isn't read live, and
       there's no auto-sync. A stale copy is a common source of confusing

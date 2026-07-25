@@ -108,9 +108,10 @@ GuideAnts has multiple ways to talk to a published guide:
 ### Client-side tool calls
 
 The guide's entire tool surface is client-side: `get_caller_phone_number`
-(no arguments) plus the seven Booqable reservation operations
+(no arguments) plus the eight Booqable reservation operations
 (`listCatalog`, `checkAvailability`, `listCustomers`, `createCustomer`,
-`createReservation`, `cancelReservation`, `sendPaymentLink`). None of these
+`createReservation`, `findReservations`, `cancelReservation`,
+`sendPaymentLink`). None of these
 are server-side Booqable-style HTTP tools GuideAnts calls itself — all of
 them are resolved by whichever client is on the call, i.e. this app, in
 `app/guide_client.py`.
@@ -626,7 +627,7 @@ call path, and stays in that project.
   `response.conversation` here is the durable continuation handle `app/guide_client.py` captures into `GuideSession.conversation_id`. The openai SDK also exposes the concatenated text directly as `response.output_text`.
 - **Streaming response** (`stream: true`, used on every turn including the first): `text/event-stream`, typed events —
   `response.created` → `response.output_item.added` → `response.content_part.added` → repeated `response.output_text.delta` (the actual token text, in `.delta`) → `response.output_text.done` → `response.output_item.done` → `response.completed`. On a current GuideAnts build, both the `response.created` and `response.completed` events' embedded `response` object carry the same `conversation` field as the non-streaming body — `app/guide_client.py` reads it off whichever of those two events arrives first with the session not yet having an id. An older GuideAnts build whose stream predates this omits the field entirely; see the `stream_missing_conversation` fallback in `app/guide_client.py` above.
-- **Tool calls**: the endpoint also supports OpenAI-style `tools`/client-side tool execution (emitted as `function_call` output items). All eight of this app's tools (`get_caller_phone_number` plus the seven Booqable reservation operations) are declared in the GuideAnts UI as **Client Actions** sources (`client://` scheme, `ActionType.ClientHandled`, `ToolCaller.cs`, GuideAnts repo), not via a request-level `tools` param — GuideAnts never executes any of them itself; it hands each `function_call` back to this app instead, which answers it in `app/guide_client.py`. See "Client-side tool calls" below for the full mechanism and why the reservation operations moved here from an earlier Web API tool source.
+- **Tool calls**: the endpoint also supports OpenAI-style `tools`/client-side tool execution (emitted as `function_call` output items). All nine of this app's tools (`get_caller_phone_number` plus the eight Booqable reservation operations) are declared in the GuideAnts UI as **Client Actions** sources (`client://` scheme, `ActionType.ClientHandled`, `ToolCaller.cs`, GuideAnts repo), not via a request-level `tools` param — GuideAnts never executes any of them itself; it hands each `function_call` back to this app instead, which answers it in `app/guide_client.py`. See "Client-side tool calls" below for the full mechanism and why the reservation operations moved here from an earlier Web API tool source.
 - **Errors this app handles specially**: HTTP 400 with `code: "conversation_not_found"` or `code: "invalid_conversation_id"` — GuideAnts no longer recognizes the `conversation` id sent (e.g. it restarted and lost in-memory/db state). `guide_client.stream_reply` catches this, clears the session, and retries once as a fresh conversation (no recap replay — prior context for that call is lost; see "Known gaps" below).
 - **Other errors**: e.g. `403 endpoint_disabled` if the guide's "Enable Wire API" / **"Responses"** toggle isn't turned on in the Publish dialog (see SETUP.md step 1.5 — note this is a different checkbox from "Chat Completions").
 

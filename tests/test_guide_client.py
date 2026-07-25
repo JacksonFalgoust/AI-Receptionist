@@ -395,6 +395,24 @@ def test_execute_tool_create_customer(monkeypatch):
     assert register_mock.call_args.kwargs["note"] == "wants to buy an e-bike"
 
 
+def test_execute_tool_find_reservations(monkeypatch):
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    fake_result = {
+        "customer_found": True,
+        "customer_name": "Jane Doe",
+        "reservations": [{"order_id": "order_1", "status": "reserved", "items": [{"name": "Cruiser", "quantity": 1}]}],
+    }
+    find_mock = AsyncMock(return_value=fake_result)
+    monkeypatch.setattr(guide_client.reservations, "find_reservations", find_mock)
+
+    result = asyncio.run(
+        guide_client._execute_tool("findReservations", json.dumps({"customer_phone": "+15551234567"}), GuideSession())
+    )
+
+    assert json.loads(result) == fake_result
+    assert find_mock.call_args.kwargs["phone"] == "+15551234567"
+
+
 def test_execute_tool_cancel_reservation(monkeypatch):
     monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
     fake_result = {"order_id": "order_1", "previous_status": "reserved", "status": "canceled"}
