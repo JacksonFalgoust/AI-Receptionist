@@ -129,6 +129,7 @@ _RESERVATION_TOOLS = {
     "listCustomers",
     "createCustomer",
     "createReservation",
+    "findReservations",
     "cancelReservation",
     "sendPaymentLink",
 }
@@ -178,6 +179,10 @@ async def _run_reservation_tool(name: str, args: dict[str, Any]) -> dict[str, An
             stops_at=args["stops_at"],
             items=args["items"],
             auto_reserve=args.get("auto_reserve", True),
+        )
+    if name == "findReservations":
+        return await reservations.find_reservations(
+            client, email=args.get("customer_email"), phone=args.get("customer_phone")
         )
     if name == "cancelReservation":
         return await reservations.cancel_reservation(client, args["order_id"])
