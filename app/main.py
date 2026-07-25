@@ -154,6 +154,8 @@ class CallState:
 async def conversation_relay_ws(websocket: WebSocket) -> None:
     await websocket.accept()
 
+    token = websocket.query_params.get("token", "")
+
     st = CallState()
 
     async def respond_to(input_text: str, filler_eligible: bool) -> None:
@@ -343,6 +345,12 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
             msg_type = msg.get("type")
 
             if msg_type == "setup":
+                call_sid = msg.get("callSid", "")
+                if not twilio_auth.verify_ws_token(token, call_sid):
+                    logger.warning("Rejecting /ws: invalid token for callSid=%s", call_sid)
+                    await websocket.close(code=1008)  # policy violation
+                    return
+
                 st.guide.caller_phone = msg.get("from")
                 logger.info(
                     "Call setup: callSid=%s from=%s to=%s",

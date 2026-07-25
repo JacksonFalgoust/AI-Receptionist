@@ -247,11 +247,21 @@ If you wired up the reservation tools (step 1.7), try these too:
   afterward: a customer should exist with a note describing the request (e.g.
   "wants to buy an e-bike").
 
+## Security
+
+`X-Twilio-Signature` validation on `/twiml`, and token verification on the
+`/ws` WebSocket upgrade, are enforced automatically whenever
+`TWILIO_AUTH_TOKEN` is set — no extra setup step required. `/twiml` rejects
+requests with a missing/invalid signature (403), and mints a short-lived,
+HMAC-signed token bound to the call's `CallSid`, embedded in the `wss://` URL
+it returns. `/ws` verifies that token against the `callSid` reported in the
+call's `setup` message and closes the connection if it doesn't match or has
+expired. If `TWILIO_AUTH_TOKEN` is left unset, both checks are skipped (with
+a logged warning) so local/dev use without a token still works as before. See
+`app/twilio_auth.py` for the implementation.
+
 ## Optional hardening (not implemented, not required for the demo)
 
-- **Validate `X-Twilio-Signature`** on `/twiml` (and the WebSocket upgrade
-  request) using `TWILIO_AUTH_TOKEN`, so only real Twilio requests are
-  accepted. Useful before exposing this publicly for real.
 - **Handle `end`/handoff messages** (e.g., transfer to a human) and configure
   the `<Connect action="...">` callback URL.
 - **Silence timeouts** — end or re-prompt the call if the caller goes quiet.
