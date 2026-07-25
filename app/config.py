@@ -27,6 +27,7 @@ WELCOME_GREETING = os.environ.get(
 )
 
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
+WS_TOKEN_TTL_SECONDS = int(os.environ.get("WS_TOKEN_TTL_SECONDS", "120"))
 
 PORT = int(os.environ.get("PORT", "8080"))
 
