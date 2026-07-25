@@ -63,7 +63,7 @@ env var is unset):
 | `GUIDEANTS_MODEL` | `GUIDEANTS_MODEL` | `"guide"` | `app/guide_client.py` — `model` field in the responses request (fixed alias, not a real model name) |
 | `GUIDEANTS_TIMEOUT_SECONDS` | `GUIDEANTS_TIMEOUT_SECONDS` | `30` | `app/guide_client.py` — request timeout passed to the `AsyncOpenAI` client (with `max_retries=1`), replacing the SDK's 600s/2-retry defaults, which would be dead air on a live call |
 | `WELCOME_GREETING` | `WELCOME_GREETING` | `"Thanks for calling! How can I help you today?"` | `app/main.py` — spoken by Twilio before any WS traffic happens |
-| `TWILIO_AUTH_TOKEN` | `TWILIO_AUTH_TOKEN` | `""` | not currently used in code — reserved for optional `X-Twilio-Signature` validation (not implemented, see SETUP.md) |
+| `TWILIO_AUTH_TOKEN` | `TWILIO_AUTH_TOKEN` | `""` | used both for outbound SMS auth (`app/twilio_client.py`) and to enforce `X-Twilio-Signature` validation on `/twiml` plus token verification on `/ws` (`app/twilio_auth.py`); if unset, that validation is skipped with a warning, matching pre-hardening behavior |
 | `PORT` | `PORT` | `8080` | not read by `app/main.py` itself — `uvicorn` is started with `--port` on the command line; this constant is unused today |
 | `FILLER_PHRASES` | `FILLER_PHRASES` | a built-in list of 6 phrases (e.g. `"Let me look that up for you."`) | `app/main.py` (via `fillers.pick`) — pool of filler phrases spoken before the real reply when the caller's utterance looks like a question/request *and* GuideAnts hasn't replied within `FILLER_DELAY_SECONDS`. Pipe-separated (`\|`) in the env var, since phrases contain commas/periods; falls back to the built-in list if unset. |
 | `FILLER_DELAY_SECONDS` | `FILLER_DELAY_SECONDS` | `1.0` | `app/main.py` — how long to wait for GuideAnts' reply, for a filler-eligible utterance, before speaking a filler phrase. If the reply arrives before this elapses, no filler is spoken at all. |
@@ -654,8 +654,7 @@ call path, and stays in that project.
 
 ## Known gaps (intentionally out of scope today)
 
-From SETUP.md's "optional hardening" list — not implemented, not required for the demo to work:
-- No `X-Twilio-Signature` validation on `/twiml` (any request to that URL is trusted).
+From SETUP.md's hardening notes — not implemented, not required for the demo to work:
 - No handling of Twilio `end`/handoff messages (e.g. transfer to a human).
 - No silence timeout / re-prompt if the caller goes quiet.
 - `dtmf` digits are logged but never acted on — no keypad menu.
