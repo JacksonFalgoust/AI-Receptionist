@@ -60,7 +60,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 from twilio.twiml.voice_response import Connect, VoiceResponse
 
-from . import barge_in, config, fillers, speaker_events, speech_timing
+from . import barge_in, config, fillers, speaker_events, speech_timing, twilio_auth
 from .guide_client import GuideSession, build_input, stream_reply
 from .reservations_api import router as reservations_router
 
@@ -81,12 +81,17 @@ PENDING_TURN_CEILING_SECONDS = 10.0
 @app.post("/twiml")
 async def twiml(request: Request) -> Response:
     """Return TwiML that connects the call to our Conversation Relay WebSocket."""
+    if not await twilio_auth.validate_twiml_request(request):
+        return Response(status_code=403)
+
     host = request.headers.get("host", request.url.hostname)
+    call_sid = (await request.form()).get("CallSid", "")
+    token = twilio_auth.mint_ws_token(call_sid)
 
     vr = VoiceResponse()
     connect = Connect()
     connect.conversation_relay(
-        url=f"wss://{host}/ws",
+        url=f"wss://{host}/ws?token={token}",
         welcome_greeting=config.WELCOME_GREETING,
         tts_provider="ElevenLabs",
         transcription_provider="Deepgram",
