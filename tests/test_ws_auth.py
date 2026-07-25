@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from app import config, twilio_auth
+from app import main
 from app.main import app
 
 client = TestClient(app)
@@ -148,3 +149,77 @@ def test_ws_setup_missing_call_sid_with_correctly_minted_empty_token_stays_open(
         outcome = _await_close_or_timeout(websocket)
 
     assert outcome is None
+
+
+def test_ws_prompt_before_setup_is_rejected_and_never_reaches_guide(monkeypatch):
+    """The Critical bug a reviewer caught: token verification originally
+    lived only inside the `setup` branch, so a client that skips `setup`
+    entirely and sends `prompt` first sailed straight through to
+    schedule_turn -> start_reply -> respond_to -> stream_reply, driving the
+    guide (and any tools it calls) with zero authentication -- exactly the
+    threat this whole feature exists to stop. The message loop must now
+    reject *any* non-setup frame before an authenticated setup has been
+    verified, not just fail to authenticate the setup frame itself.
+
+    Proves both halves: the connection is closed (1008), and stream_reply
+    -- the guide entry point everything else in this handler funnels
+    through -- is never even called.
+    """
+    monkeypatch.setattr(config, "TWILIO_AUTH_TOKEN", "test-ws-secret")
+
+    calls = []
+
+    def _fake_stream_reply(input_text, guide):
+        # Records the call the instant stream_reply is invoked, regardless
+        # of whether the returned generator is ever iterated -- if this
+        # runs at all, the bypass succeeded.
+        calls.append(input_text)
+
+        async def _gen():
+            yield "should never run"
+
+        return _gen()
+
+    monkeypatch.setattr(main, "stream_reply", _fake_stream_reply)
+
+    with client.websocket_connect("/ws") as websocket:  # no token, no setup
+        websocket.send_json({"type": "prompt", "voicePrompt": "cancel my reservation"})
+        outcome = _await_close_or_timeout(websocket)
+
+    assert isinstance(outcome, WebSocketDisconnect)
+    assert outcome.code == 1008
+    assert calls == []
+
+
+def test_ws_prompt_after_valid_setup_gets_a_real_reply(monkeypatch):
+    """Strengthens the "stays open" signal from
+    test_ws_setup_with_matching_token_stays_open, which only proves the
+    server didn't close the socket within CLOSE_WAIT_SECONDS -- silence
+    that a hung or silently-erroring server would also produce. This test
+    stubs guide_client.stream_reply (imported into app.main) and asserts an
+    actual `text` reply frame comes back after a valid setup + prompt, a
+    real positive signal instead of an absence-of-negative one.
+    """
+    monkeypatch.setattr(config, "TWILIO_AUTH_TOKEN", "test-ws-secret")
+    # Turn buffering normally waits TURN_PAUSE_SECONDS of silence before
+    # committing a turn (see schedule_turn/_arm_commit in app/main.py); drop
+    # it to keep the test fast without changing the behavior under test.
+    monkeypatch.setattr(config, "TURN_PAUSE_SECONDS", 0.01)
+
+    async def _fake_stream_reply(input_text, guide):
+        yield "Hello from the guide"
+
+    monkeypatch.setattr(main, "stream_reply", _fake_stream_reply)
+
+    call_sid = "CA_prompt_after_setup"
+    token = twilio_auth.mint_ws_token(call_sid)
+
+    with client.websocket_connect(f"/ws?token={token}") as websocket:
+        websocket.send_json(
+            {"type": "setup", "callSid": call_sid, "from": "+15551234567", "to": "+15557654321"}
+        )
+        websocket.send_json({"type": "prompt", "voicePrompt": "hi there", "last": True})
+        frame = websocket.receive_json()
+
+    assert frame["type"] == "text"
+    assert "Hello from the guide" in frame["token"]
