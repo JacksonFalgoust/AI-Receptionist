@@ -25,6 +25,13 @@ TTS_WORDS_PER_SECOND = float(os.environ.get("TTS_WORDS_PER_SECOND", "2.5"))
 WELCOME_GREETING = os.environ.get(
     "WELCOME_GREETING", "Thanks for calling! How can I help you today?"
 )
+WELCOME_BACK_GREETING_TEMPLATE = os.environ.get(
+    "WELCOME_BACK_GREETING_TEMPLATE", "Hi {name}, welcome back! How can I help you today?"
+)
+# Ceiling on the Booqable customer lookup done before answering the call --
+# this runs in the call-answering path (POST /twiml must respond promptly),
+# so a slow/unreachable Booqable must never delay or block picking up.
+CALLER_LOOKUP_TIMEOUT_SECONDS = float(os.environ.get("CALLER_LOOKUP_TIMEOUT_SECONDS", "3"))
 
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
 WS_TOKEN_TTL_SECONDS = int(os.environ.get("WS_TOKEN_TTL_SECONDS", "120"))
