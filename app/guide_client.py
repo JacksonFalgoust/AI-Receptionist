@@ -353,16 +353,42 @@ async def _stream_reply_with_tools(
     generator (barge-in) cascades down to whichever streamed request is
     currently live -- see `stream_reply`'s docstring for why that matters.
     Bounded by _MAX_TOOL_ITERATIONS so a guide that never stops calling tools
-    can't hang a turn forever."""
+    can't hang a turn forever.
+
+    Only the first round's deltas are yielded live. A round that goes on to
+    request a further tool call may still carry real spoken text from
+    GuideAnts (e.g. "let me check the helmet too") -- speaking that
+    immediately risks a later round's audio cutting it off mid-word once
+    Twilio's preemptible-frame semantics kick in. So every round after the
+    first has its deltas buffered locally instead: once we know whether the
+    round was final (no more tool calls) we either flush the buffer (this
+    was the real final answer) or discard it and log at info level (it was
+    narration ahead of another tool call, and would only ever have been
+    interrupted). Round 1 always streams live since there is nothing before
+    it to interrupt."""
     next_input: Any = user_text
+    is_first_round = True
     for _ in range(_MAX_TOOL_ITERATIONS):
         outcome = _TurnOutcome()
+        buffered: list[str] = []
         async with contextlib.aclosing(_stream_turn(client, next_input, session, outcome)) as gen:
             async for delta in gen:
+                if is_first_round:
+                    yield delta
+                else:
+                    buffered.append(delta)
+        is_first_round = False
+        tool_input = await _next_tool_input(outcome, session)
+        if tool_input is None:
+            for delta in buffered:
                 yield delta
-        next_input = await _next_tool_input(outcome, session)
-        if next_input is None:
             return
+        if buffered:
+            logger.info(
+                "Discarding intermediate-round narration ahead of another tool call: %r",
+                "".join(buffered),
+            )
+        next_input = tool_input
     logger.warning("Tool-call loop hit its %d-iteration bound; ending the turn", _MAX_TOOL_ITERATIONS)
 
 
