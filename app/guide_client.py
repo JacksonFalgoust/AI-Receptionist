@@ -18,6 +18,7 @@ next call automatically falls back to starting a fresh conversation --
 earlier context for that call is lost, but the caller still gets an answer.
 """
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -78,6 +79,15 @@ class GuideSession:
     # get_caller_phone_number tool -- not sent as prompt text, since it's
     # only relevant if/when the guide actually asks for it.
     caller_phone: str | None = None
+    # Set the first time get_caller_phone_number is called this session --
+    # caches whether a Booqable customer lookup for caller_phone has already
+    # been attempted, so a call that invokes the tool more than once (e.g.
+    # once during a reservation, again later for a callback) doesn't repeat
+    # the lookup.
+    known_customer_checked: bool = False
+    # The matched Booqable customer record from that lookup, or None if not
+    # yet checked, no match was found, or the lookup failed/timed out.
+    known_customer: dict | None = None
 
 
 def build_input(user_text: str, interrupted_partial: str | None) -> str:
@@ -199,7 +209,25 @@ async def _execute_tool(name: str, arguments: str, session: GuideSession) -> str
     send back as a function_call_output. Never raises -- an error result is
     still a well-formed reply the model can react to."""
     if name == "get_caller_phone_number":
-        return json.dumps({"phone_number": session.caller_phone})
+        if not session.known_customer_checked:
+            session.known_customer_checked = True
+            if session.caller_phone:
+                try:
+                    client = BooqableClient()
+                    session.known_customer = await asyncio.wait_for(
+                        reservations.find_customer(client, phone=session.caller_phone),
+                        timeout=config.CALLER_LOOKUP_TIMEOUT_SECONDS,
+                    )
+                except Exception:
+                    session.known_customer = None
+        result: dict[str, Any] = {"phone_number": session.caller_phone}
+        if session.known_customer:
+            attrs = BooqableClient.attrs(session.known_customer)
+            if attrs.get("name"):
+                result["customer_name"] = attrs["name"]
+            if attrs.get("email"):
+                result["customer_email"] = attrs["email"]
+        return json.dumps(result)
     if name in _RESERVATION_TOOLS:
         try:
             args = json.loads(arguments) if arguments else {}
