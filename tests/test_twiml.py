@@ -75,6 +75,31 @@ def test_twiml_known_customer_gets_personalized_greeting(monkeypatch):
     assert config.WELCOME_BACK_GREETING_TEMPLATE.format(name="Jane") in response.text
 
 
+def test_twiml_malformed_greeting_template_falls_back_to_default_greeting(monkeypatch):
+    token_secret = "test-auth-token"
+    monkeypatch.setattr(config, "TWILIO_AUTH_TOKEN", token_secret)
+    monkeypatch.setattr(config, "BOOQABLE_API_KEY", "test-booqable-key")
+    # Mismatched placeholder -- raises KeyError on .format(name=...), which
+    # must still degrade to the default greeting rather than a 500.
+    monkeypatch.setattr(config, "WELCOME_BACK_GREETING_TEMPLATE", "Hi {nam}, welcome back!")
+
+    async def fake_find_customer(client, *, email=None, phone=None):
+        return {"id": "cust_1", "attributes": {"name": "Jane Doe"}}
+
+    monkeypatch.setattr(reservations, "find_customer", fake_find_customer)
+
+    params = {"CallSid": "CA1234567890abcdef", "From": "+15551234567"}
+    signature = RequestValidator(token_secret).compute_signature(TWIML_URL, params)
+
+    response = client.post(
+        "/twiml", data=params, headers={"X-Twilio-Signature": signature}
+    )
+
+    assert response.status_code == 200
+    assert "wss://testserver/ws?token=" in response.text
+    assert config.WELCOME_GREETING in response.text
+
+
 def test_twiml_unknown_customer_falls_back_to_default_greeting(monkeypatch):
     token_secret = "test-auth-token"
     monkeypatch.setattr(config, "TWILIO_AUTH_TOKEN", token_secret)

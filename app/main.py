@@ -99,15 +99,15 @@ async def _greeting_for(from_number: str) -> str:
             reservations.find_customer(client, phone=from_number),
             timeout=config.CALLER_LOOKUP_TIMEOUT_SECONDS,
         )
+        if not customer:
+            return config.WELCOME_GREETING
+        name = (client.attrs(customer).get("name") or "").split()
+        if not name:
+            return config.WELCOME_GREETING
+        return config.WELCOME_BACK_GREETING_TEMPLATE.format(name=name[0])
     except (BooqableError, asyncio.TimeoutError, Exception):
         logger.warning("Caller lookup failed; using default greeting", exc_info=True)
         return config.WELCOME_GREETING
-    if not customer:
-        return config.WELCOME_GREETING
-    name = (client.attrs(customer).get("name") or "").split()
-    if not name:
-        return config.WELCOME_GREETING
-    return config.WELCOME_BACK_GREETING_TEMPLATE.format(name=name[0])
 
 
 @app.post("/twiml")
