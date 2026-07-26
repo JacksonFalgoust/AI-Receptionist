@@ -252,7 +252,14 @@ def _function_call_item(call_id: str, name: str = "get_caller_phone_number", arg
     return SimpleNamespace(type="function_call", call_id=call_id, name=name, arguments=arguments)
 
 
-def test_execute_tool_returns_caller_phone():
+def test_execute_tool_returns_caller_phone(monkeypatch):
+    monkeypatch.setattr(guide_client.config, "BOOQABLE_API_KEY", "test-booqable-key")
+
+    async def fake_find_customer(client, *, email=None, phone=None):
+        return None
+
+    monkeypatch.setattr(guide_client.reservations, "find_customer", fake_find_customer)
+
     session = GuideSession(caller_phone="+15551234567")
     result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
     assert json.loads(result) == {"phone_number": "+15551234567"}
@@ -262,6 +269,68 @@ def test_execute_tool_returns_null_when_caller_phone_unknown():
     session = GuideSession(caller_phone=None)
     result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
     assert json.loads(result) == {"phone_number": None}
+
+
+def test_execute_tool_caller_phone_includes_known_customer_info(monkeypatch):
+    monkeypatch.setattr(guide_client.config, "BOOQABLE_API_KEY", "test-booqable-key")
+
+    async def fake_find_customer(client, *, email=None, phone=None):
+        return {"id": "cust_1", "attributes": {"name": "Jane Doe", "email": "jane@example.com"}}
+
+    monkeypatch.setattr(guide_client.reservations, "find_customer", fake_find_customer)
+
+    session = GuideSession(caller_phone="+15551234567")
+    result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
+    assert json.loads(result) == {
+        "phone_number": "+15551234567",
+        "customer_name": "Jane Doe",
+        "customer_email": "jane@example.com",
+    }
+
+
+def test_execute_tool_caller_phone_lookup_raises_falls_back_gracefully(monkeypatch):
+    monkeypatch.setattr(guide_client.config, "BOOQABLE_API_KEY", "test-booqable-key")
+
+    async def fake_find_customer(client, *, email=None, phone=None):
+        raise RuntimeError("Booqable is down")
+
+    monkeypatch.setattr(guide_client.reservations, "find_customer", fake_find_customer)
+
+    session = GuideSession(caller_phone="+15551234567")
+    result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
+    assert json.loads(result) == {"phone_number": "+15551234567"}
+
+
+def test_execute_tool_caller_phone_lookup_timeout_falls_back_gracefully(monkeypatch):
+    monkeypatch.setattr(guide_client.config, "BOOQABLE_API_KEY", "test-booqable-key")
+    monkeypatch.setattr(guide_client.config, "CALLER_LOOKUP_TIMEOUT_SECONDS", 0.01)
+
+    async def fake_find_customer(client, *, email=None, phone=None):
+        await asyncio.sleep(0.5)
+        return {"id": "cust_1", "attributes": {"name": "Jane Doe"}}
+
+    monkeypatch.setattr(guide_client.reservations, "find_customer", fake_find_customer)
+
+    session = GuideSession(caller_phone="+15551234567")
+    result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
+    assert json.loads(result) == {"phone_number": "+15551234567"}
+
+
+def test_execute_tool_caller_phone_caches_lookup_across_calls(monkeypatch):
+    monkeypatch.setattr(guide_client.config, "BOOQABLE_API_KEY", "test-booqable-key")
+
+    find_customer_mock = AsyncMock(
+        return_value={"id": "cust_1", "attributes": {"name": "Jane Doe"}}
+    )
+    monkeypatch.setattr(guide_client.reservations, "find_customer", find_customer_mock)
+
+    session = GuideSession(caller_phone="+15551234567")
+    first = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
+    second = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
+
+    assert json.loads(first)["customer_name"] == "Jane Doe"
+    assert json.loads(second)["customer_name"] == "Jane Doe"
+    assert find_customer_mock.call_count == 1
 
 
 def test_execute_tool_unknown_tool_returns_error():

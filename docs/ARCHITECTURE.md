@@ -82,7 +82,7 @@ If `GUIDEANTS_PUB_ID` is empty when the guide client is first used, `app/guide_c
 
 Exposes:
 
-- `GuideSession` — a small dataclass holding the call's continuation state: `conversation_id: str | None`, mutated in place by `stream_reply` as the continuation handle it gets back from GuideAnts, and `caller_phone: str | None`, set once by `app/main.py`'s `setup` handler from Twilio's `from` field and read by the `get_caller_phone_number` client-side tool (see "Client-side tool calls" below). One instance lives for the life of a call (`CallState.guide` in `app/main.py`).
+- `GuideSession` — a small dataclass holding the call's continuation state: `conversation_id: str | None`, mutated in place by `stream_reply` as the continuation handle it gets back from GuideAnts, and `caller_phone: str | None`, set once by `app/main.py`'s `setup` handler from Twilio's `from` field and read by the `get_caller_phone_number` client-side tool (see "Client-side tool calls" below). Also `known_customer_checked: bool` and `known_customer: dict | None`, caching the result of a lazy Booqable customer lookup on `caller_phone`, done at most once per call the first time `get_caller_phone_number` is invoked. One instance lives for the life of a call (`CallState.guide` in `app/main.py`).
 - `stream_reply(user_text, session) -> AsyncIterator[str]` — sends a single caller utterance and yields the guide's reply as text deltas.
 - `build_input(user_text, interrupted_partial) -> str` — pure text-shaping helper, see "Interruption notes" below.
 
@@ -167,9 +167,13 @@ never about correctness or per-call routing (see "Concurrency" below).
     than as its own streamed event.
   - `_stream_reply_with_tools` is the loop that actually drives one caller
     turn: after a streamed request ends, if it collected any `function_call`s,
-    it resolves each via `_execute_tool` — `get_caller_phone_number` just
-    returns `json.dumps({"phone_number": session.caller_phone})` (`null` if
-    the `setup` message never carried a `from`); the seven reservation tool
+    it resolves each via `_execute_tool` — `get_caller_phone_number` returns
+    `json.dumps({"phone_number": ...})` (`null` if the `setup` message never
+    carried a `from`), plus `customer_name`/`customer_email` if a lazy,
+    once-per-call Booqable lookup on that phone number (cached on
+    `GuideSession.known_customer`, bounded by
+    `config.CALLER_LOOKUP_TIMEOUT_SECONDS`, degrading silently to no match on
+    any failure) finds an existing customer; the seven reservation tool
     names are dispatched to `_run_reservation_tool`, which builds a
     `BooqableClient` (and a `TwilioSmsClient` for `sendPaymentLink`) and calls
     straight into `app/reservations.py`/`app/payments.py` — the same

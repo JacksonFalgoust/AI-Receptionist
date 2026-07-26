@@ -16,7 +16,7 @@
       "get": {
         "operationId": "get_caller_phone_number",
         "summary": "Get the phone number of the caller currently on this call",
-        "description": "Takes no arguments. Use this to get the caller's own phone number, e.g. to offer it as a reservation or callback number instead of asking for it. May return a null phone_number if it isn't available for this call.",
+        "description": "Takes no arguments. Use this to get the caller's own phone number, e.g. to offer it as a reservation or callback number instead of asking for it, and to check whether they're a known customer before asking for their name. May return a null phone_number if it isn't available for this call. If the calling number matches an existing customer, the response also includes customer_name and, if on file, customer_email -- confirm this info with the caller instead of asking for their name and contact info fresh.",
         "responses": {
           "200": {
             "description": "The caller's phone number",
@@ -29,6 +29,14 @@
                       "type": "string",
                       "nullable": true,
                       "description": "The caller's phone number as provided by Twilio caller ID, or null if unavailable"
+                    },
+                    "customer_name": {
+                      "type": "string",
+                      "description": "Present only if the calling number matches an existing Booqable customer -- their name on file"
+                    },
+                    "customer_email": {
+                      "type": "string",
+                      "description": "Present only if a matching customer was found and has an email on file"
                     }
                   }
                 }
