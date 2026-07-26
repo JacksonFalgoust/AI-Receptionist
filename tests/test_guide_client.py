@@ -597,6 +597,80 @@ def test_tool_loop_stops_at_iteration_bound(monkeypatch):
     assert create.call_count == guide_client._MAX_TOOL_ITERATIONS
 
 
+def test_intermediate_round_narration_is_buffered_and_discarded(monkeypatch):
+    # Round 1: no text, just a tool call (today's existing coverage).
+    round1_events = [
+        SimpleNamespace(type="response.created", response=SimpleNamespace(conversation="conv_abc")),
+        SimpleNamespace(type="response.output_item.done", item=_function_call_item("call_1")),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(conversation="conv_abc", id="resp_1", output=[]),
+        ),
+    ]
+    # Round 2: the exact GuideAnts shape that causes the bug -- both text
+    # deltas *and* a second function call in the same round.
+    round2_events = [
+        SimpleNamespace(type="response.output_text.delta", delta="Let me check "),
+        SimpleNamespace(type="response.output_text.delta", delta="the helmet too."),
+        SimpleNamespace(type="response.output_item.done", item=_function_call_item("call_2")),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(conversation="conv_abc", id="resp_2", output=[]),
+        ),
+    ]
+    # Round 3: only text, no function call -- the true final answer.
+    round3_events = [
+        SimpleNamespace(type="response.output_text.delta", delta="You're all set."),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(conversation="conv_abc", id="resp_3", output=[]),
+        ),
+    ]
+    create = AsyncMock(
+        side_effect=[FakeStream(round1_events), FakeStream(round2_events), FakeStream(round3_events)]
+    )
+    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+
+    session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
+    deltas = asyncio.run(_collect(guide_client.stream_reply("book me a bike and a helmet", session)))
+
+    assert deltas == ["You're all set."]
+    assert create.call_count == 3
+
+
+def test_first_round_text_streams_live_alongside_final_round(monkeypatch):
+    # Round 1 has both text *and* a function call -- proves round 1's text
+    # streams live even though it precedes another tool call.
+    round1_events = [
+        SimpleNamespace(type="response.created", response=SimpleNamespace(conversation="conv_abc")),
+        SimpleNamespace(type="response.output_text.delta", delta="Sure, "),
+        SimpleNamespace(type="response.output_text.delta", delta="checking now."),
+        SimpleNamespace(type="response.output_item.done", item=_function_call_item("call_1")),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(conversation="conv_abc", id="resp_1", output=[]),
+        ),
+    ]
+    # Round 2 has no function call -- the true final answer.
+    round2_events = [
+        SimpleNamespace(type="response.output_text.delta", delta="You're all set."),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(conversation="conv_abc", id="resp_2", output=[]),
+        ),
+    ]
+    create = AsyncMock(side_effect=[FakeStream(round1_events), FakeStream(round2_events)])
+    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+
+    session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
+    deltas = asyncio.run(_collect(guide_client.stream_reply("book me a bike", session)))
+
+    assert deltas == ["Sure, ", "checking now.", "You're all set."]
+    assert create.call_count == 2
+
+
 def test_no_tools_kwarg_sent_on_any_turn(monkeypatch):
     # The tool is declared on the guide in GuideAnts (a Client Actions tool
     # source, see guide-demo/caller-phone-client-tool.json) -- this app never
