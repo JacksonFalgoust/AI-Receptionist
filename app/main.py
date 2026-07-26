@@ -27,7 +27,12 @@ finished, falling back to a word-count estimate of the speaking time
 When a caller's utterance looks like a question or request
 (see fillers.py) and GuideAnts' reply doesn't arrive within
 config.FILLER_DELAY_SECONDS, a short filler phrase is spoken while still
-waiting on the same in-flight call, to mask lookup latency.
+waiting on the same in-flight call, to mask lookup latency. This isn't
+limited to the very first wait: every fetch of the next delta races the
+same timeout, so a reply with several slow tool-call rounds (which can go
+quiet between rounds while a later round's text is buffered pending
+confirmation it's the final one -- see guide_client.py) may speak more than
+one filler phrase in sequence rather than leaving the caller in silence.
 
 Twilio finalizes a "prompt" at each pause in caller speech, so one spoken
 turn can arrive as several prompt messages. Prompts that would start a new
@@ -169,32 +174,40 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         reply_text = ""
         filler = None
         gen = stream_reply(input_text, st.guide)
+        pending: asyncio.Future | None = None
+
         # Only utterances that look like a question/request (see fillers.py)
-        # are filler-eligible at all. Among those, race GuideAnts' reply
-        # against the filler delay: if it's already back within
-        # FILLER_DELAY_SECONDS, skip the filler; otherwise speak one and keep
-        # waiting on the same in-flight call.
-        first_chunk = asyncio.ensure_future(gen.__anext__())
-        try:
+        # are filler-eligible at all. Among those, race every fetch of the
+        # next delta from GuideAnts against the filler delay: if it's already
+        # back within FILLER_DELAY_SECONDS, skip the filler for that wait;
+        # otherwise speak one and keep waiting on the same in-flight fetch.
+        # This isn't limited to the first delta -- a reply with several
+        # tool-call rounds can go quiet between rounds (buffered rounds don't
+        # emit anything until the final round is confirmed), and each
+        # sufficiently slow wait gets its own filler, so the caller is never
+        # sitting in silence for long regardless of which wait is slow.
+        async def next_delta() -> str | None:
+            nonlocal pending, filler
+            pending = asyncio.ensure_future(gen.__anext__())
             if filler_eligible:
-                done, _ = await asyncio.wait({first_chunk}, timeout=config.FILLER_DELAY_SECONDS)
-                if first_chunk not in done:
-                    filler = fillers.pick(config.FILLER_PHRASES)
-                    if filler:
+                done, _ = await asyncio.wait({pending}, timeout=config.FILLER_DELAY_SECONDS)
+                if pending not in done:
+                    phrase = fillers.pick(config.FILLER_PHRASES)
+                    if phrase:
+                        filler = phrase
                         await websocket.send_json(
-                            {"type": "text", "token": filler + " ", "last": False, "preemptible": True}
+                            {"type": "text", "token": phrase + " ", "last": False, "preemptible": True}
                         )
             try:
-                first_delta = await first_chunk
+                return await pending
             except StopAsyncIteration:
-                first_delta = None
-            if first_delta is not None:
-                await websocket.send_json(
-                    {"type": "text", "token": first_delta, "last": False, "preemptible": True}
-                )
-                reply_text += first_delta
-                st.partial_reply = reply_text
-            async for delta in gen:
+                return None
+
+        try:
+            while True:
+                delta = await next_delta()
+                if delta is None:
+                    break
                 await websocket.send_json(
                     {"type": "text", "token": delta, "last": False, "preemptible": True}
                 )
@@ -202,9 +215,10 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 st.partial_reply = reply_text
             await websocket.send_json({"type": "text", "token": "", "last": True, "preemptible": True})
         except asyncio.CancelledError:
-            first_chunk.cancel()
-            with contextlib.suppress(Exception):
-                await first_chunk
+            if pending:
+                pending.cancel()
+                with contextlib.suppress(Exception):
+                    await pending
             # Ensure the underlying SSE response (if any) is closed before
             # the interrupting turn's request goes out, rather than at GC
             # time -- avoids a stale socket overlapping the next request on
