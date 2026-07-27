@@ -133,8 +133,9 @@ over HTTP: it hands each `function_call` back to this app mid-call, and
 | `listCustomers` | Look up an existing customer by name/phone/email. |
 | `createCustomer` | Register a caller as a customer without booking, optionally with a follow-up note. |
 | `createReservation` | Find-or-create customer, create order, book items, and (by default) reserve it. |
+| `findReservations` | Look up a customer's reservation(s) by phone or email. |
 | `cancelReservation` | Cancel a reservation. |
-| `sendPaymentLink` | Text the caller a payment link for their reservation. |
+| `sendPaymentLink` | Email (default) or text the caller a payment link for their reservation. |
 
 None of these need an API key of their own — since GuideAnts never dials out
 for them, there's no shared secret to configure or leak, unlike the earlier

@@ -1,10 +1,14 @@
 # Payment link — deferred options
 
 The `sendPaymentLink` reservation tool (`app/payments.py`,
-`app/twilio_client.py`, dispatched from `app/guide_client.py`) currently sends an SMS
-with a **placeholder link** (`PAYMENT_LINK_BASE_URL` + the order id — no real
-checkout page, no charge). Two things were deliberately left out of that first
-pass and are documented here so the path to a real version isn't lost.
+`app/postmark_client.py`, `app/twilio_client.py`, dispatched from
+`app/guide_client.py`) sends a **placeholder link**
+(`PAYMENT_LINK_BASE_URL` + the order id — no real checkout page, no charge)
+by email (Postmark) or SMS (Twilio), depending on `channel` /
+`PAYMENT_LINK_DEFAULT_CHANNEL`. SMS is currently unusable pending
+carrier/government verification, which is why email defaults on. One thing
+was deliberately left out of that first pass and is documented here so the
+path to a real version isn't lost.
 
 ## 1. Real payment-link generation (currently a placeholder)
 
@@ -34,30 +38,28 @@ one of:
   programmatic version if one exists beyond what's publicly documented.
 
 Either way, only `payments.build_test_payment_link` and (for the Stripe path)
-`app/payments.py`'s `send_payment_link` need to change — the Twilio-sending
-and Booqable-lookup plumbing around it stays the same.
+`app/payments.py`'s `send_payment_link` need to change — the
+channel-sending and Booqable-lookup plumbing around it stays the same.
 
-## 2. Email delivery (not implemented — SMS only for now)
+## 2. Email delivery — implemented via Postmark
 
-Twilio's Programmable Messaging API only sends SMS/MMS, not email. Options,
-in order of fit for this app:
+Twilio's Programmable Messaging API only sends SMS/MMS, not email, and SMS
+itself is currently unusable pending carrier/government verification, so
+**Postmark** was added as the email channel (chosen over SendGrid/SMTP/Gmail
+API, all considered here previously — Postmark was preferred for its simple
+single-email HTTP endpoint and clear per-message error codes).
 
-- **SendGrid** (Twilio's own email product). Best fit if staying inside the
-  Twilio ecosystem. Needs its own API key (`SENDGRID_API_KEY`) and a verified
-  sender identity/domain. Would mirror `app/twilio_client.py`'s shape: a small
-  `app/sendgrid_client.py` wrapping a POST to
-  `https://api.sendgrid.com/v3/mail/send` (or the `sendgrid` PyPI package),
-  raising a `SendGridError` the same way `TwilioSmsError`/`BooqableError` do.
-- **Plain SMTP** (an existing mailbox/provider, e.g. Gmail/Office365). No new
-  vendor account, but more deliverability risk (personal accounts get rate
-  limited/flagged) and needs an app password or OAuth setup. Python's
-  built-in `smtplib`/`email.mime` would suffice.
-- **Gmail API**. Only worth it if you specifically want to send "from" a
-  Gmail/Workspace account already connected elsewhere in your tooling;
-  otherwise SendGrid is the more production-appropriate choice for a
-  business-facing "pay now" email.
+`app/postmark_client.py` mirrors `app/twilio_client.py`'s shape: a small
+wrapper POSTing to `https://api.postmarkapp.com/email` with
+`X-Postmark-Server-Token` auth, raising `PostmarkError` the same way
+`TwilioSmsError`/`BooqableError` do — on an HTTP error status, and also on a
+non-zero Postmark `ErrorCode` in an otherwise-200 response (e.g. `406`
+inactive recipient, `401` unconfirmed sender signature — `POSTMARK_FROM_EMAIL`
+must be a confirmed Sender Signature in the Postmark account).
 
-Whichever is chosen, it plugs into `app/payments.send_payment_link` the same
-way `TwilioSmsClient` does today — the contact lookup (`get_order_contact`)
-already returns `email` alongside `phone`, it's just unused by the payments
-flow right now.
+It plugs into `app/payments.send_payment_link` alongside `TwilioSmsClient` —
+the contact lookup (`get_order_contact`) already returns `email` alongside
+`phone`; `send_payment_link` picks whichever channel is requested (or
+falls back to `config.PAYMENT_LINK_DEFAULT_CHANNEL`, `"email"` today) and
+sends through the matching client. The link itself is still the placeholder
+from §1 above — implementing email didn't touch that.
