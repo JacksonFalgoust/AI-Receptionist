@@ -26,11 +26,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          latest=$(gh release list --limit 1000 --json tagName -q '.[].tagName' \
-            | grep -oE 'published-guides-v[0-9]+-' \
-            | grep -oE '[0-9]+' \
-            | sort -n \
-            | tail -1) || true
+          tags=$(gh release list --limit 1000 --json tagName -q '.[].tagName')
+          latest=$(printf '%s\n' "$tags" | grep -oE 'published-guides-v[0-9]+-' | grep -oE '[0-9]+' | sort -n | tail -1) || true
           if [ -z "$latest" ]; then
             next=1
           else
