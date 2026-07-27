@@ -175,6 +175,21 @@ curl http://localhost:8080/api/booqable/ping
    required for the demo to run, but keep them handy (and see the optional
    signature-validation note below).
 
+## 4b. Postmark account setup (for the `sendPaymentLink` email channel)
+
+The `sendPaymentLink` tool emails a payment link by default — SMS
+(`TWILIO_ACCOUNT_SID`/`TWILIO_FROM_NUMBER` above) is only used if you set
+`PAYMENT_LINK_DEFAULT_CHANNEL=sms` or the guide passes `channel: sms`.
+
+1. In the Postmark dashboard, open your server and copy its **Server API
+   token** (Servers → your server → API Tokens) into `POSTMARK_SERVER_TOKEN`.
+2. Confirm a **Sender Signature** for the address you want to send from
+   (Sender Signatures → Add Domain/Signature, then click the confirmation
+   link Postmark emails you) and put that address in `POSTMARK_FROM_EMAIL`.
+   Sending with an unconfirmed address fails every send with `ErrorCode 401`.
+3. Leave `POSTMARK_MESSAGE_STREAM` unset unless you've created a custom
+   message stream — it defaults to `outbound`.
+
 ## 5. Run the app and expose it publicly
 
 Conversation Relay requires a public `wss://` URL — it will not connect to
@@ -240,6 +255,11 @@ If you wired up the reservation tools (step 1.7), try these too:
   whether to use the number you're calling from or a different one — not just
   assume one. Answer either way and confirm it uses the right number in the
   confirmation and in the resulting order in Booqable.
+- **After booking, say yes to the payment link.** The guide should ask to
+  email it, then ask for (or confirm) an email address and read it back
+  before sending. Confirm the email actually arrives (check Postmark's
+  Activity tab if it doesn't) and that the guide says "email" rather than
+  "text."
 - **Say "I'd like to buy a bike"** (or "can you service my bike?", or "can I
   talk to a person?"). The guide should offer to have someone call you back,
   ask for your name, then use your caller-ID number **without asking** — this

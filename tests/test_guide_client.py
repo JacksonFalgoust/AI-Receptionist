@@ -496,8 +496,12 @@ def test_execute_tool_cancel_reservation(monkeypatch):
 
 def test_execute_tool_send_payment_link(monkeypatch):
     monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
-    monkeypatch.setattr(guide_client, "TwilioSmsClient", lambda: object())
-    fake_result = {"order_id": "order_1", "sent_to": "+15551234567", "payment_link": "https://example.com/pay/order_1"}
+    fake_result = {
+        "order_id": "order_1",
+        "channel": "email",
+        "sent_to": "jane@example.com",
+        "payment_link": "https://example.com/pay/order_1",
+    }
     monkeypatch.setattr(guide_client.payments, "send_payment_link", AsyncMock(return_value=fake_result))
 
     result = asyncio.run(
@@ -509,7 +513,6 @@ def test_execute_tool_send_payment_link(monkeypatch):
 
 def test_execute_tool_send_payment_link_passes_phone_override(monkeypatch):
     monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
-    monkeypatch.setattr(guide_client, "TwilioSmsClient", lambda: object())
     send_mock = AsyncMock(return_value={"order_id": "order_1", "sent_to": "+15559998888", "payment_link": "x"})
     monkeypatch.setattr(guide_client.payments, "send_payment_link", send_mock)
 
@@ -520,6 +523,23 @@ def test_execute_tool_send_payment_link_passes_phone_override(monkeypatch):
     )
 
     assert send_mock.call_args.kwargs["phone"] == "+15559998888"
+
+
+def test_execute_tool_send_payment_link_passes_channel_and_email(monkeypatch):
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    send_mock = AsyncMock(return_value={"order_id": "order_1", "sent_to": "jane@example.com", "payment_link": "x"})
+    monkeypatch.setattr(guide_client.payments, "send_payment_link", send_mock)
+
+    asyncio.run(
+        guide_client._execute_tool(
+            "sendPaymentLink",
+            json.dumps({"order_id": "order_1", "channel": "email", "email": "jane@example.com"}),
+            GuideSession(),
+        )
+    )
+
+    assert send_mock.call_args.kwargs["channel"] == "email"
+    assert send_mock.call_args.kwargs["email"] == "jane@example.com"
 
 
 def test_execute_tool_booqable_error_returns_error_json(monkeypatch):
@@ -535,11 +555,25 @@ def test_execute_tool_booqable_error_returns_error_json(monkeypatch):
 
 def test_execute_tool_twilio_error_returns_error_json(monkeypatch):
     monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
-    monkeypatch.setattr(guide_client, "TwilioSmsClient", lambda: object())
     monkeypatch.setattr(
         guide_client.payments,
         "send_payment_link",
         AsyncMock(side_effect=guide_client.TwilioSmsError("Invalid 'To' Phone Number", status_code=400)),
+    )
+
+    result = asyncio.run(
+        guide_client._execute_tool("sendPaymentLink", json.dumps({"order_id": "order_1"}), GuideSession())
+    )
+
+    assert "error" in json.loads(result)
+
+
+def test_execute_tool_postmark_error_returns_error_json(monkeypatch):
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(
+        guide_client.payments,
+        "send_payment_link",
+        AsyncMock(side_effect=guide_client.PostmarkError("Inactive recipient", status_code=200, error_code=406)),
     )
 
     result = asyncio.run(
