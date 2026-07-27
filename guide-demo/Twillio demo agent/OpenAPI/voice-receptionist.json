@@ -1,0 +1,157 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "AI Receptionist Reservations (Client Action)",
+    "version": "1.0.0",
+    "description": "Client-side reservation tools, not a real HTTP API -- GuideAnts never calls the server URL below. Paste this as a 'Client Actions' tool source (Add Tool Source > Client Actions) rather than 'Web API', the same way guide-demo/caller-phone-client-tool.json is set up. When the guide calls one of these operations, GuideAnts hands the call back unresolved to whichever client is on that conversation; the Twilio demo app (app/guide_client.py's _run_reservation_tool) executes it directly against Booqable (via app/reservations.py / app/payments.py) and returns the result -- there is no longer an HTTP endpoint (like the old /api/reservations/*) that anyone else could call these operations through. See docs/ARCHITECTURE.md's 'Client-side tool calls' section."
+  },
+  "servers": [
+    {
+      "url": "client://voice-receptionist",
+      "description": "The client:// scheme is what marks this as a Client Actions source in GuideAnts -- it is never actually dialed."
+    }
+  ],
+  "paths": {
+    "/catalog": {
+      "get": {
+        "operationId": "listCatalog",
+        "summary": "List rentable products the caller can book",
+        "description": "Use this to look up the product_id needed for availability checks and reservations. Prices are in USD.",
+        "responses": {
+          "200": { "description": "Live product catalog", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/availability": {
+      "get": {
+        "operationId": "checkAvailability",
+        "summary": "Check whether a product is available for a date range and quantity",
+        "description": "Call this before promising a reservation, and again immediately before creating one, since stock can be taken by another booking in between.",
+        "parameters": [
+          { "name": "product_id", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "starts_at", "in": "query", "required": true, "schema": { "type": "string" }, "description": "ISO 8601 date/time, e.g. 2026-08-01T09:00:00" },
+          { "name": "stops_at", "in": "query", "required": true, "schema": { "type": "string" }, "description": "ISO 8601 date/time, e.g. 2026-08-02T17:00:00" },
+          { "name": "quantity", "in": "query", "required": false, "schema": { "type": "integer", "default": 1 } },
+          { "name": "location_id", "in": "query", "required": false, "schema": { "type": "string" }, "description": "Defaults to the account's existing location" }
+        ],
+        "responses": {
+          "200": { "description": "Availability status: available, partial, unavailable, or unknown", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/customers": {
+      "get": {
+        "operationId": "listCustomers",
+        "summary": "List existing customers",
+        "description": "Use this to look someone up by name, phone, or email. Never read the full list back to a caller -- only use it to find a specific match.",
+        "responses": {
+          "200": { "description": "Live customer list", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      },
+      "post": {
+        "operationId": "createCustomer",
+        "summary": "Register a caller as a customer, without booking a reservation",
+        "description": "Finds an existing customer by email or phone rather than creating a duplicate -- always safe to call even if the caller might already exist. Use this for a caller who wants a callback (e.g. to buy a product, get a service, or speak to a person) rather than a reservation. Set note to a short reason for the callback, e.g. 'wants to buy an e-bike' or 'asked to speak to a person', so staff know why when they call back.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["customer_name"],
+                "properties": {
+                  "customer_name": { "type": "string", "description": "The caller's full name" },
+                  "customer_email": { "type": "string", "description": "The caller's email, if given" },
+                  "customer_phone": { "type": "string", "description": "The caller's phone number, if given" },
+                  "note": { "type": "string", "description": "Why the caller wants follow-up, e.g. 'wants to buy an e-bike' or 'asked to speak to a person'" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "The registered customer, including customer_id and whether the note was recorded", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/": {
+      "post": {
+        "operationId": "createReservation",
+        "summary": "Create a reservation for a caller",
+        "description": "Finds or creates the customer, creates the order, books the requested items, and — unless auto_reserve is set to false — immediately reserves it. Only call this after confirming the products, dates, and price with the caller. Before calling: you must have collected customer_name plus at least one of customer_email or customer_phone — ask the caller for whichever they haven't given you yet. If the response shows reserved=false with a reserve_error (e.g. items became unavailable), tell the caller and offer alternatives rather than retrying blindly.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["customer_name", "starts_at", "stops_at", "items"],
+                "properties": {
+                  "customer_name": { "type": "string", "description": "The caller's full name" },
+                  "customer_email": { "type": "string", "description": "The caller's email. Optional only if customer_phone is provided instead." },
+                  "customer_phone": { "type": "string", "description": "The caller's phone number. Optional only if customer_email is provided instead." },
+                  "starts_at": { "type": "string", "description": "ISO 8601 date/time" },
+                  "stops_at": { "type": "string", "description": "ISO 8601 date/time" },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["product_id", "quantity"],
+                      "properties": {
+                        "product_id": { "type": "string", "description": "From listCatalog" },
+                        "quantity": { "type": "integer", "minimum": 1 }
+                      }
+                    }
+                  },
+                  "location_id": { "type": "string", "description": "Defaults to the account's existing location" },
+                  "auto_reserve": { "type": "boolean", "default": true, "description": "Set false to leave as a draft order for staff review instead of reserving immediately" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Reservation result, including order_id, pricing, and whether it was actually reserved", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/{order_id}/cancel": {
+      "post": {
+        "operationId": "cancelReservation",
+        "summary": "Cancel a reservation",
+        "parameters": [
+          { "name": "order_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Cancellation result", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/{order_id}/send-payment-link": {
+      "post": {
+        "operationId": "sendPaymentLink",
+        "summary": "Text the caller a payment link for their reservation",
+        "description": "Sends an SMS with a link so the caller can pay before arrival. This is currently a placeholder/test link -- no real charge is processed yet. Defaults to texting the phone number already on file for the reservation; only pass phone to override it.",
+        "parameters": [
+          { "name": "order_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "phone": { "type": "string", "description": "Override phone number to text, if different from the one on file" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "order_id, the phone number texted, and the payment link sent", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    }
+  }
+}

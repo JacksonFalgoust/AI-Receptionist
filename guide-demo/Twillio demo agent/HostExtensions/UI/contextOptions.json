@@ -1,0 +1,6 @@
+[
+  {
+    "key": "today",
+    "value": "[@currentDate]"
+  }
+]
