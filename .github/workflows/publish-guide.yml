@@ -1,0 +1,53 @@
+name: Publish Guide
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'guide-demo/Twillio demo agent/**'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine next version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          latest=$(gh release list --limit 1000 --json tagName -q '.[].tagName' \
+            | grep -oE 'published-guides-v[0-9]+-' \
+            | grep -oE '[0-9]+' \
+            | sort -n \
+            | tail -1) || true
+          if [ -z "$latest" ]; then
+            next=1
+          else
+            next=$((latest + 1))
+          fi
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+
+      - name: Set date
+        id: date
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Zip guide folder
+        run: |
+          zip -r "Twillio-demo-agent-v${{ steps.version.outputs.version }}-${{ steps.date.outputs.date }}.zip" "guide-demo/Twillio demo agent"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: published-guides-v${{ steps.version.outputs.version }}-${{ steps.date.outputs.date }}
+          name: "Published Guides - v${{ steps.version.outputs.version }} (${{ steps.date.outputs.date }})"
+          files: Twillio-demo-agent-v${{ steps.version.outputs.version }}-${{ steps.date.outputs.date }}.zip
