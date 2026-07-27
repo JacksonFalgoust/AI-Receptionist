@@ -21,6 +21,15 @@ def test_is_stop_command_matches_phrase_followed_by_more_words():
     assert barge_in.is_stop_command("wait a second") is True
 
 
+def test_is_stop_command_matches_bare_actually():
+    assert barge_in.is_stop_command("actually") is True
+
+
+def test_is_stop_command_strips_leading_actually_before_another_stop_phrase():
+    assert barge_in.is_stop_command("actually wait") is True
+    assert barge_in.is_stop_command("actually hold on") is True
+
+
 def test_is_stop_command_false_for_unrelated_text():
     assert barge_in.is_stop_command("what time do you close") is False
 
