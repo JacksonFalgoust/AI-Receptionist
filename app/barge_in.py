@@ -38,11 +38,16 @@ STOP_PHRASES = frozenset(
         "no no",
         "stop talking",
         "listen",
+        "actually",
     }
 )
 
 # Stripped from the front before the stop-phrase check, so "okay stop" is
-# evaluated as "stop".
+# evaluated as "stop". Deliberately excludes "actually" -- that's in
+# STOP_PHRASES itself (a bare "actually" is its own stop signal), and
+# stripping it here would erase that signal before the phrase check ever
+# runs. Its "starts with phrase + ' '" check already covers "actually wait"/
+# "actually hold on" without needing it stripped first.
 LEADING_FILLERS = frozenset(
     {"um", "uh", "er", "ah", "okay", "ok", "so", "well", "hey", "yeah", "like", "oh"}
 )

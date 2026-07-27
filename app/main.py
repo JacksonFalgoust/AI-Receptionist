@@ -182,6 +182,16 @@ class CallState:
     # recognized), so such a call degrades to the plain TURN_PAUSE_SECONDS
     # debounce instead of misbehaving.
     client_speaking: bool = False
+    # True once the guide's most recently completed reply ended in a
+    # question -- e.g. "Would you like the 9am slot?" -- awaiting the
+    # caller's answer. fillers.is_backchannel() would otherwise swallow a
+    # short affirmative ("yeah", "yep", ...) that's actually the caller
+    # answering that question, since to is_backchannel() it looks identical
+    # to the late-STT trailing acknowledgment it exists to catch (see
+    # ARCHITECTURE.md). Reset before each new reply starts, so a barge-in
+    # that cancels a reply before it completes can't leave a stale question
+    # flag from an earlier, unrelated turn in place.
+    guide_awaiting_answer: bool = False
 
 
 @app.websocket("/ws")
@@ -274,6 +284,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         # see module docstring).
         if reply_text:
             st.messages.append({"role": "assistant", "content": reply_text})
+            st.guide_awaiting_answer = reply_text.rstrip().endswith("?")
             # Cleared so a later barge-in cancellation (which lands during
             # the pacing sleep below, not during generation) doesn't re-append
             # this same content via the st.partial_reply check in the `prompt`
@@ -326,6 +337,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         st.messages.append({"role": "user", "content": user_text})
         st.partial_reply = ""
         st.playback_text = ""
+        st.guide_awaiting_answer = False
         st.task = asyncio.create_task(respond_to(input_text, fillers.looks_like_question(user_text)))
 
     def _arm_commit(delay: float) -> None:
@@ -481,6 +493,14 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                         # window, so this is the caller continuing that same
                         # turn -- merge it, even if this fragment alone would
                         # look like a backchannel ("...yeah" mid-sentence).
+                        schedule_turn(text)
+                    elif st.guide_awaiting_answer:
+                        # The guide's last reply ended in a question it's
+                        # waiting on the caller to answer, so a short
+                        # affirmative here ("yeah", "yep", ...) is the
+                        # answer, not backchannel noise -- skip the
+                        # is_backchannel() check below and treat it as a
+                        # real turn.
                         schedule_turn(text)
                     elif fillers.is_backchannel(text, config.EXTRA_BACKCHANNEL_PHRASES):
                         # STT can finish transcribing a short "ok" after the
