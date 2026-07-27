@@ -742,9 +742,13 @@ def test_intermediate_round_narration_is_buffered_and_discarded(monkeypatch):
     assert create.call_count == 3
 
 
-def test_first_round_text_streams_live_alongside_final_round(monkeypatch):
+def test_first_round_narration_is_also_buffered_and_discarded(monkeypatch):
     # Round 1 has both text *and* a function call -- proves round 1's text
-    # streams live even though it precedes another tool call.
+    # is buffered and discarded just like any later round's, rather than
+    # spoken live ahead of the tool call. Speaking it live would leave the
+    # caller hearing what sounds like a finished reply during the ensuing
+    # tool-call silence, inviting a false barge-in that cancels the still-
+    # pending real answer.
     round1_events = [
         SimpleNamespace(type="response.created", response=SimpleNamespace(conversation="conv_abc")),
         SimpleNamespace(type="response.output_text.delta", delta="Sure, "),
@@ -770,7 +774,7 @@ def test_first_round_text_streams_live_alongside_final_round(monkeypatch):
     session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
     deltas = asyncio.run(_collect(guide_client.stream_reply("book me a bike", session)))
 
-    assert deltas == ["Sure, ", "checking now.", "You're all set."]
+    assert deltas == ["You're all set."]
     assert create.call_count == 2
 
 
