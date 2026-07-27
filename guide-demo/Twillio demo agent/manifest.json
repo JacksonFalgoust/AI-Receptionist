@@ -1,0 +1,7 @@
+{
+  "name": "Twilio Demo Agent",
+  "description": "Demo for AI receptionist",
+  "defaultModel": "deepseek/deepseek-v4-flash:nitro",
+  "defaultAssistant": null,
+  "crew": []
+}
