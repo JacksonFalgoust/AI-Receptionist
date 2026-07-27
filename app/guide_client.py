@@ -387,29 +387,28 @@ async def _stream_reply_with_tools(
     Bounded by _MAX_TOOL_ITERATIONS so a guide that never stops calling tools
     can't hang a turn forever.
 
-    Only the first round's deltas are yielded live. A round that goes on to
-    request a further tool call may still carry real spoken text from
-    GuideAnts (e.g. "let me check the helmet too") -- speaking that
-    immediately risks a later round's audio cutting it off mid-word once
-    Twilio's preemptible-frame semantics kick in. So every round after the
-    first has its deltas buffered locally instead: once we know whether the
-    round was final (no more tool calls) we either flush the buffer (this
-    was the real final answer) or discard it and log at info level (it was
-    narration ahead of another tool call, and would only ever have been
-    interrupted). Round 1 always streams live since there is nothing before
-    it to interrupt."""
+    No round's deltas are yielded live -- including the first. A round that
+    goes on to request a tool call may still carry real spoken text from
+    GuideAnts (e.g. "let me check the helmet too"); speaking that leaves the
+    caller hearing what sounds like a finished reply during the tool call's
+    silence, which risks a false barge-in (main.py's should_interrupt())
+    cancelling the still-pending real answer -- and, self-inflicted, risks a
+    later round's audio cutting this one off mid-word once Twilio's
+    preemptible-frame semantics kick in. So every round's deltas are
+    buffered locally instead: once we know whether the round was final (no
+    more tool calls) we either flush the buffer (this was the real final
+    answer) or discard it and log at info level (it was narration ahead of
+    a tool call, and would only ever have been interrupted). The latency
+    this narration would have masked is covered instead by app.py's
+    filler-phrase mechanism, which already races every delta fetch
+    (including the first) against config.FILLER_DELAY_SECONDS."""
     next_input: Any = user_text
-    is_first_round = True
     for _ in range(_MAX_TOOL_ITERATIONS):
         outcome = _TurnOutcome()
         buffered: list[str] = []
         async with contextlib.aclosing(_stream_turn(client, next_input, session, outcome)) as gen:
             async for delta in gen:
-                if is_first_round:
-                    yield delta
-                else:
-                    buffered.append(delta)
-        is_first_round = False
+                buffered.append(delta)
         tool_input = await _next_tool_input(outcome, session)
         if tool_input is None:
             for delta in buffered:
