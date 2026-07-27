@@ -135,3 +135,17 @@ TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER", "")
 # Placeholder until real Stripe/Booqable payment-link generation exists (see
 # docs/PAYMENT_LINK_OPTIONS.md) -- not a real checkout URL yet.
 PAYMENT_LINK_BASE_URL = os.environ.get("PAYMENT_LINK_BASE_URL", "https://example.com/pay").rstrip("/")
+
+# Outbound email (the sendPaymentLink reservation tool) -- Postmark. Added
+# because Twilio SMS is unavailable while carrier/government verification is
+# pending; the SMS path above still works and is re-selected by flipping
+# PAYMENT_LINK_DEFAULT_CHANNEL. POSTMARK_FROM_EMAIL must be a confirmed Sender
+# Signature in the Postmark account or every send fails with ErrorCode 401.
+POSTMARK_SERVER_TOKEN = os.environ.get("POSTMARK_SERVER_TOKEN", "")
+POSTMARK_FROM_EMAIL = os.environ.get("POSTMARK_FROM_EMAIL", "")
+POSTMARK_MESSAGE_STREAM = os.environ.get("POSTMARK_MESSAGE_STREAM", "outbound")
+POSTMARK_API_URL = os.environ.get("POSTMARK_API_URL", "https://api.postmarkapp.com").rstrip("/")
+
+# Fallback channel when the guide calls sendPaymentLink without one: "email" or
+# "sms". Keep at "email" until Twilio verification clears.
+PAYMENT_LINK_DEFAULT_CHANNEL = os.environ.get("PAYMENT_LINK_DEFAULT_CHANNEL", "email").strip().lower()

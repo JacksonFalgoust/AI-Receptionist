@@ -130,8 +130,8 @@
     "/{order_id}/send-payment-link": {
       "post": {
         "operationId": "sendPaymentLink",
-        "summary": "Text the caller a payment link for their reservation",
-        "description": "Sends an SMS with a link so the caller can pay before arrival. This is currently a placeholder/test link -- no real charge is processed yet. Defaults to texting the phone number already on file for the reservation; only pass phone to override it.",
+        "summary": "Send the caller a payment link for their reservation",
+        "description": "Emails or texts a link so the caller can pay before arrival. This is currently a placeholder/test link -- no real charge is processed yet. SMS is temporarily unavailable while carrier/government verification is pending, so this defaults to emailing the address already on file for the reservation unless channel is set to 'sms'. Pass email or phone to override the contact on file.",
         "parameters": [
           { "name": "order_id", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -142,6 +142,8 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "channel": { "type": "string", "enum": ["email", "sms"], "description": "Which channel to send the payment link over: 'email' (default) or 'sms'. SMS is temporarily unavailable pending carrier/government verification." },
+                  "email": { "type": "string", "description": "Override email address to send to, if different from the one on file" },
                   "phone": { "type": "string", "description": "Override phone number to text, if different from the one on file" }
                 }
               }
@@ -149,7 +151,7 @@
           }
         },
         "responses": {
-          "200": { "description": "order_id, the phone number texted, and the payment link sent", "content": { "application/json": { "schema": { "type": "object" } } } }
+          "200": { "description": "order_id, the channel used, the address/number contacted, and the payment link sent", "content": { "application/json": { "schema": { "type": "object" } } } }
         }
       }
     }
