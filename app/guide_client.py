@@ -30,7 +30,8 @@ from openai import AsyncOpenAI
 
 from . import config, payments, reservations
 from .booqable_client import BooqableClient, BooqableError
-from .twilio_client import TwilioSmsClient, TwilioSmsError
+from .postmark_client import PostmarkError
+from .twilio_client import TwilioSmsError
 
 logger = logging.getLogger("voice_receptionist.guide")
 
@@ -197,9 +198,12 @@ async def _run_reservation_tool(name: str, args: dict[str, Any]) -> dict[str, An
     if name == "cancelReservation":
         return await reservations.cancel_reservation(client, args["order_id"])
     if name == "sendPaymentLink":
-        twilio_client = TwilioSmsClient()
         return await payments.send_payment_link(
-            client, twilio_client, order_id=args["order_id"], phone=args.get("phone")
+            client,
+            order_id=args["order_id"],
+            channel=args.get("channel"),
+            phone=args.get("phone"),
+            email=args.get("email"),
         )
     raise KeyError(name)
 
@@ -236,7 +240,7 @@ async def _execute_tool(name: str, arguments: str, session: GuideSession) -> str
             return json.dumps({"error": "malformed arguments"})
         try:
             result = await _run_reservation_tool(name, args)
-        except (BooqableError, TwilioSmsError) as exc:
+        except (BooqableError, TwilioSmsError, PostmarkError) as exc:
             logger.warning("Reservation tool %r failed: %s", name, exc)
             return json.dumps({"error": str(exc)})
         except KeyError as exc:

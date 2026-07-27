@@ -73,6 +73,12 @@ env var is unset):
 | `EXTRA_STOP_PHRASES` | `EXTRA_STOP_PHRASES` | `[]` (empty) | `app/main.py` (via `barge_in.should_interrupt`/`is_stop_command`) — comma-separated phrases, on top of the built-in `barge_in.STOP_PHRASES`, that also cancel an in-flight reply when heard mid-reply. |
 | `STOP_ACK_PHRASES` | `STOP_ACK_PHRASES` | a built-in list of 4 phrases (e.g. `"Okay."`) | `app/main.py` (via `fillers.pick`) — pool of short local acknowledgments spoken (instead of a GuideAnts reply) when a stop/wait phrase cancels an in-flight reply. Pipe-separated (`\|`) in the env var; falls back to the built-in list if unset. |
 | `TTS_WORDS_PER_SECOND` | `TTS_WORDS_PER_SECOND` | `2.5` | `app/main.py` (via `speech_timing.estimate_seconds`) — assumed TTS speaking rate, used to estimate how long a reply takes to speak aloud. Twilio's agent-stopped speaker event is the primary "reply finished playing" signal; this estimate paces replies until the first such event is recognized on a call, and caps how long the app waits for one after that (×1.5 + 2s). |
+| `TWILIO_ACCOUNT_SID` / `TWILIO_FROM_NUMBER` | same | `""` | `app/twilio_client.py` — outbound SMS for the `sendPaymentLink` tool's `sms` channel; currently unusable pending carrier/government verification |
+| `PAYMENT_LINK_BASE_URL` | same | `https://example.com/pay` | `app/payments.py` — placeholder payment link, not a real checkout URL (see `docs/PAYMENT_LINK_OPTIONS.md`) |
+| `POSTMARK_SERVER_TOKEN` / `POSTMARK_FROM_EMAIL` | same | `""` | `app/postmark_client.py` — outbound email for the `sendPaymentLink` tool's default `email` channel; `POSTMARK_FROM_EMAIL` must be a confirmed Sender Signature in the Postmark account or sends fail with `ErrorCode 401` |
+| `POSTMARK_MESSAGE_STREAM` | same | `"outbound"` | `app/postmark_client.py` — Postmark message stream sends are tagged under |
+| `POSTMARK_API_URL` | same | `https://api.postmarkapp.com` | `app/postmark_client.py` — overridable for testing |
+| `PAYMENT_LINK_DEFAULT_CHANNEL` | same | `"email"` | `app/payments.py` — which channel `sendPaymentLink` falls back to when the guide doesn't pass one; flip to `"sms"` once Twilio verification clears |
 
 If `GUIDEANTS_PUB_ID` is empty when the guide client is first used, `app/guide_client.py` raises a `RuntimeError` telling the user to fill in `.env` — this is the only config validation in the app.
 
@@ -173,13 +179,16 @@ never about correctness or per-call routing (see "Concurrency" below).
     once-per-call Booqable lookup on that phone number (cached on
     `GuideSession.known_customer`, bounded by
     `config.CALLER_LOOKUP_TIMEOUT_SECONDS`, degrading silently to no match on
-    any failure) finds an existing customer; the seven reservation tool
+    any failure) finds an existing customer; the eight reservation tool
     names are dispatched to `_run_reservation_tool`, which builds a
-    `BooqableClient` (and a `TwilioSmsClient` for `sendPaymentLink`) and calls
-    straight into `app/reservations.py`/`app/payments.py` — the same
+    `BooqableClient` and calls straight into
+    `app/reservations.py`/`app/payments.py` — the same
     find/check/book/reserve/register/cancel/pay logic the old
     `/api/reservations/*` routes wrapped, just invoked directly instead of
-    over HTTP. A `BooqableError`/`TwilioSmsError` (or a missing required
+    over HTTP. `sendPaymentLink` picks a `PostmarkClient` or `TwilioSmsClient`
+    inside `app/payments.py` itself, based on the `channel` argument (or
+    `config.PAYMENT_LINK_DEFAULT_CHANNEL` if none is given). A
+    `BooqableError`/`TwilioSmsError`/`PostmarkError` (or a missing required
     argument) is caught and turned into `json.dumps({"error": ...})` rather
     than raised — `_execute_tool` never raises, an error result is still a
     well-formed reply the model can react to. Resolving each call then
@@ -463,10 +472,11 @@ naturally instead of repeating itself or guessing. The mechanism:
 
 ## Reservation tools (app/guide_client.py, app/reservations.py, app/payments.py, app/booqable_client.py)
 
-Booqable availability/booking/customer/payment-link operations are seven of
+Booqable availability/booking/customer/payment-link operations are eight of
 the guide's client-side tools (see "Client-side tool calls" above) —
 `listCatalog`, `checkAvailability`, `listCustomers`, `createCustomer`,
-`createReservation`, `cancelReservation`, `sendPaymentLink`. GuideAnts hands
+`createReservation`, `findReservations`, `cancelReservation`, `sendPaymentLink`.
+GuideAnts hands
 each unresolved `function_call` back to this app, same as
 `get_caller_phone_number`; there's no `/api/reservations/*` HTTP surface
 anymore (`app/reservations_api.py` now only serves `/api/booqable/ping`, a
@@ -480,12 +490,12 @@ GuideAnts (function_call, unresolved) ⇄ this app (app/guide_client.py) ⇄ Boo
 ```
 
 - **`app/guide_client.py`** — `_run_reservation_tool(name, args)` dispatches
-  each of the seven tool names to the matching call below, building a
-  `BooqableClient()` (and, for `sendPaymentLink`, a `TwilioSmsClient()`) per
-  call. `_execute_tool` wraps it: JSON-decodes `arguments`, catches
-  `BooqableError`/`TwilioSmsError`/a missing-argument `KeyError`, and always
-  returns a `json.dumps(...)` string — see "Client-side tool calls" above for
-  how this fits into the tool-call round-trip.
+  each of the eight tool names to the matching call below, building a
+  `BooqableClient()` per call. `_execute_tool` wraps it: JSON-decodes
+  `arguments`, catches `BooqableError`/`TwilioSmsError`/`PostmarkError`/a
+  missing-argument `KeyError`, and always returns a `json.dumps(...)` string —
+  see "Client-side tool calls" above for how this fits into the tool-call
+  round-trip.
 - **`app/reservations.py`** — the actual find/check/book/reserve/register logic
   against a `BooqableClient`: `list_catalog`, `check_product_availability`,
   `find_or_create_customer`, `create_reservation`, `cancel_reservation`,
@@ -494,7 +504,14 @@ GuideAnts (function_call, unresolved) ⇄ this app (app/guide_client.py) ⇄ Boo
   mapping a product group to its bookable product.
 - **`app/payments.py`** — `send_payment_link` (used by the `sendPaymentLink`
   tool): looks up the order's contact via `reservations.get_order_contact`,
-  then sends the SMS via `TwilioSmsClient`.
+  then picks a channel (`email` by default, or `sms`, per the `channel`
+  argument or `config.PAYMENT_LINK_DEFAULT_CHANNEL`) and sends via
+  `PostmarkClient` or `TwilioSmsClient` accordingly.
+- **`app/postmark_client.py`** — thin `httpx` wrapper around Postmark's Email
+  API (`POST {POSTMARK_API_URL}/email`), raising `PostmarkError` on an HTTP
+  error status *or* a non-zero Postmark `ErrorCode` in an otherwise-200
+  response (e.g. `406` inactive recipient, `401` unconfirmed sender
+  signature).
 - **`app/booqable_client.py`** — a thin async `httpx` wrapper around Booqable's
   JSON:API v4 (`{company_url}/api/4`), Bearer-token auth from
   `config.BOOQABLE_API_KEY`, plus `resource()`/`attrs()` helpers for building
@@ -586,7 +603,7 @@ booking a reservation — used by the callback flow in the guide's instructions
   registered customer, with `note_recorded: false` and a `note_error` field,
   rather than failing the whole call over a note.
 
-**Auth**: none of the seven reservation tools need one — they're never
+**Auth**: none of the eight reservation tools need one — they're never
 reachable over HTTP at all, only as `function_call`s GuideAnts hands back to
 this app mid-call (see "Client-side tool calls" above), so there's no shared
 secret to configure or leak. `/api/booqable/ping` (the one route that does
