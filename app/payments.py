@@ -1,10 +1,10 @@
 """Glue between the Booqable reservation data and outbound payment-link
 delivery -- kept separate from reservations.py (Booqable-only) and the
 per-vendor clients (twilio_client.py, postmark_client.py). Supports both an
-email channel (Postmark) and an SMS channel (Twilio); SMS is currently
-unavailable pending carrier/government verification, so
-config.PAYMENT_LINK_DEFAULT_CHANNEL defaults to "email". build_test_payment_link
-is a placeholder: no real Stripe/Booqable payment-link generation exists yet
+email channel (Postmark) and an SMS channel (Twilio); either can be selected
+per call via `channel`, and config.PAYMENT_LINK_DEFAULT_CHANNEL picks the
+default when the caller doesn't specify. build_test_payment_link is a
+placeholder: no real Stripe/Booqable payment-link generation exists yet
 (see docs/PAYMENT_LINK_OPTIONS.md)."""
 
 from __future__ import annotations
