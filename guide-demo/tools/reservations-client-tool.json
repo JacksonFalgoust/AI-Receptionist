@@ -145,7 +145,7 @@
       "post": {
         "operationId": "sendPaymentLink",
         "summary": "Send the caller a payment link for their reservation",
-        "description": "Emails or texts a link so the caller can pay before arrival. This is currently a placeholder/test link -- no real charge is processed yet. SMS is temporarily unavailable while carrier/government verification is pending, so this defaults to emailing the address already on file for the reservation unless channel is set to 'sms'. Pass email or phone to override the contact on file.",
+        "description": "Emails or texts a link so the caller can pay before arrival. This is currently a placeholder/test link -- no real charge is processed yet. Defaults to emailing the address already on file for the reservation unless channel is set to 'sms', in which case it texts the phone number on file. Pass email or phone to override the contact on file.",
         "parameters": [
           { "name": "order_id", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -156,7 +156,7 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "channel": { "type": "string", "enum": ["email", "sms"], "description": "Which channel to send the payment link over: 'email' (default) or 'sms'. SMS is temporarily unavailable pending carrier/government verification." },
+                  "channel": { "type": "string", "enum": ["email", "sms"], "description": "Which channel to send the payment link over: 'email' (default) or 'sms'." },
                   "email": { "type": "string", "description": "Override email address to send to, if different from the one on file" },
                   "phone": { "type": "string", "description": "Override phone number to text, if different from the one on file" }
                 }

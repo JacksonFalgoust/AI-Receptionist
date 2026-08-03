@@ -5,10 +5,12 @@ The `sendPaymentLink` reservation tool (`app/payments.py`,
 `app/guide_client.py`) sends a **placeholder link**
 (`PAYMENT_LINK_BASE_URL` + the order id — no real checkout page, no charge)
 by email (Postmark) or SMS (Twilio), depending on `channel` /
-`PAYMENT_LINK_DEFAULT_CHANNEL`. SMS is currently unusable pending
-carrier/government verification, which is why email defaults on. One thing
-was deliberately left out of that first pass and is documented here so the
-path to a real version isn't lost.
+`PAYMENT_LINK_DEFAULT_CHANNEL`. Both channels are live -- Twilio's A2P 10DLC
+brand/campaign registration, the carrier/government verification SMS needed,
+cleared, so SMS is no longer restricted to the email fallback; email just
+stays the default unless a caller asks to be texted. One thing was
+deliberately left out of that first pass and is documented here so the path
+to a real version isn't lost.
 
 ## 1. Real payment-link generation (currently a placeholder)
 
@@ -43,11 +45,11 @@ channel-sending and Booqable-lookup plumbing around it stays the same.
 
 ## 2. Email delivery — implemented via Postmark
 
-Twilio's Programmable Messaging API only sends SMS/MMS, not email, and SMS
-itself is currently unusable pending carrier/government verification, so
-**Postmark** was added as the email channel (chosen over SendGrid/SMTP/Gmail
-API, all considered here previously — Postmark was preferred for its simple
-single-email HTTP endpoint and clear per-message error codes).
+Twilio's Programmable Messaging API only sends SMS/MMS, not email, so
+**Postmark** was added as a second channel alongside SMS (chosen over
+SendGrid/SMTP/Gmail API, all considered here previously — Postmark was
+preferred for its simple single-email HTTP endpoint and clear per-message
+error codes).
 
 `app/postmark_client.py` mirrors `app/twilio_client.py`'s shape: a small
 wrapper POSTing to `https://api.postmarkapp.com/email` with
