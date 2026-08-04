@@ -43,6 +43,13 @@ _INTERRUPTED_TAIL_CHARS = 150
 
 _LOST_CONVERSATION_CODES = {"conversation_not_found", "invalid_conversation_id"}
 
+# GuideAnts rejects a function_call_output whose turn is no longer "streaming"
+# (it completed, or -- the case we hit -- was cancelled server-side when a
+# mid-stream disconnect aborted the request that carried it). See
+# GuideAnts' WireToolResultContinuation.cs. Treated like a lost conversation:
+# the turn is unresumable, so recover by starting fresh rather than crashing.
+_STALE_TOOL_RESULT_CODE = "tool_results_not_pending"
+
 # Ceiling on responses.create calls within a single caller turn (one call, plus
 # one more per round of tool calls) -- guards against a guide that keeps
 # calling tools without ever producing a text answer.
@@ -120,6 +127,10 @@ def _extract_conversation_id(response) -> str | None:
 def _is_lost_conversation(err: "openai.BadRequestError") -> bool:
     code = getattr(err, "code", None)
     return code in _LOST_CONVERSATION_CODES
+
+
+def _is_stale_tool_result(err: "openai.BadRequestError") -> bool:
+    return getattr(err, "code", None) == _STALE_TOOL_RESULT_CODE
 
 
 # All of these tools -- get_caller_phone_number plus the Booqable reservation
@@ -297,7 +308,10 @@ async def _start_conversation(client: AsyncOpenAI, input_text: str, session: Gui
         kwargs: dict[str, Any] = {"model": config.GUIDEANTS_MODEL, "input": next_input}
         if session.conversation_id is not None:
             kwargs["conversation"] = session.conversation_id
-        response = await client.responses.create(**kwargs)
+        # Same non-idempotence guard as _stream_turn: never retry a tool-output
+        # submission (next_input is a list of function_call_output items).
+        call_client = client.with_options(max_retries=0) if isinstance(next_input, list) else client
+        response = await call_client.responses.create(**kwargs)
         if session.conversation_id is None:
             session.conversation_id = _extract_conversation_id(response)
             if session.conversation_id is None:
@@ -340,7 +354,14 @@ async def _stream_turn(
     if had_conversation_id:
         kwargs["conversation"] = session.conversation_id
 
-    stream = await client.responses.create(**kwargs)
+    # A tool-output submission (input is a list of function_call_output items)
+    # is not idempotent: if it reaches GuideAnts and the connection then blips,
+    # the SDK's automatic retry re-POSTs the same call_id -- but the first
+    # attempt has already advanced or (on a mid-stream disconnect) cancelled the
+    # turn, so the retry hits tool_results_not_pending. Disable retries for
+    # exactly those calls; a fresh turn's request stays retryable.
+    call_client = client.with_options(max_retries=0) if isinstance(input_value, list) else client
+    stream = await call_client.responses.create(**kwargs)
 
     completed = False
     async with stream:
@@ -447,25 +468,44 @@ async def stream_reply(user_text: str, session: GuideSession) -> AsyncIterator[s
     # (barge-in), nothing would otherwise close the inner one(s) -- wrap it in
     # `aclosing` so `.aclose()` here deterministically closes whichever
     # underlying stream is live too.
-    lost_conversation = False
+    recover_fresh = False
     async with contextlib.aclosing(_stream_reply_with_tools(client, user_text, session)) as gen:
         try:
             async for delta in gen:
                 yield delta
             return
         except openai.BadRequestError as err:
-            if session.conversation_id is None or not _is_lost_conversation(err):
+            if session.conversation_id is None:
                 raise
-            logger.warning(
-                "GuideAnts no longer recognizes conversation %s (%s); starting a "
-                "fresh conversation for this call -- prior context is lost",
-                session.conversation_id,
-                getattr(err, "code", None),
-            )
+            if _is_lost_conversation(err):
+                logger.warning(
+                    "GuideAnts no longer recognizes conversation %s (%s); starting a "
+                    "fresh conversation for this call -- prior context is lost",
+                    session.conversation_id,
+                    getattr(err, "code", None),
+                )
+            elif _is_stale_tool_result(err):
+                # The turn carrying the tool call is no longer resumable (it was
+                # completed or cancelled server-side, typically by a mid-stream
+                # disconnect). Recover like a lost conversation. NOTE: any tool
+                # side effect this app already ran (e.g. a Booqable reservation)
+                # has happened; re-asking on a fresh conversation could prompt
+                # the guide to repeat it -- acceptable for now over crashing the
+                # turn, but worth revisiting if a tool becomes costly to repeat.
+                logger.warning(
+                    "GuideAnts rejected a tool result for conversation %s as no "
+                    "longer pending (%s); the turn was cancelled/completed "
+                    "server-side. Starting a fresh conversation -- prior context "
+                    "is lost",
+                    session.conversation_id,
+                    getattr(err, "code", None),
+                )
+            else:
+                raise
             session.conversation_id = None
-            lost_conversation = True
+            recover_fresh = True
 
-    if lost_conversation:
+    if recover_fresh:
         async with contextlib.aclosing(stream_reply(user_text, session)) as retry_gen:
             async for delta in retry_gen:
                 yield delta
