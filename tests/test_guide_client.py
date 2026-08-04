@@ -15,6 +15,25 @@ async def _collect(aiter):
     return [item async for item in aiter]
 
 
+class _FakeClient(SimpleNamespace):
+    """Stand-in for AsyncOpenAI: exposes `.responses.create` and a
+    `.with_options()` that returns the same client (the real SDK returns a
+    reconfigured copy; sharing one is fine for assertions here). guide_client
+    calls with_options(max_retries=0) on tool-output submissions; each such
+    call's kwargs are recorded in `with_options_calls` for assertions."""
+
+    def __init__(self, **kwargs):
+        super().__init__(with_options_calls=[], **kwargs)
+
+    def with_options(self, **kwargs):
+        self.with_options_calls.append(kwargs)
+        return self
+
+
+def _fake_client(create) -> _FakeClient:
+    return _FakeClient(responses=SimpleNamespace(create=create))
+
+
 class FakeStream:
     """Minimal stand-in for the openai SDK's responses streaming context
     manager: an async context manager that is also an async iterator."""
@@ -56,7 +75,7 @@ def test_first_turn_streams_and_captures_conversation_from_created_event(monkeyp
     ]
     stream = FakeStream(events)
     create = AsyncMock(return_value=stream)
-    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    fake_client = _fake_client(create)
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession()
@@ -79,7 +98,7 @@ def test_first_turn_accepts_object_shaped_conversation(monkeypatch):
     ]
     stream = FakeStream(events)
     create = AsyncMock(return_value=stream)
-    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    fake_client = _fake_client(create)
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession()
@@ -96,7 +115,7 @@ def test_conversation_captured_from_completed_when_created_lacks_it(monkeypatch)
     ]
     stream = FakeStream(events)
     create = AsyncMock(return_value=stream)
-    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    fake_client = _fake_client(create)
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession()
@@ -117,7 +136,7 @@ def test_continuation_turn_streams_with_conversation_param(monkeypatch):
     ]
     stream = FakeStream(events)
     create = AsyncMock(return_value=stream)
-    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    fake_client = _fake_client(create)
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc")
@@ -140,7 +159,7 @@ def test_lost_conversation_recovers_with_fresh_streaming_call(monkeypatch):
     ]
     retry_stream = FakeStream(retry_events)
     create = AsyncMock(side_effect=[_bad_request_error("conversation_not_found"), retry_stream])
-    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    fake_client = _fake_client(create)
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_stale")
@@ -158,9 +177,84 @@ def test_lost_conversation_recovers_with_fresh_streaming_call(monkeypatch):
     assert retry_stream.closed
 
 
+def test_stale_tool_result_recovers_with_fresh_conversation(monkeypatch):
+    # A tool round-trip whose output submission is rejected as no longer
+    # pending (the turn was cancelled/completed server-side, e.g. a mid-stream
+    # disconnect) must recover like a lost conversation rather than crash.
+    monkeypatch.setattr(guide_client.config, "BOOQABLE_API_KEY", "test-booqable-key")
+    tool_call_events = [
+        SimpleNamespace(type="response.created", response=SimpleNamespace(conversation="conv_abc")),
+        SimpleNamespace(type="response.output_item.done", item=_function_call_item("call_1")),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(conversation="conv_abc", id="resp_1", output=[]),
+        ),
+    ]
+    fresh_events = [
+        SimpleNamespace(type="response.created", response=SimpleNamespace(conversation="conv_new")),
+        SimpleNamespace(type="response.output_text.delta", delta="Fresh reply"),
+        SimpleNamespace(type="response.completed", response=SimpleNamespace(conversation="conv_new")),
+    ]
+    fresh_stream = FakeStream(fresh_events)
+    create = AsyncMock(
+        side_effect=[
+            FakeStream(tool_call_events),
+            _bad_request_error("tool_results_not_pending"),
+            fresh_stream,
+        ]
+    )
+    fake_client = _fake_client(create)
+    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+
+    session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
+    deltas = asyncio.run(_collect(guide_client.stream_reply("what's my number?", session)))
+
+    assert deltas == ["Fresh reply"]
+    assert session.conversation_id == "conv_new"
+    assert create.call_count == 3
+    # The rejected submission carried the tool output on the original convo...
+    assert create.call_args_list[1].kwargs["conversation"] == "conv_abc"
+    assert create.call_args_list[1].kwargs["input"][0]["type"] == "function_call_output"
+    # ...and the fresh retry re-asks the original utterance on a new convo.
+    assert "conversation" not in create.call_args_list[2].kwargs
+    assert create.call_args_list[2].kwargs["input"] == "what's my number?"
+    assert fresh_stream.closed
+
+
+def test_tool_output_submission_disables_sdk_retries(monkeypatch):
+    # The tool-output submission (input is a list) must go out with retries
+    # disabled, since re-POSTing it after a blip is what produces a stale
+    # tool_results_not_pending. The initial turn keeps its retries.
+    tool_call_events = [
+        SimpleNamespace(type="response.created", response=SimpleNamespace(conversation="conv_abc")),
+        SimpleNamespace(type="response.output_item.done", item=_function_call_item("call_1")),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(conversation="conv_abc", id="resp_1", output=[]),
+        ),
+    ]
+    text_events = [
+        SimpleNamespace(type="response.output_text.delta", delta="ok"),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(conversation="conv_abc", id="resp_2", output=[]),
+        ),
+    ]
+    create = AsyncMock(side_effect=[FakeStream(tool_call_events), FakeStream(text_events)])
+    fake_client = _fake_client(create)
+    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+
+    session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
+    asyncio.run(_collect(guide_client.stream_reply("what's my number?", session)))
+
+    # Exactly the submission (the 2nd create) went through with_options; the
+    # first turn did not.
+    assert fake_client.with_options_calls == [{"max_retries": 0}]
+
+
 def test_other_bad_request_errors_propagate(monkeypatch):
     create = AsyncMock(side_effect=_bad_request_error("endpoint_disabled"))
-    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    fake_client = _fake_client(create)
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc")
@@ -174,7 +268,7 @@ def test_cancellation_closes_stream(monkeypatch):
     events = [SimpleNamespace(type="response.output_text.delta", delta="Hel")]
     stream = FakeStream(events, gate=gate)
     create = AsyncMock(return_value=stream)
-    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    fake_client = _fake_client(create)
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     async def scenario():
@@ -203,7 +297,7 @@ def test_aclose_after_first_delta_closes_underlying_stream(monkeypatch):
     ]
     stream = FakeStream(events)
     create = AsyncMock(return_value=stream)
-    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    fake_client = _fake_client(create)
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     async def scenario():
@@ -227,7 +321,7 @@ def test_missing_conversation_falls_back_to_non_streaming_next_turn(monkeypatch)
     turn1_stream = FakeStream(turn1_events)
     turn2_response = SimpleNamespace(id="resp_x", conversation="conv_new", output_text="ok again")
     create = AsyncMock(side_effect=[turn1_stream, turn2_response])
-    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    fake_client = _fake_client(create)
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession()
@@ -619,7 +713,7 @@ def test_streamed_tool_call_round_trip_yields_only_text(monkeypatch):
     tool_call_stream = FakeStream(tool_call_events)
     text_stream = FakeStream(text_events)
     create = AsyncMock(side_effect=[tool_call_stream, text_stream])
-    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    fake_client = _fake_client(create)
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
@@ -665,7 +759,7 @@ def test_function_call_backstop_from_completed_output(monkeypatch):
         ),
     ]
     create = AsyncMock(side_effect=[FakeStream(tool_call_events), FakeStream(text_events)])
-    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    fake_client = _fake_client(create)
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc", caller_phone="555")
@@ -690,7 +784,7 @@ def test_tool_loop_stops_at_iteration_bound(monkeypatch):
         )
 
     create = AsyncMock(side_effect=[tool_call_stream(f"call_{i}") for i in range(10)])
-    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    fake_client = _fake_client(create)
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc")
@@ -732,7 +826,7 @@ def test_intermediate_round_narration_is_buffered_and_discarded(monkeypatch):
     create = AsyncMock(
         side_effect=[FakeStream(round1_events), FakeStream(round2_events), FakeStream(round3_events)]
     )
-    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    fake_client = _fake_client(create)
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
@@ -768,7 +862,7 @@ def test_first_round_narration_is_also_buffered_and_discarded(monkeypatch):
         ),
     ]
     create = AsyncMock(side_effect=[FakeStream(round1_events), FakeStream(round2_events)])
-    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    fake_client = _fake_client(create)
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
@@ -788,7 +882,7 @@ def test_no_tools_kwarg_sent_on_any_turn(monkeypatch):
         SimpleNamespace(type="response.completed", response=SimpleNamespace(conversation="conv_abc", output=[])),
     ]
     create = AsyncMock(return_value=FakeStream(events))
-    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    fake_client = _fake_client(create)
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession()
@@ -819,7 +913,7 @@ def test_aclose_during_tool_round_trip_closes_active_stream(monkeypatch):
     tool_call_stream = FakeStream(tool_call_events)
     text_stream = FakeStream([SimpleNamespace(type="response.output_text.delta", delta="Sure")], gate=gate)
     create = AsyncMock(side_effect=[tool_call_stream, text_stream])
-    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    fake_client = _fake_client(create)
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     async def scenario():
