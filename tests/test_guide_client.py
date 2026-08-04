@@ -11,8 +11,29 @@ from app import guide_client
 from app.guide_client import GuideSession, build_input
 
 
+@pytest.fixture(autouse=True)
+def _no_sentinel_gating(monkeypatch):
+    """These tests exercise conversation continuation and tool
+    orchestration, not the sentinel-phrase gate itself -- see
+    test_final_answer_sentinel.py for that. Disable gating so every delta
+    streams through unconditionally, matching an empty
+    config.FINAL_ANSWER_SENTINEL (the app's control/no-op mode) -- the
+    compiled patterns are module globals set once at import, so they're
+    monkeypatched directly rather than through config."""
+    monkeypatch.setattr(guide_client, "_SENTINEL_STRICT", None)
+    monkeypatch.setattr(guide_client, "_SENTINEL_LOOSE", None)
+
+
 async def _collect(aiter):
     return [item async for item in aiter]
+
+
+def _texts(events) -> list[str]:
+    return [e.text for e in events if isinstance(e, guide_client.Delta)]
+
+
+def _tool_events(events) -> list["guide_client.ToolCallStarted"]:
+    return [e for e in events if isinstance(e, guide_client.ToolCallStarted)]
 
 
 class _FakeClient(SimpleNamespace):
@@ -79,9 +100,9 @@ def test_first_turn_streams_and_captures_conversation_from_created_event(monkeyp
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession()
-    deltas = asyncio.run(_collect(guide_client.stream_reply("hi", session)))
+    reply_events = asyncio.run(_collect(guide_client.stream_reply("hi", session)))
 
-    assert deltas == ["Hel", "lo"]
+    assert _texts(reply_events) == ["Hel", "lo"]
     assert session.conversation_id == "conv_abc"
     assert session.stream_missing_conversation is False
     assert stream.closed
@@ -119,9 +140,9 @@ def test_conversation_captured_from_completed_when_created_lacks_it(monkeypatch)
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession()
-    deltas = asyncio.run(_collect(guide_client.stream_reply("hi", session)))
+    reply_events = asyncio.run(_collect(guide_client.stream_reply("hi", session)))
 
-    assert deltas == ["Hi"]
+    assert _texts(reply_events) == ["Hi"]
     assert session.conversation_id == "conv_late"
     assert session.stream_missing_conversation is False
 
@@ -140,9 +161,9 @@ def test_continuation_turn_streams_with_conversation_param(monkeypatch):
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc")
-    deltas = asyncio.run(_collect(guide_client.stream_reply("what did I say?", session)))
+    reply_events = asyncio.run(_collect(guide_client.stream_reply("what did I say?", session)))
 
-    assert deltas == ["Hel", "lo"]
+    assert _texts(reply_events) == ["Hel", "lo"]
     assert stream.closed
     _, kwargs = create.call_args
     assert kwargs["stream"] is True
@@ -163,9 +184,9 @@ def test_lost_conversation_recovers_with_fresh_streaming_call(monkeypatch):
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_stale")
-    deltas = asyncio.run(_collect(guide_client.stream_reply("hi again", session)))
+    reply_events = asyncio.run(_collect(guide_client.stream_reply("hi again", session)))
 
-    assert deltas == ["Fresh reply"]
+    assert _texts(reply_events) == ["Fresh reply"]
     assert session.conversation_id == "conv_new"
     assert create.call_count == 2
     first_kwargs = create.call_args_list[0].kwargs
@@ -175,6 +196,34 @@ def test_lost_conversation_recovers_with_fresh_streaming_call(monkeypatch):
     assert "conversation" not in second_kwargs
     assert second_kwargs["stream"] is True
     assert retry_stream.closed
+
+
+def test_lost_conversation_does_not_retry_once_text_was_already_spoken(monkeypatch):
+    # A BadRequestError after this turn already emitted a Delta must not be
+    # retried -- a retry would re-speak text the caller already heard. Only
+    # the id is cleared, so the *next* caller turn recovers on a fresh
+    # conversation.
+    tool_call_events = [
+        SimpleNamespace(type="response.created", response=SimpleNamespace(conversation="conv_abc")),
+        SimpleNamespace(type="response.output_text.delta", delta="Sure, one sec."),
+        SimpleNamespace(type="response.output_item.done", item=_function_call_item("call_1")),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(conversation="conv_abc", id="resp_1", output=[]),
+        ),
+    ]
+    create = AsyncMock(
+        side_effect=[FakeStream(tool_call_events), _bad_request_error("tool_results_not_pending")]
+    )
+    fake_client = _fake_client(create)
+    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+
+    session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
+    with pytest.raises(openai.BadRequestError):
+        asyncio.run(_collect(guide_client.stream_reply("what's my number?", session)))
+
+    assert session.conversation_id is None
+    assert create.call_count == 2
 
 
 def test_stale_tool_result_recovers_with_fresh_conversation(monkeypatch):
@@ -207,9 +256,9 @@ def test_stale_tool_result_recovers_with_fresh_conversation(monkeypatch):
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
-    deltas = asyncio.run(_collect(guide_client.stream_reply("what's my number?", session)))
+    reply_events = asyncio.run(_collect(guide_client.stream_reply("what's my number?", session)))
 
-    assert deltas == ["Fresh reply"]
+    assert _texts(reply_events) == ["Fresh reply"]
     assert session.conversation_id == "conv_new"
     assert create.call_count == 3
     # The rejected submission carried the tool output on the original convo...
@@ -308,7 +357,7 @@ def test_aclose_after_first_delta_closes_underlying_stream(monkeypatch):
         return first
 
     first = asyncio.run(scenario())
-    assert first == "Hel"
+    assert first == guide_client.Delta("Hel")
     assert stream.closed
 
 
@@ -325,15 +374,15 @@ def test_missing_conversation_falls_back_to_non_streaming_next_turn(monkeypatch)
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession()
-    deltas = asyncio.run(_collect(guide_client.stream_reply("hi", session)))
+    reply_events = asyncio.run(_collect(guide_client.stream_reply("hi", session)))
 
-    assert deltas == ["ok"]
+    assert _texts(reply_events) == ["ok"]
     assert session.conversation_id is None
     assert session.stream_missing_conversation is True
 
     # Next turn falls back to the non-streaming path to obtain an id.
-    deltas2 = asyncio.run(_collect(guide_client.stream_reply("hi again", session)))
-    assert deltas2 == ["ok again"]
+    reply_events2 = asyncio.run(_collect(guide_client.stream_reply("hi again", session)))
+    assert _texts(reply_events2) == ["ok again"]
     assert session.conversation_id == "conv_new"
     assert create.call_count == 2
     second_kwargs = create.call_args_list[1].kwargs
@@ -693,7 +742,7 @@ def test_execute_tool_missing_required_argument_returns_error(monkeypatch):
     assert "error" in json.loads(result)
 
 
-def test_streamed_tool_call_round_trip_yields_only_text(monkeypatch):
+def test_streamed_tool_call_round_trip_yields_tool_call_started_then_text(monkeypatch):
     tool_call_events = [
         SimpleNamespace(type="response.created", response=SimpleNamespace(conversation="conv_abc")),
         SimpleNamespace(type="response.output_item.done", item=_function_call_item("call_1")),
@@ -717,9 +766,14 @@ def test_streamed_tool_call_round_trip_yields_only_text(monkeypatch):
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
-    deltas = asyncio.run(_collect(guide_client.stream_reply("what's my number?", session)))
+    reply_events = asyncio.run(_collect(guide_client.stream_reply("what's my number?", session)))
 
-    assert deltas == ["Your number is ", "555-1234."]
+    assert _texts(reply_events) == ["Your number is ", "555-1234."]
+    tool_events = _tool_events(reply_events)
+    assert len(tool_events) == 1
+    assert tool_events[0].names == ("get_caller_phone_number",)
+    # The ToolCallStarted event precedes the answer's text.
+    assert reply_events.index(tool_events[0]) < reply_events.index(guide_client.Delta("Your number is "))
     assert create.call_count == 2
     first_kwargs = create.call_args_list[0].kwargs
     second_kwargs = create.call_args_list[1].kwargs
@@ -763,9 +817,9 @@ def test_function_call_backstop_from_completed_output(monkeypatch):
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc", caller_phone="555")
-    deltas = asyncio.run(_collect(guide_client.stream_reply("ok", session)))
+    reply_events = asyncio.run(_collect(guide_client.stream_reply("ok", session)))
 
-    assert deltas == ["Sure."]
+    assert _texts(reply_events) == ["Sure."]
     assert create.call_count == 2
     second_input = create.call_args_list[1].kwargs["input"]
     assert second_input[0]["call_id"] == "call_9"
@@ -788,88 +842,10 @@ def test_tool_loop_stops_at_iteration_bound(monkeypatch):
     monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc")
-    deltas = asyncio.run(_collect(guide_client.stream_reply("hi", session)))
+    reply_events = asyncio.run(_collect(guide_client.stream_reply("hi", session)))
 
-    assert deltas == []
+    assert _texts(reply_events) == []
     assert create.call_count == guide_client._MAX_TOOL_ITERATIONS
-
-
-def test_intermediate_round_narration_is_buffered_and_discarded(monkeypatch):
-    # Round 1: no text, just a tool call (today's existing coverage).
-    round1_events = [
-        SimpleNamespace(type="response.created", response=SimpleNamespace(conversation="conv_abc")),
-        SimpleNamespace(type="response.output_item.done", item=_function_call_item("call_1")),
-        SimpleNamespace(
-            type="response.completed",
-            response=SimpleNamespace(conversation="conv_abc", id="resp_1", output=[]),
-        ),
-    ]
-    # Round 2: the exact GuideAnts shape that causes the bug -- both text
-    # deltas *and* a second function call in the same round.
-    round2_events = [
-        SimpleNamespace(type="response.output_text.delta", delta="Let me check "),
-        SimpleNamespace(type="response.output_text.delta", delta="the helmet too."),
-        SimpleNamespace(type="response.output_item.done", item=_function_call_item("call_2")),
-        SimpleNamespace(
-            type="response.completed",
-            response=SimpleNamespace(conversation="conv_abc", id="resp_2", output=[]),
-        ),
-    ]
-    # Round 3: only text, no function call -- the true final answer.
-    round3_events = [
-        SimpleNamespace(type="response.output_text.delta", delta="You're all set."),
-        SimpleNamespace(
-            type="response.completed",
-            response=SimpleNamespace(conversation="conv_abc", id="resp_3", output=[]),
-        ),
-    ]
-    create = AsyncMock(
-        side_effect=[FakeStream(round1_events), FakeStream(round2_events), FakeStream(round3_events)]
-    )
-    fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
-
-    session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
-    deltas = asyncio.run(_collect(guide_client.stream_reply("book me a bike and a helmet", session)))
-
-    assert deltas == ["You're all set."]
-    assert create.call_count == 3
-
-
-def test_first_round_narration_is_also_buffered_and_discarded(monkeypatch):
-    # Round 1 has both text *and* a function call -- proves round 1's text
-    # is buffered and discarded just like any later round's, rather than
-    # spoken live ahead of the tool call. Speaking it live would leave the
-    # caller hearing what sounds like a finished reply during the ensuing
-    # tool-call silence, inviting a false barge-in that cancels the still-
-    # pending real answer.
-    round1_events = [
-        SimpleNamespace(type="response.created", response=SimpleNamespace(conversation="conv_abc")),
-        SimpleNamespace(type="response.output_text.delta", delta="Sure, "),
-        SimpleNamespace(type="response.output_text.delta", delta="checking now."),
-        SimpleNamespace(type="response.output_item.done", item=_function_call_item("call_1")),
-        SimpleNamespace(
-            type="response.completed",
-            response=SimpleNamespace(conversation="conv_abc", id="resp_1", output=[]),
-        ),
-    ]
-    # Round 2 has no function call -- the true final answer.
-    round2_events = [
-        SimpleNamespace(type="response.output_text.delta", delta="You're all set."),
-        SimpleNamespace(
-            type="response.completed",
-            response=SimpleNamespace(conversation="conv_abc", id="resp_2", output=[]),
-        ),
-    ]
-    create = AsyncMock(side_effect=[FakeStream(round1_events), FakeStream(round2_events)])
-    fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
-
-    session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
-    deltas = asyncio.run(_collect(guide_client.stream_reply("book me a bike", session)))
-
-    assert deltas == ["You're all set."]
-    assert create.call_count == 2
 
 
 def test_no_tools_kwarg_sent_on_any_turn(monkeypatch):
@@ -896,8 +872,8 @@ def test_no_tools_kwarg_sent_on_any_turn(monkeypatch):
     non_streaming_response = SimpleNamespace(id="resp_x", conversation="conv_new", output_text="ok", output=[])
     create.side_effect = [non_streaming_response]
     session3 = GuideSession(stream_missing_conversation=True)
-    deltas = asyncio.run(_collect(guide_client.stream_reply("hi", session3)))
-    assert deltas == ["ok"]
+    reply_events = asyncio.run(_collect(guide_client.stream_reply("hi", session3)))
+    assert _texts(reply_events) == ["ok"]
     assert "tools" not in create.call_args.kwargs
 
 
@@ -919,14 +895,20 @@ def test_aclose_during_tool_round_trip_closes_active_stream(monkeypatch):
     async def scenario():
         session = GuideSession(conversation_id="conv_abc")
         gen = guide_client.stream_reply("what's my number", session)
+        # First __anext__() returns promptly with the ToolCallStarted event
+        # from round 1 (a pure tool call, no text) -- it doesn't touch the
+        # gated second stream at all.
+        first = await gen.__anext__()
         task = asyncio.ensure_future(gen.__anext__())
         await asyncio.sleep(0)  # let the task run the tool round-trip up to the gated second stream
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
         await gen.aclose()
+        return first
 
-    asyncio.run(scenario())
+    first = asyncio.run(scenario())
+    assert isinstance(first, guide_client.ToolCallStarted)
     assert tool_call_stream.closed
     assert text_stream.closed
 

@@ -62,6 +62,27 @@ TURN_PAUSE_SECONDS = float(os.environ.get("TURN_PAUSE_SECONDS", "0.5"))
 # the "resume" was just untranscribable noise.
 TURN_RESUME_GRACE_SECONDS = float(os.environ.get("TURN_RESUME_GRACE_SECONDS", "1.5"))
 
+# The literal phrase the guide is instructed (see guide-demo/Twillio demo
+# agent/instructions.md's "FINAL ANSWER MARKER" paragraph) to speak at the
+# start of its final answer, once it has nothing left to check. guide_client
+# scans every incoming delta for this phrase and forwards nothing to Twilio
+# until it's seen -- so narration and tool-call preamble are dropped with
+# certainty rather than guessed at by a length threshold (see
+# _SentinelGate). Matching is case-insensitive and tolerant of the
+# whitespace/punctuation GuideAnts puts around it; the phrase itself is
+# never spoken. Set to "" to disable gating entirely (every delta streams
+# live, unconditionally) -- used as this app's control/no-op mode.
+FINAL_ANSWER_SENTINEL = os.environ.get("FINAL_ANSWER_SENTINEL", "declare victory")
+
+# For this long (in seconds) after a client-side tool call starts (see
+# guide_client._stream_reply_with_tools's ToolCallStarted event), app.py
+# ignores non-stop-command caller speech instead of letting
+# barge_in.should_interrupt() treat it as a new question and cancel the
+# answer that's still coming; an explicit stop/wait phrase always still cuts
+# through. Bounded so a hung tool can't make the caller un-interruptible for
+# the rest of the call.
+TOOL_CALL_BARGE_IN_GRACE_SECONDS = float(os.environ.get("TOOL_CALL_BARGE_IN_GRACE_SECONDS", "8"))
+
 # Filler phrases spoken before the real answer, to mask GuideAnts lookup
 # latency. Pipe-separated in the env var since phrases contain commas/periods.
 _DEFAULT_FILLER_PHRASES = [

@@ -89,7 +89,7 @@ If `GUIDEANTS_PUB_ID` is empty when the guide client is first used, `app/guide_c
 Exposes:
 
 - `GuideSession` — a small dataclass holding the call's continuation state: `conversation_id: str | None`, mutated in place by `stream_reply` as the continuation handle it gets back from GuideAnts, and `caller_phone: str | None`, set once by `app/main.py`'s `setup` handler from Twilio's `from` field and read by the `get_caller_phone_number` client-side tool (see "Client-side tool calls" below). Also `known_customer_checked: bool` and `known_customer: dict | None`, caching the result of a lazy Booqable customer lookup on `caller_phone`, done at most once per call the first time `get_caller_phone_number` is invoked. One instance lives for the life of a call (`CallState.guide` in `app/main.py`).
-- `stream_reply(user_text, session) -> AsyncIterator[str]` — sends a single caller utterance and yields the guide's reply as text deltas.
+- `stream_reply(user_text, session) -> AsyncIterator[ReplyEvent]` — sends a single caller utterance and yields events: `Delta(text)` for text to speak, and `ToolCallStarted(names)` right before a client-side tool call runs (see "Trigger-phrase gating" below for why text isn't yielded live the instant GuideAnts produces it).
 - `build_input(user_text, interrupted_partial) -> str` — pure text-shaping helper, see "Interruption notes" below.
 
 `_get_client()` lazily builds a module-level singleton `AsyncOpenAI` client the first time it's needed, pointed at:
@@ -199,10 +199,10 @@ never about correctness or per-call routing (see "Concurrency" below).
     `_MAX_TOOL_ITERATIONS` (5) so a guide that never stops calling tools can't
     hang the turn forever; hitting the cap just logs a warning and ends the
     turn with whatever text (if any) was produced.
-  - `stream_reply`'s public contract is unchanged by any of this — it still
-    only ever yields assistant text deltas. `app/main.py`'s `respond_to()`,
-    barge-in, and filler logic need no changes and have none: they just see a
-    turn that took a bit longer before its first delta.
+  - `stream_reply` also yields a `ToolCallStarted(names)` event right after a
+    round's tool calls are known (before running them) — `app/main.py` uses
+    it to stamp `st.tool_call_started_at`, which softens barge-in for the
+    real tool-call latency that follows (see "Selective barge-in" below).
 - **Cancellation safety**: each `_stream_turn` call inside the loop is wrapped
   in its own `contextlib.aclosing`, nested inside `stream_reply`'s existing
   outer `aclosing`. A barge-in's `.aclose()` therefore cascades through
@@ -241,6 +241,57 @@ never about correctness or per-call routing (see "Concurrency" below).
   (same bounded loop as `_stream_reply_with_tools`), so a call already on that
   fallback for the conversation-id reason can still use tools — but it isn't a
   general-purpose escape hatch for streamed-tool-call failures on its own.
+
+### Trigger-phrase gating (`_SentinelGate`)
+
+This app can only speak text it's sure is the caller-facing final answer —
+every Twilio frame it sends carries `preemptible: true` (see "Selective
+barge-in" below), so a later frame from the *same* reply cuts off whatever's
+still playing, even after the real silence a tool call takes. GuideAnts also
+sometimes narrates ahead of a tool call ("let me check the helmet too"), or
+leaks the model's raw reasoning as plain content (see
+`docs/THINKING_LEAK_FIXES.md`) — either would get spoken and then cut off if
+forwarded live.
+
+The guide is instructed (see `guide-demo/Twillio demo agent/instructions.md`'s
+"FINAL ANSWER MARKER" paragraph) to begin its actual final answer with a
+fixed phrase, `config.FINAL_ANSWER_SENTINEL` ("declare victory" by default).
+`_stream_reply_with_tools` runs every round's deltas through a per-round
+`_SentinelGate` (`app/guide_client.py`): closed, it appends each delta to an
+internal `retained` string and re-searches it for the phrase, without
+yielding anything; the instant the phrase matches — even mid-delta, split
+across several deltas — it opens and returns the remainder of that same
+delta, and every later delta in the round streams straight through with no
+further delay. Nothing is ever held back waiting to learn whether a round is
+complete: this is the difference from `main` (buffers a whole round) and
+`feature/live-token-streaming` (buffers a fixed `STREAM_COMMIT_CHARS`
+threshold) — those defer a decision to a fixed point; the gate defers
+nothing once the phrase is seen, because the phrase itself is the decision.
+
+- **Failsafe**: if a round that turns out to be the final answer never
+  produced the phrase (the guide forgot it), the round's whole retained text
+  is spoken as one un-gated burst once the round ends — exactly `main`'s
+  behavior, logged as a warning (`No trigger phrase this turn`). A loose
+  cleanup pass (`_strip_sentinel`) still strips a near-miss the strict
+  gating pattern didn't catch (odd punctuation around the phrase) before
+  that burst is spoken.
+- **Mis-bet**: if the phrase opens the gate in a round that still goes on to
+  call a tool, whatever streamed is spoken and then cut off — the same
+  worst case the other two branches have, but expected to be rare (the
+  guide is instructed never to do this) rather than a routine threshold
+  artifact. Logged as a warning (`Trigger phrase appeared in a round that
+  then called ...`).
+- **`_start_conversation`** (the non-streaming fallback) applies the same
+  rule to a round's whole text at once, since there's nothing to gate
+  mid-flight on a single blocking call.
+- **Disabling gating**: an empty `config.FINAL_ANSWER_SENTINEL` builds an
+  always-open gate — every delta streams live, unconditionally, with no
+  narration protection at all. Used as the app's control/no-op mode (see
+  `docs/STREAMING_COMPARISON.md`), not recommended for production.
+- See `docs/STREAMING_COMPARISON.md` for a head-to-head comparison against
+  `main` and `feature/live-token-streaming`, both offline
+  (`scripts/compare_streaming.py`/`scripts/compare_branches.py`) and via a
+  live-call checklist.
 
 ---
 
@@ -307,7 +358,7 @@ Non-JSON frames are logged and skipped rather than crashing the loop.
 {"type": "text", "token": "Hello there!", "last": false, "preemptible": true}
 {"type": "text", "token": "", "last": true, "preemptible": true}
 ```
-Every turn, including the call's first, is forwarded at whatever granularity GuideAnts' SSE stream actually emits — `respond_to()` sends one Twilio `text` frame per `response.output_text.delta` event, so the caller starts hearing the reply as soon as the first tokens arrive, without waiting for the whole answer. The filler phrase (sent as its own frame first, see below) still covers a slow gap before any delta arrives, first or later — not only the gap before the very first one. Verified live (2026-07-10, current GuideAnts build): a long reply arrives as ~120 incremental deltas spread over ~6.5s, first delta ~3.3s in. **Caveat: this depends on the deployed GuideAnts build being current** — an outdated `guideants-webapi-ui` image (pre-dating GuideAnts' wire-streaming fixes, or pre-dating the streamed `conversation` field) emits the entire reply as a single SSE burst after generation completes, regardless of which model the guide uses, which looks exactly like "streaming doesn't work"; an image that streams but doesn't yet echo `conversation` falls back to one non-streaming turn (see `app/guide_client.py`'s `stream_missing_conversation` above) before resuming streaming. If replies seem to arrive all at once, rebuild/update the GuideAnts container before blaming the model or this app; `scripts/check_streaming.py` prints per-delta timings, including turn 1, to check either way. Every frame carries `preemptible: true` — see "Selective barge-in" below for why.
+Every turn, including the call's first, sends one Twilio `text` frame per `Delta` event `guide_client.stream_reply` yields — but that's not the same as "every GuideAnts SSE delta": each round's text is withheld behind `_SentinelGate` until `config.FINAL_ANSWER_SENTINEL` has been seen in it (see "Trigger-phrase gating" above), so the caller starts hearing the reply the instant the trigger phrase clears, not the instant GuideAnts starts generating. The filler phrase (sent as its own frame first, see below) covers that gated silence, first wait or later — not only the gap before the very first delta. **Caveat: this depends on the deployed GuideAnts build streaming at all** — an outdated `guideants-webapi-ui` image (pre-dating GuideAnts' wire-streaming fixes, or pre-dating the streamed `conversation` field) emits the entire reply as a single SSE burst after generation completes, regardless of which model the guide uses, which looks exactly like "streaming doesn't work"; an image that streams but doesn't yet echo `conversation` falls back to one non-streaming turn (see `app/guide_client.py`'s `stream_missing_conversation` above) before resuming streaming. If replies seem to arrive all at once even after the trigger phrase, rebuild/update the GuideAnts container before blaming the model or this app; `scripts/check_streaming.py` prints per-event timing, including `TOOL CALL` markers, to check either way. Every frame carries `preemptible: true` — see "Selective barge-in" below for why.
 
 ### Turn-pause buffering (`schedule_turn()`)
 
@@ -357,7 +408,7 @@ so it can't fire mid-teardown and start a reply nothing would cancel.
 `start_reply(user_text)` builds this turn's actual input via `build_input(user_text, st.interrupted_reply)` (folding in an interruption note if the previous reply was cut short — see "Interruption notes" below), clears `st.interrupted_reply`, logs `user_text` to `st.messages`, and spawns `respond_to(input_text, filler_eligible)` as an `asyncio.Task` stored on `st.task`, where `filler_eligible = fillers.looks_like_question(user_text)`:
 
 1. Start `guide_client.stream_reply(input_text, st.guide)`. Every fetch of the next delta (`gen.__anext__()`) is begun as a background task rather than awaited directly, so it can be raced against the filler delay.
-2. If `filler_eligible` is true, race *each* such fetch against `config.FILLER_DELAY_SECONDS` (`asyncio.wait(..., timeout=...)`) — not just the first one. If GuideAnts hasn't produced that delta by the time the timeout elapses, pick a random phrase from `config.FILLER_PHRASES` and send it immediately as its own spoken token: `{"type": "text", "token": filler + " ", "last": False, "preemptible": True}`. Either way (timed out or not), keep waiting on the *same* in-flight fetch afterward — nothing is restarted or duplicated. Because this races every delta, not only the first, a reply with several slow tool-call rounds (see `app/guide_client.py` — a buffered round's text isn't forwarded until the final round is confirmed, so the wait between rounds can be silent) may speak more than one filler phrase in sequence rather than leaving the caller in silence; this is intentional. If `filler_eligible` is false, every fetch is simply awaited with no race and no filler, regardless of how long it takes.
+2. If `filler_eligible` is true, race *each* such fetch against `config.FILLER_DELAY_SECONDS` (`asyncio.wait(..., timeout=...)`) — not just the first one, and only if Twilio doesn't still have unplayed audio queued from what's already been sent this turn (`_queued_audio_seconds()`, so a filler can't stack on top of speech the guide just produced). If GuideAnts hasn't produced that event by the time the timeout elapses, pick a random phrase from `config.FILLER_PHRASES` and send it immediately as its own spoken token: `{"type": "text", "token": filler + " ", "last": False, "preemptible": True}`. Either way (timed out or not), keep waiting on the *same* in-flight fetch afterward — nothing is restarted or duplicated. Because this races every event, not only the first, a reply with a client-side tool call (which can go quiet for several real seconds of tool latency behind the sentinel gate — see "Trigger-phrase gating" above) may speak more than one filler phrase in sequence rather than leaving the caller in silence; this is intentional. A `ToolCallStarted` event doesn't itself get a filler — it's handled separately, stamping `st.tool_call_started_at` (see "Selective barge-in" below) — but the *next* fetch after it is still filler-eligible like any other. If `filler_eligible` is false, every fetch is simply awaited with no race and no filler, regardless of how long it takes.
 3. Forward each resulting delta to the WS as its own `{"type": "text", ...}` frame as it arrives, accumulating them into `reply_text` (and `st.partial_reply`, kept current after every delta so a mid-stream barge-in has an accurate cut-off point), then send a final `{"token": "", "last": true}` frame to signal end-of-turn to Twilio.
 4. **On success**, log the real reply to `st.messages` — the filler is never logged. Then hold the turn open until playback actually ends: wait for Twilio's agent-stopped speaker event (`st.playback_done`, with ×1.5 + 2s of the word-count estimate as a ceiling in case the event is lost), or — until the first agent-stop has been recognized on the call — just sleep out the remainder of the word-count estimate as the older versions did. This is what keeps `st.task` "not done" while Twilio is still speaking.
 5. **On `asyncio.CancelledError`** (raised by `cancel_task()`, called either from the `finally` block on `WebSocketDisconnect`, or from the mid-reply barge-in branch when a trigger utterance cancels this turn — see "Selective barge-in" below): cancels the background chunk-fetch task, awaits it (suppressing the resulting `CancelledError`), then calls `await gen.aclose()` (also suppressing exceptions) so the underlying SSE HTTP response is definitely closed before the interrupting turn's own request goes out on the shared connection pool — then re-raises. `st.messages`/`st.interrupted_reply` bookkeeping for the cut-off reply is the barge-in caller's responsibility (see "Selective barge-in" below), not this handler's.
@@ -398,6 +449,17 @@ next differs:
   consumes `st.interrupted_reply` via `build_input()`.
 - **Anything else** (statement, backchannel, noise) → logged and ignored,
   exactly as before this feature.
+
+**Tool-call grace period.** A `ToolCallStarted` event (see "Trigger-phrase
+gating" above) can leave the guide silent for several real seconds — the
+sentinel gate hasn't cleared for the next round yet, not because the reply
+finished. `respond_to()` stamps `st.tool_call_started_at` when this happens;
+for `config.TOOL_CALL_BARGE_IN_GRACE_SECONDS` (default 8s) after that,
+non-stop-command speech is logged and ignored rather than treated as a new
+question via `should_interrupt()` — an explicit stop/wait phrase still cuts
+through immediately, same as always. Cleared on every exit from
+`respond_to()` (cancellation, error, or normal completion) so a stale window
+can never leak into a later, unrelated turn.
 
 Playback is actually cut off using Conversation Relay's `preemptible` flag,
 not Twilio-native interruption: every `text` frame `respond_to()` sends is

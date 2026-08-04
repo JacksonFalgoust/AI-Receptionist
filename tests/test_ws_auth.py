@@ -19,6 +19,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from app import config, twilio_auth
 from app import main
+from app.guide_client import Delta
 from app.main import app
 
 client = TestClient(app)
@@ -176,7 +177,7 @@ def test_ws_prompt_before_setup_is_rejected_and_never_reaches_guide(monkeypatch)
         calls.append(input_text)
 
         async def _gen():
-            yield "should never run"
+            yield Delta("should never run")
 
         return _gen()
 
@@ -207,7 +208,7 @@ def test_ws_prompt_after_valid_setup_gets_a_real_reply(monkeypatch):
     monkeypatch.setattr(config, "TURN_PAUSE_SECONDS", 0.01)
 
     async def _fake_stream_reply(input_text, guide):
-        yield "Hello from the guide"
+        yield Delta("Hello from the guide")
 
     monkeypatch.setattr(main, "stream_reply", _fake_stream_reply)
 
