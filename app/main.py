@@ -83,6 +83,12 @@ app.include_router(reservations_router)
 # hold the turn open forever.
 PENDING_TURN_CEILING_SECONDS = 10.0
 
+# Below this, respond_to()'s reply-token frames are logged as having reached
+# Twilio in one burst rather than incrementally -- kept in sync by eye with
+# scripts/check_streaming.py's _INCREMENTAL_SPAN_THRESHOLD_SECONDS (same
+# idea, applied to the app -> Twilio leg instead of GuideAnts -> app).
+_STREAM_TO_TWILIO_BURST_THRESHOLD_SECONDS = 0.05
+
 
 async def _greeting_for(from_number: str) -> str:
     """Personalize the welcome greeting for a known Booqable customer, by
@@ -192,6 +198,14 @@ class CallState:
     # that cancels a reply before it completes can't leave a stale question
     # flag from an earlier, unrelated turn in place.
     guide_awaiting_answer: bool = False
+    # event-loop-clock timestamp of the last reply's final Twilio frame
+    # (the closing `last: true` message) finishing its send -- diagnostic
+    # only, see respond_to()'s TIMING logs. Lets the agent-start speaker
+    # event handler below report how long after that Twilio actually began
+    # playback, the closest thing to a receipt Twilio gives back (there is
+    # no application-level ack for individual text frames). 0.0 means no
+    # reply has finished sending yet this call.
+    last_reply_sent_at: float = 0.0
 
 
 @app.websocket("/ws")
@@ -214,6 +228,11 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         filler = None
         gen = stream_reply(input_text, st.guide)
         pending: asyncio.Future | None = None
+        # Diagnostic timestamps for how this reply is handed to Twilio --
+        # see the TIMING/RESULT logs below and check_streaming_proxy.py's
+        # module docstring for the GuideAnts-side half of this picture.
+        twilio_send_start: float | None = None
+        twilio_frame_count = 0
 
         # Only utterances that look like a question/request (see fillers.py)
         # are filler-eligible at all. Among those, race every fetch of the
@@ -247,12 +266,36 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 delta = await next_delta()
                 if delta is None:
                     break
+                if twilio_send_start is None:
+                    twilio_send_start = asyncio.get_event_loop().time()
+                    logger.info(
+                        "TIMING: GuideAnts request sent -> first token ready to send to Twilio: %.3fs",
+                        twilio_send_start - start_time,
+                    )
                 await websocket.send_json(
                     {"type": "text", "token": delta, "last": False, "preemptible": True}
                 )
+                twilio_frame_count += 1
                 reply_text += delta
                 st.partial_reply = reply_text
             await websocket.send_json({"type": "text", "token": "", "last": True, "preemptible": True})
+            if twilio_send_start is not None:
+                # "last frame sent" is the honest number here -- Twilio gives
+                # no application-level ack that it received a text frame, so
+                # this is when *we* finished handing the reply over, not
+                # confirmation Twilio has it. The agent-start speaker-event
+                # handler below reports the closest thing to a receipt
+                # Twilio actually gives back.
+                st.last_reply_sent_at = asyncio.get_event_loop().time()
+                span = st.last_reply_sent_at - twilio_send_start
+                logger.info(
+                    "TIMING: first frame sent to Twilio -> last frame (incl. end-of-turn) sent: %.3fs (%d frames)",
+                    span, twilio_frame_count,
+                )
+                if span < _STREAM_TO_TWILIO_BURST_THRESHOLD_SECONDS:
+                    logger.info("RESULT: reply handed to Twilio as one burst (%.3fs apart) -- not incremental.", span)
+                else:
+                    logger.info("RESULT: reply handed to Twilio incrementally, spread over %.3fs.", span)
         except asyncio.CancelledError:
             if pending:
                 pending.cancel()
@@ -529,6 +572,17 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 if speaker_kind == "agent-stop":
                     st.agent_stop_seen = True
                     st.playback_done.set()
+                elif speaker_kind == "agent-start" and st.last_reply_sent_at:
+                    # Closest thing to a receipt Twilio gives back for a
+                    # reply's text frames: not an ack of receiving them, but
+                    # confirmation it has started speaking them, which it
+                    # can't do without having received (and TTS'd) them
+                    # first. Compare against respond_to()'s "last frame
+                    # sent" TIMING log to see the app -> Twilio gap in full.
+                    logger.info(
+                        "TIMING: last frame sent to Twilio -> Twilio agent-start (playback begins): %.3fs",
+                        asyncio.get_event_loop().time() - st.last_reply_sent_at,
+                    )
                 elif speaker_kind == "client-start":
                     st.client_speaking = True
                     # The caller resumed while a turn was buffered: hold the
