@@ -8,6 +8,7 @@ __pycache__/
 scripts/captures/
 
 .worktrees/
+.compare-worktrees/
 .claude/
 .superpowers/
 docs/superpowers/

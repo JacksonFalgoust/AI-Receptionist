@@ -22,6 +22,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
@@ -70,6 +71,27 @@ def _get_client() -> AsyncOpenAI:
             max_retries=1,
         )
     return _client
+
+
+@dataclass(frozen=True)
+class Delta:
+    """A chunk of assistant text to speak, forwarded to Twilio verbatim."""
+
+    text: str
+
+
+@dataclass(frozen=True)
+class ToolCallStarted:
+    """A round ended in one or more client-side tool calls, about to be run.
+    Nothing will be spoken until a later round's text clears the sentinel
+    gate, which can be several seconds away (real Booqable HTTP time) --
+    app.py uses this to soften barge-in for that gap so a caller talking
+    into the silence can't cancel the answer that's still coming."""
+
+    names: tuple[str, ...]
+
+
+ReplyEvent = Delta | ToolCallStarted
 
 
 @dataclass
@@ -289,22 +311,140 @@ async def _tool_outputs(outcome: "_TurnOutcome", session: GuideSession) -> list[
     return outputs
 
 
-async def _next_tool_input(outcome: "_TurnOutcome", session: GuideSession) -> list[dict[str, str]] | None:
-    """Given one turn's outcome, return the next request's `input` (the
-    resolved tool outputs) if the turn ended in a function_call, or None if
-    the turn already produced its final text answer -- shared by both the
-    streaming and non-streaming tool loops below."""
-    if not outcome.function_calls:
-        return None
-    return await _tool_outputs(outcome, session)
+# Leading whitespace/sentence punctuation trimmed off whatever immediately
+# follows a phrase match -- the marker's own sentence-ending "." (or ":",
+# extra spaces, ...) belongs to the marker, never to the caller's actual
+# answer. Not phrase-dependent, so it's a single module-level pattern shared
+# by `_SentinelGate._trim` and `_start_conversation`.
+_LEAD_PUNCT_RE = re.compile(r"^[\s.,:;!?—-]+")
 
 
-async def _start_conversation(client: AsyncOpenAI, input_text: str, session: GuideSession) -> AsyncIterator[str]:
+def _compile_sentinel_patterns(phrase: str) -> tuple["re.Pattern | None", "re.Pattern | None"]:
+    """Build the core (gating) and loose (failsafe cleanup) patterns for
+    `phrase`. Returns `(None, None)` for an empty phrase -- the signal
+    `_SentinelGate` and `_strip_sentinel` use for "gating disabled, every
+    delta streams live".
+
+    The core pattern matches only the bare words, in order, separated by
+    whitespace -- no trailing punctuation absorption here. GuideAnts can
+    stream the marker's own sentence-ending punctuation as a *separate*
+    delta from the phrase itself (observed live: "Declare victory" arrives
+    whole, then ". " arrives in the next delta) -- a pattern that only
+    absorbs trailing punctuation already present in the same accumulated
+    match can't consume characters that haven't arrived yet. `_LEAD_PUNCT_RE`
+    (via `_SentinelGate._trim`) handles that punctuation instead, as its own
+    persistent step that survives a delta boundary."""
+    if not phrase:
+        return None, None
+    words = phrase.split()
+    core_body = r"\s+".join(re.escape(w) for w in words)
+    core = re.compile(core_body, re.IGNORECASE)
+    # Loose: tolerant of a near-miss the core pattern didn't catch (a
+    # trailing "victory:" GuideAnts formatted oddly, extra punctuation
+    # between words) -- used only to clean the failsafe text before it's
+    # spoken, never for gating. Anchored to the start of the text; does not
+    # catch a reworded phrase ("Declaring victory"), an accepted limit.
+    loose_body = r"\W+".join(rf"{re.escape(w)}\w*" for w in words)
+    loose = re.compile(rf"^\W*{loose_body}\W*", re.IGNORECASE)
+    return core, loose
+
+
+_SENTINEL_STRICT, _SENTINEL_LOOSE = _compile_sentinel_patterns(config.FINAL_ANSWER_SENTINEL)
+
+
+def _strip_sentinel(text: str) -> str:
+    """Best-effort cleanup for the failsafe path (see `_SentinelGate`): if
+    the sentinel phrase is present in `text` but `_SENTINEL_STRICT` never
+    matched it while streaming, strip it here so it's never spoken as part
+    of the failsafe burst. A no-op when gating is disabled."""
+    if _SENTINEL_LOOSE is None:
+        return text
+    return _SENTINEL_LOOSE.sub("", text, count=1)
+
+
+class _SentinelGate:
+    """Per-round gate: withholds a round's text until
+    `config.FINAL_ANSWER_SENTINEL` has been seen in the stream, then passes
+    every later delta straight through unchanged. Nothing is ever held back
+    once the gate is fully open -- `feed()` is synchronous and does no
+    buffering of its own once `self._state == "open"`, so the caller can
+    yield its return value inside the same `async for` iteration that
+    received the delta. This is the difference from `main`'s whole-round
+    buffering and from `feature/live-token-streaming`'s STREAM_COMMIT_CHARS
+    threshold: neither of those ever defers a decision past a fixed point,
+    this one defers nothing at all once the phrase is seen.
+
+    Three internal states, `"closed"` -> `"trimming"` -> `"open"`:
+    - `"closed"`: searching `retained` for the phrase. No output.
+    - `"trimming"`: the phrase itself has been found; now stripping the
+      leading run of whitespace/sentence punctuation that belongs to the
+      marker's own sentence end (`_LEAD_PUNCT_RE`), one delta at a time if
+      necessary -- this is what makes trimming survive a delta boundary
+      (GuideAnts can stream "Declare victory" and its trailing ". "
+      separately; a one-shot strip against a single delta would miss that).
+      No output while there's nothing left after trimming.
+    - `"open"`: real content has started. Pure pass-through from here.
+
+    `open` (the public property) is `True` for `"trimming"` or `"open"` --
+    both mean the phrase has been found, which is what the round-end
+    failsafe/mis-bet logic in `_stream_reply_with_tools` actually cares
+    about, not whether trimming has finished.
+
+    `retained` accumulates only the pre-match text, purely so the caller can
+    fall back to speaking it (via `_strip_sentinel`) if the round ends still
+    `"closed"` -- the failsafe for a turn where the guide forgot the phrase.
+
+    `emitted_any` is distinct from `open`: with gating disabled
+    (`config.FINAL_ANSWER_SENTINEL` empty) the gate starts fully open, but a
+    round that produced zero text should still not be reported as "already
+    spoken" by the caller's round-end logging -- `emitted_any` tracks
+    whether `feed` actually returned non-empty text at least once."""
+
+    def __init__(self) -> None:
+        self._state = "open" if _SENTINEL_STRICT is None else "closed"
+        self.retained = ""
+        self.emitted_any = False
+
+    @property
+    def open(self) -> bool:
+        return self._state != "closed"
+
+    def feed(self, delta: str) -> str:
+        if self._state == "open":
+            if delta:
+                self.emitted_any = True
+            return delta
+        if self._state == "closed":
+            self.retained += delta
+            match = _SENTINEL_STRICT.search(self.retained)
+            if not match:
+                return ""
+            self._state = "trimming"
+            return self._trim(self.retained[match.end():])
+        return self._trim(delta)  # self._state == "trimming"
+
+    def _trim(self, text: str) -> str:
+        remainder = _LEAD_PUNCT_RE.sub("", text, count=1)
+        if not remainder:
+            return ""  # still trimming -- nothing but punctuation/whitespace so far
+        self._state = "open"
+        self.emitted_any = True
+        return remainder
+
+
+async def _start_conversation(
+    client: AsyncOpenAI, input_text: str, session: GuideSession
+) -> AsyncIterator[ReplyEvent]:
     """Non-streaming fallback for establishing a conversation id against an
     older GuideAnts build whose streamed events don't carry one yet. Also
-    tool-aware, so a turn that needs this fallback can still call tools."""
+    tool-aware, so a turn that needs this fallback can still call tools.
+    Applies the same sentinel-phrase rule as `_stream_reply_with_tools` to a
+    round's whole text at once, since there's nothing to gate mid-flight on
+    a single blocking call -- see that function's docstring for why a round
+    ahead of a tool call must never reach Twilio unless it cleared the
+    phrase."""
     next_input: Any = input_text
-    for _ in range(_MAX_TOOL_ITERATIONS):
+    for i in range(_MAX_TOOL_ITERATIONS):
         kwargs: dict[str, Any] = {"model": config.GUIDEANTS_MODEL, "input": next_input}
         if session.conversation_id is not None:
             kwargs["conversation"] = session.conversation_id
@@ -322,13 +462,60 @@ async def _start_conversation(client: AsyncOpenAI, input_text: str, session: Gui
                 )
         outcome = _TurnOutcome()
         _collect_function_calls(getattr(response, "output", None), outcome)
-        text = response.output_text
-        if text:
-            yield text
-        next_input = await _next_tool_input(outcome, session)
-        if next_input is None:
+        text = response.output_text or ""
+
+        if _SENTINEL_STRICT is None:
+            matched, spoken = True, text
+        else:
+            m = _SENTINEL_STRICT.search(text)
+            # _LEAD_PUNCT_RE strips the marker's own trailing "." / ":" /
+            # extra spaces from the remainder -- see _SentinelGate's
+            # docstring for why the phrase pattern itself no longer absorbs
+            # this (it only matters here for a single already-complete
+            # `text` blob, but the same cleanup is needed for the same
+            # reason: that punctuation belongs to the marker, not the
+            # caller's actual answer).
+            matched = bool(m)
+            spoken = _LEAD_PUNCT_RE.sub("", text[m.end():], count=1) if m else ""
+
+        if not outcome.function_calls:  # final round
+            if not matched:
+                spoken = _strip_sentinel(text)
+                logger.warning(
+                    "No trigger phrase this turn (non-streaming path); speaking "
+                    "the round unstreamed (failsafe)"
+                )
+            if spoken:
+                yield Delta(spoken)
             return
-    logger.warning("Non-streaming tool loop hit its %d-iteration bound; ending the turn", _MAX_TOOL_ITERATIONS)
+
+        if i == _MAX_TOOL_ITERATIONS - 1:
+            logger.warning(
+                "Non-streaming tool loop hit its %d-iteration bound; speaking whatever "
+                "text this round produced instead of ending the turn in silence",
+                _MAX_TOOL_ITERATIONS,
+            )
+            if not matched:
+                spoken = _strip_sentinel(text)
+            if spoken:
+                yield Delta(spoken)
+            return
+
+        if spoken:
+            if matched:
+                logger.warning(
+                    "Trigger phrase appeared in a round that then called %s (non-streaming "
+                    "path) -- already-yielded text will be cut off",
+                    ", ".join(name for _, name, _ in outcome.function_calls),
+                )
+            yield Delta(spoken)
+        elif text:
+            logger.info(
+                "Discarding pre-trigger narration ahead of a tool call (non-streaming path): %r",
+                text,
+            )
+        yield ToolCallStarted(tuple(name for _, name, _ in outcome.function_calls))
+        next_input = await _tool_outputs(outcome, session)
 
 
 async def _stream_turn(
@@ -397,7 +584,7 @@ async def _stream_turn(
 
 async def _stream_reply_with_tools(
     client: AsyncOpenAI, user_text: str, session: GuideSession
-) -> AsyncIterator[str]:
+) -> AsyncIterator[ReplyEvent]:
     """Drive one caller turn to completion, running any client-side tool
     calls (declared on the guide in GuideAnts -- see
     guide-demo/caller-phone-client-tool.json, and _execute_tool for how this
@@ -408,57 +595,96 @@ async def _stream_reply_with_tools(
     Bounded by _MAX_TOOL_ITERATIONS so a guide that never stops calling tools
     can't hang a turn forever.
 
-    No round's deltas are yielded live -- including the first. A round that
-    goes on to request a tool call may still carry real spoken text from
-    GuideAnts (e.g. "let me check the helmet too"); speaking that leaves the
-    caller hearing what sounds like a finished reply during the tool call's
-    silence, which risks a false barge-in (main.py's should_interrupt())
-    cancelling the still-pending real answer -- and, self-inflicted, risks a
-    later round's audio cutting this one off mid-word once Twilio's
-    preemptible-frame semantics kick in. So every round's deltas are
-    buffered locally instead: once we know whether the round was final (no
-    more tool calls) we either flush the buffer (this was the real final
-    answer) or discard it and log at info level (it was narration ahead of
-    a tool call, and would only ever have been interrupted). The latency
-    this narration would have masked is covered instead by app.py's
-    filler-phrase mechanism, which already races every delta fetch
-    (including the first) against config.FILLER_DELAY_SECONDS."""
+    A round's deltas pass through a `_SentinelGate`: withheld until
+    `config.FINAL_ANSWER_SENTINEL` (the guide is instructed -- see
+    guide-demo/Twillio demo agent/instructions.md's "FINAL ANSWER MARKER"
+    paragraph -- to speak it once, at the very start of its actual final
+    answer) has been seen in that round's stream, then forwarded live from
+    that point on with no further delay. This is not just a latency
+    tradeoff -- it's required for correct playback on a real call. GuideAnts
+    sometimes narrates ahead of a tool call (e.g. "let me check the helmet
+    too"), or leaks the model's raw reasoning as plain content (see
+    docs/THINKING_LEAK_FIXES.md) -- but Twilio Conversation Relay's
+    `preemptible` flag (every frame this app sends carries it) means ANY
+    later frame cuts off whatever's still playing, even a later frame from
+    this same reply after the real silence a tool call takes. So text ahead
+    of the phrase must never reach Twilio as a frame at all, or the caller
+    hears it start and then gets cut off mid-word once the tool finishes and
+    the real answer's frames arrive. Unlike buffering a whole round (`main`)
+    or a fixed character threshold (`feature/live-token-streaming`), this
+    isn't a bet against length -- the marker says definitively whether a
+    round is the final answer, so a short final answer streams immediately
+    after the phrase instead of waiting to accumulate enough characters to
+    look final, and a long narration round is never mistaken for one.
+
+    Failsafe: if a round that turns out to be final never produced the
+    phrase (the guide forgot it), the round's whole retained text is spoken
+    as one un-gated burst -- exactly `main`'s behavior, the one case with no
+    streaming. If an *intermediate* round's phrase opened the gate and it
+    still went on to call a tool, whatever was already streamed is spoken
+    and then cut off same as the buffering branches' worst case; this is
+    logged as a warning since it means the guide said the marker too early."""
     next_input: Any = user_text
-    for _ in range(_MAX_TOOL_ITERATIONS):
+    for i in range(_MAX_TOOL_ITERATIONS):
         outcome = _TurnOutcome()
-        buffered: list[str] = []
+        gate = _SentinelGate()
         async with contextlib.aclosing(_stream_turn(client, next_input, session, outcome)) as gen:
             async for delta in gen:
-                buffered.append(delta)
-        tool_input = await _next_tool_input(outcome, session)
-        if tool_input is None:
-            for delta in buffered:
-                yield delta
+                if text := gate.feed(delta):
+                    yield Delta(text)
+
+        if not outcome.function_calls:  # final round
+            if not gate.open:  # FAILSAFE: phrase never arrived this turn
+                if text := _strip_sentinel(gate.retained):
+                    yield Delta(text)
+                logger.warning(
+                    "No trigger phrase this turn; speaking the round unstreamed (failsafe)"
+                )
             return
-        if buffered:
-            logger.info(
-                "Discarding intermediate-round narration ahead of another tool call: %r",
-                "".join(buffered),
+
+        if i == _MAX_TOOL_ITERATIONS - 1:
+            logger.warning(
+                "Tool-call loop hit its %d-iteration bound; speaking whatever text this "
+                "round produced instead of ending the turn in silence",
+                _MAX_TOOL_ITERATIONS,
             )
-        next_input = tool_input
-    logger.warning("Tool-call loop hit its %d-iteration bound; ending the turn", _MAX_TOOL_ITERATIONS)
+            if not gate.open:
+                if text := _strip_sentinel(gate.retained):
+                    yield Delta(text)
+            return
+
+        if gate.emitted_any:
+            logger.warning(
+                "Trigger phrase appeared in a round that then called %s -- "
+                "already-spoken text will be cut off",
+                ", ".join(name for _, name, _ in outcome.function_calls),
+            )
+        elif gate.retained:
+            logger.info(
+                "Discarding pre-trigger narration ahead of a tool call: %r", gate.retained
+            )
+        yield ToolCallStarted(tuple(name for _, name, _ in outcome.function_calls))
+        next_input = await _tool_outputs(outcome, session)
 
 
-async def stream_reply(user_text: str, session: GuideSession) -> AsyncIterator[str]:
-    """Yield text deltas for the guide's reply to a single caller utterance.
+async def stream_reply(user_text: str, session: GuideSession) -> AsyncIterator[ReplyEvent]:
+    """Yield events for the guide's reply to a single caller utterance: text
+    to speak (`Delta`) and, when a client-side tool call is about to run
+    (declared on the guide in GuideAnts, see
+    guide-demo/caller-phone-client-tool.json, resolved internally by
+    `_stream_reply_with_tools`), a `ToolCallStarted` marker so the caller can
+    be protected from a false barge-in during the gap before the next
+    `Delta`.
 
     `user_text` should already include any interruption note (see
     build_input); this function only handles GuideAnts continuation, not
-    prompt shaping. Client-side tool calls (declared on the guide in
-    GuideAnts, see guide-demo/caller-phone-client-tool.json) are resolved
-    internally by `_stream_reply_with_tools` -- only assistant text is ever
-    yielded here.
+    prompt shaping.
     """
     client = _get_client()
 
     if session.conversation_id is None and session.stream_missing_conversation:
-        async for delta in _start_conversation(client, user_text, session):
-            yield delta
+        async for event in _start_conversation(client, user_text, session):
+            yield event
         return
 
     # `_stream_reply_with_tools` nests one or more `_stream_turn` calls, each
@@ -468,19 +694,21 @@ async def stream_reply(user_text: str, session: GuideSession) -> AsyncIterator[s
     # (barge-in), nothing would otherwise close the inner one(s) -- wrap it in
     # `aclosing` so `.aclose()` here deterministically closes whichever
     # underlying stream is live too.
-    recover_fresh = False
+    lost_conversation = False
+    emitted_any = False
     async with contextlib.aclosing(_stream_reply_with_tools(client, user_text, session)) as gen:
         try:
-            async for delta in gen:
-                yield delta
+            async for event in gen:
+                if isinstance(event, Delta):
+                    emitted_any = True
+                yield event
             return
         except openai.BadRequestError as err:
             if session.conversation_id is None:
                 raise
             if _is_lost_conversation(err):
                 logger.warning(
-                    "GuideAnts no longer recognizes conversation %s (%s); starting a "
-                    "fresh conversation for this call -- prior context is lost",
+                    "GuideAnts no longer recognizes conversation %s (%s)",
                     session.conversation_id,
                     getattr(err, "code", None),
                 )
@@ -495,17 +723,25 @@ async def stream_reply(user_text: str, session: GuideSession) -> AsyncIterator[s
                 logger.warning(
                     "GuideAnts rejected a tool result for conversation %s as no "
                     "longer pending (%s); the turn was cancelled/completed "
-                    "server-side. Starting a fresh conversation -- prior context "
-                    "is lost",
+                    "server-side",
                     session.conversation_id,
                     getattr(err, "code", None),
                 )
             else:
                 raise
+            # Still clear the id so the *next* caller turn recovers on a
+            # fresh conversation, even when this turn can't retry below.
             session.conversation_id = None
-            recover_fresh = True
+            if emitted_any:
+                logger.warning(
+                    "Conversation was lost after this turn had already spoken text; "
+                    "not retrying, since a retry would re-speak it"
+                )
+                raise
+            logger.warning("Starting a fresh conversation for this call -- prior context is lost")
+            lost_conversation = True
 
-    if recover_fresh:
+    if lost_conversation:
         async with contextlib.aclosing(stream_reply(user_text, session)) as retry_gen:
-            async for delta in retry_gen:
-                yield delta
+            async for event in retry_gen:
+                yield event

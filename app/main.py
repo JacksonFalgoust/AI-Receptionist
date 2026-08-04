@@ -24,15 +24,26 @@ holding the reply task open until Twilio's agent-stopped speaker event
 (`events="speaker-events"`, see speaker_events.py) reports playback
 finished, falling back to a word-count estimate of the speaking time
 (speech_timing.py) until the first such event is recognized on the call.
-When a caller's utterance looks like a question or request
-(see fillers.py) and GuideAnts' reply doesn't arrive within
-config.FILLER_DELAY_SECONDS, a short filler phrase is spoken while still
-waiting on the same in-flight call, to mask lookup latency. This isn't
-limited to the very first wait: every fetch of the next delta races the
-same timeout, so a reply with several slow tool-call rounds (which can go
-quiet between rounds while a later round's text is buffered pending
-confirmation it's the final one -- see guide_client.py) may speak more than
-one filler phrase in sequence rather than leaving the caller in silence.
+Every `Delta` this module receives from guide_client.stream_reply() is already gated: the guide
+is instructed to open its final answer with a fixed trigger phrase
+(config.FINAL_ANSWER_SENTINEL, see guide-demo/Twillio demo agent/instructions.md's "FINAL
+ANSWER MARKER" paragraph and guide_client._SentinelGate), and nothing reaches this module until
+that phrase has been seen and stripped -- so respond_to() can forward every delta to Twilio the
+instant it arrives with no local buffering of its own. This is why a reply can go quiet for a
+while (narration ahead of a tool call, or the model's own "thinking" -- see
+docs/THINKING_LEAK_FIXES.md -- both held back by the gate rather than spoken and cut off) and
+then start streaming mid-sentence rather than only ever between rounds. When a caller's
+utterance looks like a question or request (see fillers.py) and GuideAnts' reply doesn't arrive
+within config.FILLER_DELAY_SECONDS, a short filler phrase is spoken while still waiting on the
+same in-flight call, to mask that gated silence -- but only if Twilio doesn't still have
+unplayed audio queued from what's already been sent this turn, so a filler can't stack on top of
+speech the guide just produced. This isn't limited to the very first wait: every fetch of the
+next event races the same timeout, so a reply that runs a client-side tool call (which can go
+quiet for several seconds of real tool latency -- see guide_client.ToolCallStarted) may speak
+more than one filler phrase in sequence rather than leaving the caller in true silence. A tool
+call in flight also softens barge-in for that gap (config.TOOL_CALL_BARGE_IN_GRACE_SECONDS):
+non-stop-command speech is ignored instead of being treated as a new question that cancels the
+still-pending answer.
 
 Twilio finalizes a "prompt" at each pause in caller speech, so one spoken
 turn can arrive as several prompt messages. Prompts that would start a new
@@ -67,7 +78,7 @@ from twilio.twiml.voice_response import Connect, VoiceResponse
 
 from . import barge_in, config, fillers, reservations, speaker_events, speech_timing, twilio_auth
 from .booqable_client import BooqableClient, BooqableError
-from .guide_client import GuideSession, build_input, stream_reply
+from .guide_client import Delta, GuideSession, ToolCallStarted, build_input, stream_reply
 from .reservations_api import router as reservations_router
 
 logging.basicConfig(level=logging.INFO)
@@ -206,6 +217,14 @@ class CallState:
     # no application-level ack for individual text frames). 0.0 means no
     # reply has finished sending yet this call.
     last_reply_sent_at: float = 0.0
+    # Event-loop time a client-side tool call started this turn, or 0.0 if
+    # none is currently pending. guide_client streams every round's text
+    # live, including narration ahead of a tool call, so the guide can go
+    # quiet mid-turn while the tool runs -- sounding like a finished reply.
+    # The `prompt` handler uses this (bounded by
+    # config.TOOL_CALL_BARGE_IN_GRACE_SECONDS) to keep a caller who talks
+    # into that silence from cancelling the answer that's still coming.
+    tool_call_started_at: float = 0.0
 
 
 @app.websocket("/ws")
@@ -226,6 +245,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         start_time = asyncio.get_event_loop().time()
         reply_text = ""
         filler = None
+        audio_started_at: float | None = None
         gen = stream_reply(input_text, st.guide)
         pending: asyncio.Future | None = None
         # Diagnostic timestamps for how this reply is handed to Twilio --
@@ -234,22 +254,41 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         twilio_send_start: float | None = None
         twilio_frame_count = 0
 
+        def _queued_audio_seconds() -> float:
+            """Best-effort estimate of TTS audio still unplayed from what's
+            already been sent this turn -- the caller isn't sitting in
+            silence while this is positive, so a canned filler would just
+            stack on top of speech already in flight (narration ahead of a
+            tool call, or an earlier filler). Estimated from the whole
+            accumulated reply_text, never by summing per-delta estimates --
+            speech_timing.estimate_seconds splits on whitespace, so a delta
+            split mid-word would be double-counted as two words."""
+            if audio_started_at is None:
+                return 0.0
+            spoken = f"{filler} {reply_text}" if filler else reply_text
+            played = asyncio.get_event_loop().time() - audio_started_at
+            return max(
+                0.0, speech_timing.estimate_seconds(spoken, config.TTS_WORDS_PER_SECOND) - played
+            )
+
         # Only utterances that look like a question/request (see fillers.py)
         # are filler-eligible at all. Among those, race every fetch of the
-        # next delta from GuideAnts against the filler delay: if it's already
-        # back within FILLER_DELAY_SECONDS, skip the filler for that wait;
-        # otherwise speak one and keep waiting on the same in-flight fetch.
-        # This isn't limited to the first delta -- a reply with several
-        # tool-call rounds can go quiet between rounds (buffered rounds don't
-        # emit anything until the final round is confirmed), and each
-        # sufficiently slow wait gets its own filler, so the caller is never
-        # sitting in silence for long regardless of which wait is slow.
-        async def next_delta() -> str | None:
+        # next event from GuideAnts against the filler delay: if it's already
+        # back within FILLER_DELAY_SECONDS, or Twilio still has queued audio
+        # from what's already been sent this turn, skip the filler for that
+        # wait; otherwise speak one and keep waiting on the same in-flight
+        # fetch. This isn't limited to the first event -- a reply that runs
+        # a client-side tool call can go quiet for several seconds of real
+        # tool latency (see guide_client.ToolCallStarted), and each
+        # sufficiently slow wait (with nothing already queued to cover it)
+        # gets its own filler, so the caller is never sitting in true
+        # silence for long.
+        async def next_event():
             nonlocal pending, filler
             pending = asyncio.ensure_future(gen.__anext__())
             if filler_eligible:
                 done, _ = await asyncio.wait({pending}, timeout=config.FILLER_DELAY_SECONDS)
-                if pending not in done:
+                if pending not in done and _queued_audio_seconds() <= 0.0:
                     phrase = fillers.pick(config.FILLER_PHRASES)
                     if phrase:
                         filler = phrase
@@ -263,9 +302,28 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
 
         try:
             while True:
-                delta = await next_delta()
-                if delta is None:
+                event = await next_event()
+                if event is None:
                     break
+                if isinstance(event, ToolCallStarted):
+                    # The guide (or narration ahead of it) may already have
+                    # gone quiet by the time this arrives -- the caller
+                    # hears silence until the next Delta, which can be
+                    # several seconds away (real tool-call latency). This
+                    # softens barge-in for that gap; see the `prompt`
+                    # handler below.
+                    st.tool_call_started_at = asyncio.get_event_loop().time()
+                    logger.info("Client tool call(s) in flight: %s", ", ".join(event.names))
+                    continue
+                st.tool_call_started_at = 0.0
+                token = event.text
+                if reply_text and not reply_text[-1].isspace() and not token[:1].isspace():
+                    # Round boundary (e.g. narration, then a tool call, then
+                    # the final answer): without this, adjacent rounds run
+                    # together into "for you.It's available" in both the
+                    # TTS and the interruption note built from
+                    # st.partial_reply.
+                    token = " " + token
                 if twilio_send_start is None:
                     twilio_send_start = asyncio.get_event_loop().time()
                     logger.info(
@@ -273,10 +331,12 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                         twilio_send_start - start_time,
                     )
                 await websocket.send_json(
-                    {"type": "text", "token": delta, "last": False, "preemptible": True}
+                    {"type": "text", "token": token, "last": False, "preemptible": True}
                 )
                 twilio_frame_count += 1
-                reply_text += delta
+                if audio_started_at is None:
+                    audio_started_at = asyncio.get_event_loop().time()
+                reply_text += token
                 st.partial_reply = reply_text
             await websocket.send_json({"type": "text", "token": "", "last": True, "preemptible": True})
             if twilio_send_start is not None:
@@ -322,6 +382,11 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
             except Exception:
                 pass
             return
+        finally:
+            # Cleared on every exit -- cancellation, error, or normal
+            # completion -- so a stale window can never leak into whatever
+            # happens next on this call.
+            st.tool_call_started_at = 0.0
         # Log the real reply -- never the filler -- for debugging only; this
         # list is not sent to GuideAnts (continuation is by conversation id,
         # see module docstring).
@@ -337,7 +402,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
             st.partial_reply = ""
             st.playback_text = reply_text
             st.playback_start = asyncio.get_event_loop().time()
-        # Turns 2+ stream token-by-token, but Twilio still buffers/plays TTS
+        # Every turn streams token-by-token, but Twilio still buffers/plays TTS
         # far slower than the deltas arrive -- this task would otherwise be
         # marked "done" well before Twilio actually finishes speaking the
         # reply aloud, making mid-reply caller speech look like it arrived
@@ -381,6 +446,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         st.partial_reply = ""
         st.playback_text = ""
         st.guide_awaiting_answer = False
+        st.tool_call_started_at = 0.0
         st.task = asyncio.create_task(respond_to(input_text, fillers.looks_like_question(user_text)))
 
     def _arm_commit(delay: float) -> None:
@@ -477,7 +543,21 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 text = msg.get("voicePrompt", "") or ""
                 if text.strip():
                     if st.task and not st.task.done():
-                        if barge_in.should_interrupt(text, config.EXTRA_STOP_PHRASES):
+                        # A client-side tool call may have left the guide
+                        # quiet mid-turn (real tool latency, not a finished
+                        # reply) -- soften barge-in for that gap so a
+                        # rephrase/"hello?" doesn't cancel the answer that's
+                        # still coming. An explicit stop/wait phrase always
+                        # still cuts through immediately.
+                        tool_pending = bool(st.tool_call_started_at) and (
+                            asyncio.get_event_loop().time() - st.tool_call_started_at
+                            < config.TOOL_CALL_BARGE_IN_GRACE_SECONDS
+                        )
+                        if tool_pending and not barge_in.is_stop_command(text, config.EXTRA_STOP_PHRASES):
+                            logger.info(
+                                "Ignoring caller speech while a tool result is pending: %r", text
+                            )
+                        elif barge_in.should_interrupt(text, config.EXTRA_STOP_PHRASES):
                             await cancel_task()
                             # Remember what the caller actually heard as
                             # st.interrupted_reply, so the *next* real question

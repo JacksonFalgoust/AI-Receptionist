@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from app import config, twilio_auth
 from app import main
+from app.guide_client import Delta
 from app.main import app
 
 client = TestClient(app)
@@ -48,9 +49,9 @@ def test_yeah_answers_a_pending_guide_question_instead_of_being_ignored(monkeypa
     async def _fake_stream_reply(input_text, guide):
         calls.append(input_text)
         if len(calls) == 1:
-            yield "Would you like the 9am slot?"
+            yield Delta("Would you like the 9am slot?")
         else:
-            yield "Great, you're booked for 9am."
+            yield Delta("Great, you're booked for 9am.")
 
     monkeypatch.setattr(main, "stream_reply", _fake_stream_reply)
 
