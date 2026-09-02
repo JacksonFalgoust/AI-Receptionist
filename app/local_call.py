@@ -14,6 +14,7 @@ tools, and conversation-id continuation working exactly as they do on /ws.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass
 from typing import Literal
@@ -46,10 +47,14 @@ def _fallback_phrase(outcome: Outcome) -> str:
 async def _with_fallback_audio(result: TurnResult) -> TurnResult:
     """Give a failed turn something to say. Synthesized outside the turn
     budget: the phrase is short, and a caller hearing nothing at all would
-    have no idea the line is still open."""
+    have no idea the line is still open. Bounded by its own
+    LOCAL_FALLBACK_TTS_BUDGET_SECONDS deadline -- this runs after
+    LOCAL_TURN_BUDGET_SECONDS has already elapsed, so an unbounded call here
+    could stack on top of that and blow past Twilio's webhook timeout."""
     phrase = _fallback_phrase(result.outcome)
     try:
-        wav = await local_audio_client.synthesize(phrase)
+        async with asyncio.timeout(config.LOCAL_FALLBACK_TTS_BUDGET_SECONDS):
+            wav = await local_audio_client.synthesize(phrase)
     except Exception:
         logger.warning("Fallback speech synthesis failed", exc_info=True)
         return result
@@ -63,9 +68,15 @@ async def _pipeline(recording_url: str, session: GuideSession) -> TurnResult:
         return TurnResult("", "", None, "no_speech")
 
     parts: list[str] = []
-    async for event in stream_reply(transcript, session):
-        if isinstance(event, Delta):
-            parts.append(event.text)
+    # Explicitly closed so a timeout cancelling this loop (run_turn's
+    # asyncio.timeout) deterministically tears down the underlying GuideAnts
+    # SSE connection instead of leaving it to eventual GC finalization, which
+    # could otherwise overlap the very next turn's request on the shared
+    # connection pool. Same hazard and fix as guide_client.py's aclosing use.
+    async with contextlib.aclosing(stream_reply(transcript, session)) as replies:
+        async for event in replies:
+            if isinstance(event, Delta):
+                parts.append(event.text)
     reply_text = "".join(parts).strip()
 
     if not reply_text:

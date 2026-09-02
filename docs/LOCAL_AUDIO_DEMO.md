@@ -18,7 +18,7 @@ Caller ⇄ Twilio number ⇄ <Record>/<Play> TwiML ⇄ this app ⇄ GuideAnts
 - **Pause between turns**: there's a 2-3 second silence between the caller finishing and the reply starting, while the app fetches the recording, transcribes it, gets the guide's answer, and synthesizes it back to audio.
 
 *Gains:*
-- **No third-party speech models** (once GuideAnts' own models below are local): speech never leaves the machine running GuideAnts. No Deepgram, no ElevenLabs, no Twilio Conversation Relay — just local models and the guide.
+- **No third-party speech models** (once GuideAnts' own models below are local): transcription and synthesis run on GuideAnts' own models instead of Deepgram/ElevenLabs/Twilio Conversation Relay. Note this is not full end-to-end privacy: `<Record>` means Twilio itself still durably records and stores every caller turn server-side, and this app downloads that recording back over the public internet to transcribe it. Nothing in this demo deletes those Twilio-side recordings afterward — treat this as fewer third-party speech vendors in the loop, not a private call.
 
 ## GuideAnts configuration (do this first)
 
@@ -81,8 +81,8 @@ These are the knobs you'll actually touch when running the demo:
 | Env var | Default | What it does |
 |---------|---------|--------------|
 | `LOCAL_RECORD_SILENCE_SECONDS` | 3 | Seconds of caller silence that end a turn. Raise it if callers get cut off mid-sentence; lower it if turns feel sluggish. |
-| `LOCAL_TURN_BUDGET_SECONDS` | 10 | Deadline for the whole turn pipeline (fetch recording + STT + guide + TTS). Must stay under Twilio's ~15s webhook timeout. |
-| `GUIDEANTS_SPEECH_VOICE` | (empty) | Voice name for speech synthesis (e.g. "alloy", "echo"). Leave empty for GuideAnts' configured default. |
+| `LOCAL_TURN_BUDGET_SECONDS` | 10 | Deadline for the whole turn pipeline (fetch recording + STT + guide + TTS). Must stay under Twilio's ~15s webhook timeout. Reservation/tool-using turns (`checkAvailability`, `createOrder`, `sendPaymentLink` chained together) may need this raised above the default, since each Booqable round-trip adds real latency inside the same budget. |
+| `GUIDEANTS_SPEECH_VOICE` | (empty) | Voice name for speech synthesis. Valid values depend on whichever local voice pack is installed and selected in GuideAnts — there's no fixed list here, and OpenAI voice names like "alloy" or "echo" don't apply. Leave empty for GuideAnts' configured default. |
 
 Other configuration (recording timeouts, session/audio cache TTLs, error messages) is in `app/config.py` with defaults that work for most cases — only change them if you hit them in practice.
 
@@ -90,4 +90,4 @@ Other configuration (recording timeouts, session/audio cache TTLs, error message
 
 - **No barge-in**: the caller must wait for the full reply to finish playing before they can interrupt.
 - **Silence while thinking**: there's a 2-3 second pause between the caller finishing and the reply starting, while the app handles recording, transcription, guide, and synthesis.
-- **Single-use unguessable audio IDs**: `/local/audio/{id}` returns synthesized replies as WAV audio. The `{id}` is a random unguessable single-use token, not a Twilio-signed request like the Conversation Relay flow — only the app and Twilio know the ID, and it expires after `LOCAL_AUDIO_TTL_SECONDS` (default 5 minutes).
+- **Single-use unguessable audio IDs**: `/local/audio/{id}` returns synthesized replies as WAV audio. The `{id}` is a random unguessable single-use token, not a Twilio-signed request like the Conversation Relay flow — only the app and Twilio know the ID. Eviction of stale entries is request-driven (it happens on the next `/local/twiml` or `/local/turn` call, not on a background timer), so `LOCAL_AUDIO_TTL_SECONDS` (default 5 minutes) is a ceiling on how long a stale entry can live, not a guaranteed expiry moment.
