@@ -169,3 +169,53 @@ POSTMARK_API_URL = os.environ.get("POSTMARK_API_URL", "https://api.postmarkapp.c
 # Fallback channel when the guide calls sendPaymentLink without one: "email" or
 # "sms".
 PAYMENT_LINK_DEFAULT_CHANNEL = os.environ.get("PAYMENT_LINK_DEFAULT_CHANNEL", "email").strip().lower()
+
+# --- Local audio demo (app/local_demo_api.py) -------------------------------
+# A second phone demo that keeps Twilio only as the phone line: <Record>
+# captures each caller turn and GuideAnts' own speech models do the
+# transcription and synthesis, instead of Conversation Relay's built-in
+# Deepgram/ElevenLabs. Unused by the /twiml + /ws Conversation Relay flow.
+
+# Model ids on GuideAnts' published OpenAI-compatible API. The defaults match
+# what /v1/models advertises; override only if a guide exposes different ids.
+GUIDEANTS_TRANSCRIPTION_MODEL = os.environ.get("GUIDEANTS_TRANSCRIPTION_MODEL", "transcription")
+GUIDEANTS_SPEECH_MODEL = os.environ.get("GUIDEANTS_SPEECH_MODEL", "speech")
+# Voice name for synthesis. Left out of the request entirely when empty, so
+# GuideAnts picks its configured default voice.
+GUIDEANTS_SPEECH_VOICE = os.environ.get("GUIDEANTS_SPEECH_VOICE", "")
+
+# <Record timeout>: seconds of caller silence that end a turn. This is the
+# whole of turn-taking in this demo -- there is no VAD or barge-in. Lower
+# feels snappier but cuts off callers who pause mid-sentence.
+LOCAL_RECORD_SILENCE_SECONDS = int(os.environ.get("LOCAL_RECORD_SILENCE_SECONDS", "3"))
+# <Record maxLength>: hard ceiling on a single caller turn.
+LOCAL_RECORD_MAX_SECONDS = int(os.environ.get("LOCAL_RECORD_MAX_SECONDS", "30"))
+
+# Deadline for the whole turn pipeline (fetch + STT + guide + TTS). Twilio
+# abandons a webhook that takes ~15s, so this stays well under it: on expiry
+# the caller hears LOCAL_TIMEOUT_PHRASE and the call continues, instead of
+# Twilio dropping it.
+LOCAL_TURN_BUDGET_SECONDS = float(os.environ.get("LOCAL_TURN_BUDGET_SECONDS", "10"))
+
+# <Record>'s action callback fires before the recording's media is finished
+# being stored, so the first fetch can 404 for a beat.
+LOCAL_RECORDING_FETCH_ATTEMPTS = int(os.environ.get("LOCAL_RECORDING_FETCH_ATTEMPTS", "5"))
+LOCAL_RECORDING_FETCH_DELAY_SECONDS = float(os.environ.get("LOCAL_RECORDING_FETCH_DELAY_SECONDS", "0.4"))
+
+# Idle eviction for the per-CallSid GuideAnts session map and the cache of
+# synthesized replies waiting to be fetched by Twilio's player.
+LOCAL_SESSION_TTL_SECONDS = float(os.environ.get("LOCAL_SESSION_TTL_SECONDS", "1800"))
+LOCAL_AUDIO_TTL_SECONDS = float(os.environ.get("LOCAL_AUDIO_TTL_SECONDS", "300"))
+
+# Spoken when a turn can't produce a real answer. Every one of these is
+# followed by another <Record>, so the call always continues.
+LOCAL_NO_SPEECH_PHRASE = os.environ.get(
+    "LOCAL_NO_SPEECH_PHRASE", "Sorry, I didn't catch that. Could you say it again?"
+)
+LOCAL_ERROR_PHRASE = os.environ.get(
+    "LOCAL_ERROR_PHRASE", "Sorry, I had trouble with that. Could you try again?"
+)
+LOCAL_TIMEOUT_PHRASE = os.environ.get(
+    "LOCAL_TIMEOUT_PHRASE",
+    "Sorry, that's taking longer than expected. Could you say that again?",
+)
