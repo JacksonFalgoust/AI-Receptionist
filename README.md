@@ -161,6 +161,14 @@ this running on your device — GuideAnts guide creation, installing
 dependencies, `.env`, Twilio account/number configuration, tunneling, and
 placing a call.
 
+## Documentation
+
+| Document | Purpose |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Deep dive into the wire protocol, every file's role, edge cases, and design decisions. |
+| [docs/SETUP.md](docs/SETUP.md) | Step-by-step account/tunnel setup guide. |
+| [docs/LOCAL_AUDIO_DEMO.md](docs/LOCAL_AUDIO_DEMO.md) | Second phone demo using GuideAnts' own audio models instead of Twilio Conversation Relay. |
+
 ## Manual verification without a phone call
 
 With the server running and `.env` pointed at a real published guide, confirm
