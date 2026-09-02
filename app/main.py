@@ -76,8 +76,8 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 from twilio.twiml.voice_response import Connect, VoiceResponse
 
-from . import barge_in, config, fillers, reservations, speaker_events, speech_timing, twilio_auth
-from .booqable_client import BooqableClient, BooqableError
+from . import barge_in, config, fillers, speaker_events, speech_timing, twilio_auth
+from .greeting import greeting_for
 from .guide_client import Delta, GuideSession, ToolCallStarted, build_input, stream_reply
 from .reservations_api import router as reservations_router
 
@@ -101,32 +101,6 @@ PENDING_TURN_CEILING_SECONDS = 10.0
 _STREAM_TO_TWILIO_BURST_THRESHOLD_SECONDS = 0.05
 
 
-async def _greeting_for(from_number: str) -> str:
-    """Personalize the welcome greeting for a known Booqable customer, by
-    caller phone number. Falls back to the plain WELCOME_GREETING on any
-    failure -- this sits directly in the call-answering path (Twilio expects
-    a prompt TwiML response), so a slow/unreachable Booqable or an unset
-    BOOQABLE_API_KEY (which makes BooqableClient() itself raise immediately,
-    see booqable_client.py) must never delay or break answering the call."""
-    if not from_number:
-        return config.WELCOME_GREETING
-    try:
-        client = BooqableClient()
-        customer = await asyncio.wait_for(
-            reservations.find_customer(client, phone=from_number),
-            timeout=config.CALLER_LOOKUP_TIMEOUT_SECONDS,
-        )
-        if not customer:
-            return config.WELCOME_GREETING
-        name = (client.attrs(customer).get("name") or "").split()
-        if not name:
-            return config.WELCOME_GREETING
-        return config.WELCOME_BACK_GREETING_TEMPLATE.format(name=name[0])
-    except (BooqableError, asyncio.TimeoutError, Exception):
-        logger.warning("Caller lookup failed; using default greeting", exc_info=True)
-        return config.WELCOME_GREETING
-
-
 @app.post("/twiml")
 async def twiml(request: Request) -> Response:
     """Return TwiML that connects the call to our Conversation Relay WebSocket."""
@@ -137,7 +111,7 @@ async def twiml(request: Request) -> Response:
     form = await request.form()
     call_sid = form.get("CallSid", "")
     token = twilio_auth.mint_ws_token(call_sid)
-    greeting = await _greeting_for(form.get("From", ""))
+    greeting = await greeting_for(form.get("From", ""))
 
     vr = VoiceResponse()
     connect = Connect()
