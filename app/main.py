@@ -6,6 +6,9 @@ WS   /ws      Conversation Relay's WebSocket bridge: receives transcribed
               caller speech and streams the GuideAnts guide's reply back as
               speakable text tokens.
 
+The local audio demo's endpoints (/local/*) live in app/local_demo_api.py and
+share nothing with the state machine below.
+
 Conversation Relay is configured `interruptible="none"`, so Twilio itself
 never pauses TTS playback on caller speech; it still arrives here as
 "prompt" messages (`report_input_during_agent_speech="speech"`). Most
@@ -79,6 +82,7 @@ from twilio.twiml.voice_response import Connect, VoiceResponse
 from . import barge_in, config, fillers, speaker_events, speech_timing, twilio_auth
 from .greeting import greeting_for
 from .guide_client import Delta, GuideSession, ToolCallStarted, build_input, stream_reply
+from .local_demo_api import router as local_demo_router
 from .reservations_api import router as reservations_router
 
 logging.basicConfig(level=logging.INFO)
@@ -86,6 +90,7 @@ logger = logging.getLogger("voice_receptionist")
 
 app = FastAPI()
 app.include_router(reservations_router)
+app.include_router(local_demo_router)
 
 # Ceiling on holding a buffered turn while the caller is (per clientSpeaking
 # events) still audibly speaking. Normally the commit timer is re-armed by
