@@ -69,6 +69,7 @@ def test_transcribe_posts_multipart_named_audio_wav():
     assert call["files"]["file"][1] == b"RIFFfake"
     assert call["files"]["file"][2] == "audio/wav"
     assert call["data"]["model"] == "transcription"
+    assert FakeAsyncClient.init_kwargs["timeout"] == config.GUIDEANTS_TIMEOUT_SECONDS
 
 
 def test_transcribe_raises_on_http_error():

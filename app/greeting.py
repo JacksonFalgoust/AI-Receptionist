@@ -9,7 +9,7 @@ import asyncio
 import logging
 
 from . import config, reservations
-from .booqable_client import BooqableClient, BooqableError
+from .booqable_client import BooqableClient
 
 logger = logging.getLogger("voice_receptionist")
 
@@ -35,6 +35,6 @@ async def greeting_for(from_number: str) -> str:
         if not name:
             return config.WELCOME_GREETING
         return config.WELCOME_BACK_GREETING_TEMPLATE.format(name=name[0])
-    except (BooqableError, asyncio.TimeoutError, Exception):
+    except Exception:
         logger.warning("Caller lookup failed; using default greeting", exc_info=True)
         return config.WELCOME_GREETING

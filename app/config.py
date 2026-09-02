@@ -197,6 +197,14 @@ LOCAL_RECORD_MAX_SECONDS = int(os.environ.get("LOCAL_RECORD_MAX_SECONDS", "30"))
 # Twilio dropping it.
 LOCAL_TURN_BUDGET_SECONDS = float(os.environ.get("LOCAL_TURN_BUDGET_SECONDS", "10"))
 
+# Separate deadline for the apology/greeting synthesis spoken OUTSIDE that
+# budget (see local_call._with_fallback_audio and local_demo_api's greeting
+# synthesis): both run after their own timing budget has already elapsed, so
+# without a bound of their own a slow GuideAnts TTS call could stack on top
+# of that elapsed time and blow past Twilio's ~15s webhook timeout. Short,
+# because the text being synthesized here is always a short fixed phrase.
+LOCAL_FALLBACK_TTS_BUDGET_SECONDS = float(os.environ.get("LOCAL_FALLBACK_TTS_BUDGET_SECONDS", "3"))
+
 # <Record>'s action callback fires before the recording's media is finished
 # being stored, so the first fetch can 404 for a beat.
 LOCAL_RECORDING_FETCH_ATTEMPTS = int(os.environ.get("LOCAL_RECORDING_FETCH_ATTEMPTS", "5"))

@@ -8,6 +8,7 @@ def test_local_audio_defaults():
     assert config.LOCAL_RECORD_SILENCE_SECONDS == 3
     assert config.LOCAL_RECORD_MAX_SECONDS == 30
     assert config.LOCAL_TURN_BUDGET_SECONDS == 10.0
+    assert config.LOCAL_FALLBACK_TTS_BUDGET_SECONDS == 3.0
     assert config.LOCAL_RECORDING_FETCH_ATTEMPTS == 5
     assert config.LOCAL_RECORDING_FETCH_DELAY_SECONDS == 0.4
     assert config.LOCAL_SESSION_TTL_SECONDS == 1800.0

@@ -17,6 +17,7 @@ Setup and the GuideAnts-side model configuration: docs/LOCAL_AUDIO_DEMO.md.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 import time
@@ -121,7 +122,12 @@ async def local_twiml(request: Request) -> Response:
     wav = _greetings.get(text)
     if wav is None:
         try:
-            wav = await local_audio_client.synthesize(text)
+            # Bounded by its own budget, separate from LOCAL_TURN_BUDGET_SECONDS:
+            # this runs after the (also bounded) caller lookup in greeting_for,
+            # so an unbounded call here could stack on top of that elapsed time
+            # and blow past Twilio's webhook timeout for /local/twiml.
+            async with asyncio.timeout(config.LOCAL_FALLBACK_TTS_BUDGET_SECONDS):
+                wav = await local_audio_client.synthesize(text)
             _greetings[text] = wav
         except Exception:
             # Answering the call matters more than greeting it: a silent but

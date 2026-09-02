@@ -1,4 +1,5 @@
 import re
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -199,6 +200,39 @@ def test_endpoints_reject_a_bad_signature_when_enforcement_is_on(monkeypatch):
         ).status_code
         == 403
     )
+
+
+def test_sweep_evicts_stale_sessions_on_a_later_request(monkeypatch):
+    monkeypatch.setattr(config, "LOCAL_SESSION_TTL_SECONDS", 0)
+
+    client.post("/local/twiml", data={"CallSid": "CA-stale", "From": "+1555"})
+    assert "CA-stale" in local_demo_api._sessions
+
+    # Any later request triggers _sweep(); a different CallSid so this isn't
+    # exercising the same session being touched/refreshed.
+    client.post("/local/twiml", data={"CallSid": "CA-fresh", "From": "+1555"})
+
+    assert "CA-stale" not in local_demo_api._sessions
+    assert "CA-fresh" in local_demo_api._sessions
+
+
+def test_sweep_evicts_stale_audio_on_a_later_request(monkeypatch):
+    monkeypatch.setattr(config, "LOCAL_AUDIO_TTL_SECONDS", 0)
+
+    stale_id = local_demo_api._store_audio(b"WAV:stale")
+    # Force it past its TTL without sleeping: back-date its creation time.
+    wav, _created = local_demo_api._audio[stale_id]
+    local_demo_api._audio[stale_id] = (wav, time.monotonic() - 100)
+    assert stale_id in local_demo_api._audio
+
+    # Any request that reaches _session_for (which calls _sweep()) should
+    # evict it -- use a turn request so we don't also touch _store_audio again.
+    client.post(
+        "/local/turn",
+        data={"CallSid": "CA1", "From": "+1555"},
+    )
+
+    assert stale_id not in local_demo_api._audio
 
 
 def test_valid_signature_is_accepted(monkeypatch):
