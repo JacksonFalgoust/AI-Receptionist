@@ -1,4 +1,5 @@
 import asyncio
+import time
 from unittest.mock import AsyncMock
 
 import pytest
@@ -8,6 +9,7 @@ from app.reservations import (
     add_customer_note,
     find_or_create_customer,
     get_order_contact,
+    list_catalog,
     list_customers,
     register_customer,
 )
@@ -211,3 +213,79 @@ def test_get_order_contact_raises_when_no_linked_customer():
 
     with pytest.raises(BooqableError):
         asyncio.run(get_order_contact(client, "order_2"))
+
+
+def _group(id_: str, *, name: str, sku: str = "") -> dict:
+    return {
+        "type": "product_groups",
+        "id": id_,
+        "attributes": {
+            "name": name,
+            "sku": sku,
+            "trackable": True,
+            "price_period": "day",
+            "flat_fee_price_in_cents": 1000,
+            "deposit_in_cents": 5000,
+        },
+    }
+
+
+def _group_detail_response(group_id: str, product_id: str) -> dict:
+    # Shape of a GET product_groups/{id}?include=products response:
+    # relationships points at the product, included carries its resource.
+    return {
+        "data": {
+            "type": "product_groups",
+            "id": group_id,
+            "relationships": {"products": {"data": {"type": "products", "id": product_id}}},
+        },
+        "included": [{"type": "products", "id": product_id}],
+    }
+
+
+def test_list_catalog_maps_group_and_product_fields():
+    client = object.__new__(BooqableClient)
+    client.list_all = AsyncMock(return_value=[_group("g1", name="Cruiser Bike", sku="CRZ-1")])
+    client.get = AsyncMock(return_value=_group_detail_response("g1", "p1"))
+
+    catalog = asyncio.run(list_catalog(client))
+
+    assert catalog == [
+        {
+            "product_group_id": "g1",
+            "product_id": "p1",
+            "name": "Cruiser Bike",
+            "sku": "CRZ-1",
+            "trackable": True,
+            "price_period": "day",
+            "flat_fee_price_usd": 10.0,
+            "deposit_usd": 50.0,
+        }
+    ]
+
+
+def test_list_catalog_fetches_each_group_concurrently():
+    """BooqableClient.list_all discards the bulk list's `included` array (it
+    only returns `data`), so each group needs its own re-fetch for its
+    product -- but doing those sequentially is what actually blew the local
+    demo's whole turn budget on a ~14-group catalog (5-9s; see
+    logs/app.log). They must run concurrently instead."""
+    client = object.__new__(BooqableClient)
+    groups = [_group(f"g{i}", name=f"Bike {i}") for i in range(5)]
+    client.list_all = AsyncMock(return_value=groups)
+
+    async def slow_get(path, **kwargs):
+        await asyncio.sleep(0.05)
+        group_id = path.split("/")[1]
+        return _group_detail_response(group_id, f"p-{group_id}")
+
+    client.get = slow_get
+
+    start = time.monotonic()
+    catalog = asyncio.run(list_catalog(client))
+    elapsed = time.monotonic() - start
+
+    assert len(catalog) == 5
+    # Sequential would take ~5 * 0.05s = 0.25s; concurrent is close to one
+    # slot's worth. Generous ceiling to avoid flaking on a slow box.
+    assert elapsed < 0.2
