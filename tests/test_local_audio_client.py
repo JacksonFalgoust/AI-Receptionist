@@ -1,5 +1,6 @@
 import asyncio
 
+import httpx
 import pytest
 
 from app import config, local_audio_client
@@ -22,6 +23,10 @@ class FakeResponse:
 class FakeAsyncClient:
     calls = []
     response = None
+    # Optional queue of FakeResponse/Exception instances, consumed one per
+    # call -- lets a test script a failure followed by a success. When unset,
+    # every call just returns `response`.
+    responses = None
     init_kwargs = {}
 
     def __init__(self, *args, **kwargs):
@@ -37,18 +42,27 @@ class FakeAsyncClient:
         FakeAsyncClient.calls.append(
             {"url": url, "headers": headers, "files": files, "data": data, "json": json}
         )
+        if FakeAsyncClient.responses is not None:
+            next_item = FakeAsyncClient.responses.pop(0)
+            if isinstance(next_item, Exception):
+                raise next_item
+            return next_item
         return FakeAsyncClient.response
 
 
 @pytest.fixture(autouse=True)
 def guideants_config(monkeypatch):
     FakeAsyncClient.calls = []
+    FakeAsyncClient.responses = None
     monkeypatch.setattr(config, "GUIDEANTS_BASE_URL", "http://guideants.test")
     monkeypatch.setattr(config, "GUIDEANTS_PUB_ID", "pub-123")
     monkeypatch.setattr(config, "GUIDEANTS_API_KEY", "secret-key")
     monkeypatch.setattr(config, "GUIDEANTS_TRANSCRIPTION_MODEL", "transcription")
     monkeypatch.setattr(config, "GUIDEANTS_SPEECH_MODEL", "speech")
     monkeypatch.setattr(config, "GUIDEANTS_SPEECH_VOICE", "")
+    # Real delay would make every retry test slow for no reason; the retry
+    # count is what these tests check, not the backoff timing.
+    monkeypatch.setattr(config, "GUIDEANTS_RETRY_DELAY_SECONDS", 0.0)
     monkeypatch.setattr(
         local_audio_client, "httpx", type("_M", (), {"AsyncClient": FakeAsyncClient})
     )
@@ -124,3 +138,55 @@ def test_raises_when_pub_id_unset(monkeypatch):
 
     with pytest.raises(GuideAudioError):
         asyncio.run(transcribe(b"RIFFfake"))
+
+
+# --- Retry on GuideAnts' transient reconcile-cycle failures -----------------
+# GuideAnts periodically reloads its local ASR/TTS engines without waiting
+# out an in-flight request first, so a request whose timing overlaps that
+# cycle can have its connection dropped or get a 5xx moments before the
+# engine is healthy again. One retry rides past it.
+
+
+def test_transcribe_retries_once_on_connection_error_then_succeeds():
+    FakeAsyncClient.responses = [
+        httpx.RequestError("Remote end closed connection without response"),
+        FakeResponse(200, {"text": "I need a bike"}),
+    ]
+
+    result = asyncio.run(transcribe(b"RIFFfake"))
+
+    assert result == "I need a bike"
+    assert len(FakeAsyncClient.calls) == 2
+
+
+def test_transcribe_gives_up_after_one_retry_on_repeated_connection_error():
+    FakeAsyncClient.responses = [
+        httpx.RequestError("Remote end closed connection without response"),
+        httpx.RequestError("Remote end closed connection without response"),
+    ]
+
+    with pytest.raises(GuideAudioError):
+        asyncio.run(transcribe(b"RIFFfake"))
+
+    assert len(FakeAsyncClient.calls) == 2
+
+
+def test_synthesize_retries_once_on_503_then_succeeds():
+    FakeAsyncClient.responses = [
+        FakeResponse(503, text="model_not_loaded"),
+        FakeResponse(200, content=b"RIFFaudio"),
+    ]
+
+    result = asyncio.run(synthesize("We open at nine."))
+
+    assert result == b"RIFFaudio"
+    assert len(FakeAsyncClient.calls) == 2
+
+
+def test_synthesize_does_not_retry_on_non_retryable_4xx():
+    FakeAsyncClient.responses = [FakeResponse(400, text="bad request")]
+
+    with pytest.raises(GuideAudioError):
+        asyncio.run(synthesize("We open at nine."))
+
+    assert len(FakeAsyncClient.calls) == 1
