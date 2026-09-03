@@ -144,6 +144,10 @@ def test_fallback_synthesis_failing_still_returns_a_result(monkeypatch):
 
     assert result.outcome == "error"
     assert result.reply_wav is None
+    # The phrase survives even though GuideAnts couldn't speak it, so the
+    # caller of run_turn can still fall back to Twilio's own <Say> instead of
+    # leaving the caller in silence -- see local_demo_api._turn_response.
+    assert result.reply_text == "Trouble."
 
 
 def test_no_speech_turn_speaks_the_no_speech_phrase():

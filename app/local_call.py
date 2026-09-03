@@ -57,7 +57,10 @@ async def _with_fallback_audio(result: TurnResult) -> TurnResult:
             wav = await local_audio_client.synthesize(phrase)
     except Exception:
         logger.warning("Fallback speech synthesis failed", exc_info=True)
-        return result
+        # reply_text still carries the phrase even though GuideAnts couldn't
+        # speak it, so local_demo_api can fall back to Twilio's own <Say>
+        # instead of leaving the caller in silence.
+        return TurnResult(result.transcript, phrase, None, result.outcome)
     return TurnResult(result.transcript, phrase, wav, result.outcome)
 
 

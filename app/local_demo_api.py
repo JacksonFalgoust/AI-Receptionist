@@ -84,18 +84,27 @@ def _store_audio(wav: bytes) -> str:
     return audio_id
 
 
-def _turn_response(request: Request, wav: bytes | None) -> Response:
+def _turn_response(request: Request, wav: bytes | None, say_text: str = "") -> Response:
     """Play `wav` (when there is any) and record the caller's next turn.
 
     The <Play> URL is built from the request's Host header for the same reason
     /twiml builds its WebSocket URL that way: the tunnel's hostname changes
     between demos and must never be hardcoded.
+
+    `say_text`, when `wav` is missing, is spoken with Twilio's own built-in
+    TTS instead -- GuideAnts' own synthesis failed (see local_call's
+    _with_fallback_audio and local_twiml's greeting synthesis below), and a
+    caller hearing nothing at all would have no idea the line is still open.
+    This is the one place non-GuideAnts speech enters this demo, and only as
+    a last resort after GuideAnts' own attempt (and its one retry) failed.
     """
     vr = VoiceResponse()
     if wav:
         scheme = request.headers.get("x-forwarded-proto", "https")
         host = request.headers.get("host", request.url.hostname)
         vr.play(f"{scheme}://{host}/local/audio/{_store_audio(wav)}")
+    elif say_text:
+        vr.say(say_text)
     vr.record(
         action="/local/turn",
         method="POST",
@@ -132,10 +141,10 @@ async def local_twiml(request: Request) -> Response:
         except Exception:
             # Answering the call matters more than greeting it: a silent but
             # working line beats a Twilio error.
-            logger.warning("Greeting synthesis failed; answering silently", exc_info=True)
+            logger.warning("Greeting synthesis failed; answering with Twilio's own TTS", exc_info=True)
             wav = None
 
-    return _turn_response(request, wav)
+    return _turn_response(request, wav, say_text=text)
 
 
 @router.post("/local/turn")
@@ -167,7 +176,7 @@ async def local_turn(request: Request) -> Response:
         result.transcript,
         result.reply_text[:80],
     )
-    return _turn_response(request, result.reply_wav)
+    return _turn_response(request, result.reply_wav, say_text=result.reply_text)
 
 
 @router.get("/local/audio/{audio_id}")
