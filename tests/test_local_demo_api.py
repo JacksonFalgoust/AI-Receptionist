@@ -40,6 +40,11 @@ def audio_url_in(body):
     return match.group(1) if match else None
 
 
+def say_text_in(body):
+    match = re.search(r"<Say>(.*?)</Say>", body)
+    return match.group(1) if match else None
+
+
 def test_twiml_greets_and_starts_recording():
     response = client.post(
         "/local/twiml", data={"CallSid": "CA1", "From": "+15551234567"}
@@ -80,6 +85,9 @@ def test_greeting_synthesis_failure_still_answers_the_call(monkeypatch):
     assert response.status_code == 200
     assert "<Play>" not in response.text
     assert "<Record" in response.text
+    # GuideAnts' own TTS is down, but the caller still hears the greeting --
+    # via Twilio's built-in <Say>, as a last resort so the line isn't silent.
+    assert say_text_in(response.text) == "Thanks for calling!"
 
 
 def test_turn_plays_the_reply_and_records_again(monkeypatch):
@@ -131,6 +139,28 @@ def test_turn_with_no_audio_at_all_still_records_again(monkeypatch):
 
     assert response.status_code == 200
     assert "<Play>" not in response.text
+    assert "<Record" in response.text
+
+
+def test_turn_with_no_audio_but_known_text_falls_back_to_say(monkeypatch):
+    """local_call.run_turn keeps the intended phrase in reply_text even when
+    GuideAnts couldn't synthesize it (see test_local_call.py's
+    test_fallback_synthesis_failing_still_returns_a_result) -- this app must
+    still speak *something* rather than leave the caller in silence."""
+
+    async def fake_run_turn(recording_url, session):
+        return TurnResult("hello", "Trouble.", None, "error")
+
+    monkeypatch.setattr(local_demo_api.local_call, "run_turn", fake_run_turn)
+
+    response = client.post(
+        "/local/turn",
+        data={"CallSid": "CA1", "From": "+1555", "RecordingUrl": RECORDING_URL},
+    )
+
+    assert response.status_code == 200
+    assert "<Play>" not in response.text
+    assert say_text_in(response.text) == "Trouble."
     assert "<Record" in response.text
 
 
