@@ -83,9 +83,11 @@ from . import barge_in, config, fillers, speaker_events, speech_timing, twilio_a
 from .greeting import greeting_for
 from .guide_client import Delta, GuideSession, ToolCallStarted, build_input, stream_reply
 from .local_demo_api import router as local_demo_router
+from .logging_setup import configure_file_logging
 from .reservations_api import router as reservations_router
 
 logging.basicConfig(level=logging.INFO)
+configure_file_logging()
 logger = logging.getLogger("voice_receptionist")
 
 app = FastAPI()

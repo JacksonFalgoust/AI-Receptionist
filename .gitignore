@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .env
 .pytest_cache/
+logs/
 
 # openrouter_proxy.py debug captures (may contain prompt/conversation content)
 scripts/captures/
