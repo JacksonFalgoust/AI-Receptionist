@@ -14,6 +14,15 @@ GUIDEANTS_MODEL = os.environ.get("GUIDEANTS_MODEL", "guide")
 # tighter budget and a single retry (set in guide_client._get_client()).
 GUIDEANTS_TIMEOUT_SECONDS = float(os.environ.get("GUIDEANTS_TIMEOUT_SECONDS", "30"))
 
+# GuideAnts periodically reconciles its local ASR/TTS engines (observed:
+# roughly every 30s) without waiting out an in-flight request first, so a
+# request whose timing overlaps that cycle can have its connection dropped or
+# get a transient 5xx moments before the engine is healthy again. Used by
+# local_audio_client's single retry on such a failure (see
+# local_audio_client._post_with_retry) -- a real retry, unlike guide_client's
+# SDK-level one, since httpx has no automatic retry-after-response-started.
+GUIDEANTS_RETRY_DELAY_SECONDS = float(os.environ.get("GUIDEANTS_RETRY_DELAY_SECONDS", "1"))
+
 # Average TTS speaking rate, used to estimate how long Twilio will take to
 # speak a reply (see speech_timing.py). Twilio's agent-stopped speaker event
 # is the primary "reply finished playing" signal; this estimate paces the

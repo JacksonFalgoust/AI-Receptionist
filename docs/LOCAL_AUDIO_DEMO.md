@@ -56,6 +56,8 @@ curl -s -X POST "$GUIDEANTS_BASE_URL/api/published/openai/$GUIDEANTS_PUB_ID/v1/a
 
 This means transcription is still pointed at OpenRouter (or the upload's filename had the wrong extension). Go back to GuideAnts' Model Settings and ensure the transcription model is selected as the active provider, not OpenRouter.
 
+**If a greeting or reply comes back silent** (no `<Play>`, or a generic error/timeout phrase, and GuideAnts' own container logs show `tts_synthesize_failed`/`asr_transcribe_rejected` right next to an unprompted `tts_model_unload_start`/`asr_model_unload_start`): GuideAnts periodically reconciles its local ASR/TTS engines and doesn't wait out an in-flight request first, so a request whose timing overlaps that cycle can have its connection dropped. `local_audio_client.py` retries once after `GUIDEANTS_RETRY_DELAY_SECONDS` for exactly this — raise it if the reconcile cycle on your setup takes longer than the default 1s to settle.
+
 ## Running it
 
 Use the same server as the Conversation Relay demo:
@@ -83,6 +85,7 @@ These are the knobs you'll actually touch when running the demo:
 | `LOCAL_RECORD_SILENCE_SECONDS` | 3 | Seconds of caller silence that end a turn. Raise it if callers get cut off mid-sentence; lower it if turns feel sluggish. |
 | `LOCAL_TURN_BUDGET_SECONDS` | 10 | Deadline for the whole turn pipeline (fetch recording + STT + guide + TTS). Must stay under Twilio's ~15s webhook timeout. Reservation/tool-using turns (`checkAvailability`, `createOrder`, `sendPaymentLink` chained together) may need this raised above the default, since each Booqable round-trip adds real latency inside the same budget. |
 | `GUIDEANTS_SPEECH_VOICE` | (empty) | Voice name for speech synthesis. Valid values depend on whichever local voice pack is installed and selected in GuideAnts — there's no fixed list here, and OpenAI voice names like "alloy" or "echo" don't apply. Leave empty for GuideAnts' configured default. |
+| `GUIDEANTS_RETRY_DELAY_SECONDS` | 1 | Delay before the one retry on a transient GuideAnts audio failure — see "If a greeting or reply comes back silent" above. |
 
 Other configuration (recording timeouts, session/audio cache TTLs, error messages) is in `app/config.py` with defaults that work for most cases — only change them if you hit them in practice.
 
