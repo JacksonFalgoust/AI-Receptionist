@@ -169,6 +169,14 @@ placing a call.
 | [docs/SETUP.md](docs/SETUP.md) | Step-by-step account/tunnel setup guide. |
 | [docs/LOCAL_AUDIO_DEMO.md](docs/LOCAL_AUDIO_DEMO.md) | Second phone demo using GuideAnts' own audio models instead of Twilio Conversation Relay. |
 
+## Logs
+
+Every module logs through the standard `logging` module to the console and, by
+default, to a rotating file at `logs/app.log` (set `LOG_FILE=` empty to
+disable). Diagnosing an incident after the fact — a failed turn, a GuideAnts
+error — starts here rather than with whatever scrolled past in the terminal
+that ran `uvicorn`.
+
 ## Manual verification without a phone call
 
 With the server running and `.env` pointed at a real published guide, confirm

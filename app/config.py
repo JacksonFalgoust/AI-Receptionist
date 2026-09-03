@@ -4,6 +4,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Rotating log file, in addition to the console output logging.basicConfig
+# already gives every module's logger (see app/logging_setup.py). Empty
+# disables file logging -- console-only, the previous behavior. Sized for a
+# long-running dev server, not production log retention.
+LOG_FILE = os.environ.get("LOG_FILE", "logs/app.log")
+LOG_MAX_BYTES = int(os.environ.get("LOG_MAX_BYTES", str(5_000_000)))
+LOG_BACKUP_COUNT = int(os.environ.get("LOG_BACKUP_COUNT", "3"))
+
 GUIDEANTS_BASE_URL = os.environ.get("GUIDEANTS_BASE_URL", "http://localhost:5107").rstrip("/")
 GUIDEANTS_PUB_ID = os.environ.get("GUIDEANTS_PUB_ID", "")
 GUIDEANTS_API_KEY = os.environ.get("GUIDEANTS_API_KEY", "anonymous")
@@ -201,10 +209,18 @@ LOCAL_RECORD_SILENCE_SECONDS = int(os.environ.get("LOCAL_RECORD_SILENCE_SECONDS"
 LOCAL_RECORD_MAX_SECONDS = int(os.environ.get("LOCAL_RECORD_MAX_SECONDS", "30"))
 
 # Deadline for the whole turn pipeline (fetch + STT + guide + TTS). Twilio
-# abandons a webhook that takes ~15s, so this stays well under it: on expiry
-# the caller hears LOCAL_TIMEOUT_PHRASE and the call continues, instead of
-# Twilio dropping it.
-LOCAL_TURN_BUDGET_SECONDS = float(os.environ.get("LOCAL_TURN_BUDGET_SECONDS", "10"))
+# abandons a webhook that takes ~15s, so this (plus LOCAL_FALLBACK_TTS_BUDGET_
+# SECONDS below, which can run afterward) must stay under that: on expiry the
+# caller hears LOCAL_TIMEOUT_PHRASE and the call continues, instead of Twilio
+# dropping it. A tool-calling turn (checkAvailability/createOrder) can run
+# long enough to blow even this: if GuideAnts' own turn gets cancelled by a
+# mid-stream disconnect while a tool result is in flight, guide_client.py's
+# recovery discards everything and starts a fresh conversation from scratch
+# (see stream_reply's `_is_stale_tool_result` branch) -- which can easily
+# not fit in whatever's left of the budget. Raising this gives that retry
+# more room but doesn't guarantee it fits; there's no budget short of
+# Twilio's own ceiling that guarantees a from-scratch retry completes.
+LOCAL_TURN_BUDGET_SECONDS = float(os.environ.get("LOCAL_TURN_BUDGET_SECONDS", "11"))
 
 # Separate deadline for the apology/greeting synthesis spoken OUTSIDE that
 # budget (see local_call._with_fallback_audio and local_demo_api's greeting
@@ -212,6 +228,8 @@ LOCAL_TURN_BUDGET_SECONDS = float(os.environ.get("LOCAL_TURN_BUDGET_SECONDS", "1
 # without a bound of their own a slow GuideAnts TTS call could stack on top
 # of that elapsed time and blow past Twilio's ~15s webhook timeout. Short,
 # because the text being synthesized here is always a short fixed phrase.
+# LOCAL_TURN_BUDGET_SECONDS + this is the real worst-case wait Twilio sees --
+# keep their sum comfortably under ~15s if you raise either one.
 LOCAL_FALLBACK_TTS_BUDGET_SECONDS = float(os.environ.get("LOCAL_FALLBACK_TTS_BUDGET_SECONDS", "3"))
 
 # <Record>'s action callback fires before the recording's media is finished
