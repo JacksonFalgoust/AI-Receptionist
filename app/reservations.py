@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -104,14 +105,23 @@ async def resolve_location(client: BooqableClient, location_id: str | None) -> d
 
 
 async def list_catalog(client: BooqableClient) -> list[dict[str, Any]]:
-    """Live rentable product catalog, for the receptionist to browse/search."""
+    """Live rentable product catalog, for the receptionist to browse/search.
+
+    Each group needs its own re-fetch for its product -- BooqableClient.list_all
+    only returns `data`, discarding the `included` array the bulk list call's
+    own `include=products` would otherwise have supplied. Fetched concurrently:
+    done sequentially, this alone took 5-9s against a ~14-group catalog and
+    reliably blew the local audio demo's entire turn budget (see
+    docs/LOCAL_AUDIO_DEMO.md's "tool-using turn" troubleshooting entry) before
+    the guide could even respond.
+    """
     groups = await _load_product_groups(client)
+    products = await asyncio.gather(*(_product_for_group(client, group) for group in groups))
     catalog: list[dict[str, Any]] = []
-    for group in groups:
-        attrs = client.attrs(group)
-        product = await _product_for_group(client, group)
+    for group, product in zip(groups, products):
         if not product:
             continue
+        attrs = client.attrs(group)
         catalog.append(
             {
                 "product_group_id": group["id"],
