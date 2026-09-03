@@ -43,3 +43,11 @@ def test_does_nothing_when_log_file_is_unset(monkeypatch):
     logging_setup.configure_file_logging()
 
     assert len(root.handlers) == before
+
+
+def test_file_logging_is_disabled_under_pytest():
+    """Guards tests/conftest.py's LOG_FILE override: without it, every test
+    run's fake tracebacks and placeholder ids land in the same logs/app.log a
+    real incident is diagnosed from (app.main imports trigger
+    configure_file_logging() same as the real server)."""
+    assert config.LOG_FILE == ""
