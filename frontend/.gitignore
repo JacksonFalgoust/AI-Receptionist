@@ -26,6 +26,9 @@ dist-ssr
 # Local env overrides
 .env.local
 .env.*.local
+.env.*
+.env
+!.env.example
 
 # playwright-cli scratch output
 .playwright-cli
