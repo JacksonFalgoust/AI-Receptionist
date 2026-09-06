@@ -4,6 +4,9 @@ import { useForm } from 'react-hook-form'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { z } from 'zod'
 
+import { Button } from '@/components/ui/Button'
+import { Field } from '@/components/ui/Field'
+import { Input } from '@/components/ui/Input'
 import { useAuth } from '@/features/auth/useAuth'
 import { paths } from '@/routes/paths'
 import { toAppError } from '@/services/errors'
@@ -69,53 +72,17 @@ export function LoginPage() {
             </p>
           ) : null}
 
-          <label htmlFor="email" className="mb-1.5 block text-sm font-semibold">
-            Email
-          </label>
-          <input
-            id="email"
-            type="email"
-            autoComplete="email"
-            aria-invalid={Boolean(errors.email)}
-            aria-describedby={errors.email ? 'email-error' : undefined}
-            className="mb-1 w-full rounded-sm border border-border bg-surface px-3 py-2 text-sm"
-            {...register('email')}
-          />
-          {errors.email ? (
-            <p id="email-error" className="mb-3 text-xs text-danger">
-              {errors.email.message}
-            </p>
-          ) : (
-            <div className="mb-3" />
-          )}
+          <Field label="Email" htmlFor="email" error={errors.email?.message}>
+            <Input type="email" autoComplete="email" {...register('email')} />
+          </Field>
 
-          <label htmlFor="password" className="mb-1.5 block text-sm font-semibold">
-            Password
-          </label>
-          <input
-            id="password"
-            type="password"
-            autoComplete="current-password"
-            aria-invalid={Boolean(errors.password)}
-            aria-describedby={errors.password ? 'password-error' : undefined}
-            className="mb-1 w-full rounded-sm border border-border bg-surface px-3 py-2 text-sm"
-            {...register('password')}
-          />
-          {errors.password ? (
-            <p id="password-error" className="mb-3 text-xs text-danger">
-              {errors.password.message}
-            </p>
-          ) : (
-            <div className="mb-3" />
-          )}
+          <Field label="Password" htmlFor="password" error={errors.password?.message}>
+            <Input type="password" autoComplete="current-password" {...register('password')} />
+          </Field>
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full rounded-sm bg-brand px-4 py-2.5 text-sm font-semibold text-ink-inverse hover:bg-brand-strong disabled:opacity-60"
-          >
+          <Button type="submit" isLoading={isSubmitting} className="w-full">
             {isSubmitting ? 'Signing in…' : 'Sign in'}
-          </button>
+          </Button>
 
           <Link
             to={paths.forgotPassword}
@@ -128,15 +95,16 @@ export function LoginPage() {
         {/* US-1.1 allows SSO to ship as visibly future-ready but inert. */}
         <div className="mt-4 grid gap-2">
           {['Microsoft', 'Google', 'Enterprise SSO'].map((provider) => (
-            <button
+            <Button
               key={provider}
               type="button"
+              variant="ghost"
               disabled
               title="Single sign-on is not enabled for this organization yet"
-              className="w-full cursor-not-allowed rounded-sm border border-border bg-surface px-4 py-2 text-sm font-medium text-ink-muted"
+              className="w-full cursor-not-allowed"
             >
               Sign in with {provider}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
