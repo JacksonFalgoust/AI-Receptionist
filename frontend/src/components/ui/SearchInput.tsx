@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Search } from 'lucide-react'
 
 import { Input } from './Input'
@@ -20,11 +20,27 @@ export function SearchInput({
   placeholder,
   ...rest
 }: SearchInputProps) {
+  // Keep a ref to the latest onSearch callback. Callers typically pass an
+  // inline arrow that gets a new identity on every render; including
+  // onSearch in the effect deps would tear down and re-arm the debounce
+  // timer on every unrelated parent re-render, potentially starving search
+  // indefinitely.
+  const onSearchRef = useRef(onSearch)
+  // oxlint-disable-next-line react/refs
+  onSearchRef.current = onSearch
+  // Skip the debounce fire on mount so an unchanged initial value doesn't
+  // trigger a spurious search after debounceMs.
+  const isFirstRun = useRef(true)
+
   useEffect(() => {
-    if (!onSearch) return
-    const handle = window.setTimeout(() => onSearch(value), debounceMs)
+    if (isFirstRun.current) {
+      isFirstRun.current = false
+      return
+    }
+    if (!onSearchRef.current) return
+    const handle = window.setTimeout(() => onSearchRef.current?.(value), debounceMs)
     return () => window.clearTimeout(handle)
-  }, [value, debounceMs, onSearch])
+  }, [value, debounceMs])
 
   return (
     <div className="relative">

@@ -55,4 +55,48 @@ describe('SearchInput', () => {
     expect(onSearch).toHaveBeenCalledWith('Dana')
     vi.useRealTimers()
   })
+
+  it('does not call onSearch on mount even after the debounce window elapses, when the value never changes', () => {
+    vi.useFakeTimers()
+    const onSearch = vi.fn()
+    render(<SearchInput value="Dana" onChange={() => {}} onSearch={onSearch} aria-label="Search conversations" />)
+
+    act(() => {
+      vi.advanceTimersByTime(300)
+    })
+
+    expect(onSearch).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('does not reset or re-fire the debounce when the parent re-renders with a fresh onSearch identity', () => {
+    vi.useFakeTimers()
+    const onSearchA = vi.fn()
+    const { rerender } = render(
+      <SearchInput value="" onChange={() => {}} onSearch={onSearchA} aria-label="Search conversations" />,
+    )
+    // Establish the mount-skip before the value ever changes.
+    act(() => {
+      vi.advanceTimersByTime(300)
+    })
+    expect(onSearchA).not.toHaveBeenCalled()
+
+    rerender(<SearchInput value="Dana" onChange={() => {}} onSearch={onSearchA} aria-label="Search conversations" />)
+    act(() => {
+      vi.advanceTimersByTime(150) // partway through the debounce window
+    })
+
+    // Parent re-renders with a brand-new inline onSearch identity, but the
+    // value hasn't changed — this must not reset the pending timer.
+    const onSearchB = vi.fn()
+    rerender(<SearchInput value="Dana" onChange={() => {}} onSearch={onSearchB} aria-label="Search conversations" />)
+    act(() => {
+      vi.advanceTimersByTime(150) // remainder of the debounce window
+    })
+
+    expect(onSearchB).toHaveBeenCalledTimes(1)
+    expect(onSearchB).toHaveBeenCalledWith('Dana')
+    expect(onSearchA).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
 })
