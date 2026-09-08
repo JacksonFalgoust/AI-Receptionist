@@ -27,6 +27,10 @@ one only depends on things above it.
 - [x] **App shell** — sidebar (grouped nav, mobile drawer, Escape-to-close) + header
 - [x] **Login** (US-1.1) — validation, human-readable errors, inert SSO placeholders
 - [x] **CI** — frontend typecheck/lint/test/build job added to `.github/workflows/tests.yml`
+- [x] **Form primitives** (A1, US-0.2) — `Button`, `IconButton`, `Input`, `Textarea`, `Select`, `Checkbox`, `Radio`, `Toggle`, `Field`; `LoginPage` refactored onto them
+- [x] **Layout & display primitives** (A2, US-0.2) — `Panel`/`PanelHeader`, `PageHeader`, `SectionHeader`, `StatusPill`, `Badge`, `Avatar`, `Alert`, `Breadcrumb`, `Tabs`
+- [x] **Overlay primitives + providers** (A3, US-0.2, US-14.2) — `Modal`, `Drawer`, `Dropdown`, `Tooltip`, `Toast`/`ToastProvider`, `ConfirmDialog`/`useConfirm`; both providers mounted in `App.tsx`
+- [x] **Data-display primitives** (A4, US-0.2) — `Table` (on `@tanstack/react-table` v9), `Pagination`, `SearchInput`, `FilterBar`, `EmptyState`, `Skeleton`, `KpiCard`, `Timeline`, `ActivityFeed`, `ChatBubble`
 
 ---
 
@@ -34,33 +38,6 @@ one only depends on things above it.
 
 Everything here is shared infrastructure. Building screens before it means
 duplicating markup that has to be torn out later (PRD §53.4).
-
-### A1. Form primitives (US-0.2)
-`src/components/ui/` — `Button`, `IconButton`, `Input`, `Textarea`, `Select`,
-`Checkbox`, `Radio`, `Toggle`, and a `Field` wrapper handling label,
-description, error text, and `aria-describedby` wiring.
-- Every control takes a required accessible name; icon-only variants require `aria-label` (PRD §52).
-- Button variants: primary, ghost, danger. Sizes: sm, md.
-- Extract the styles currently inlined in `LoginPage.tsx` and refactor that page onto them.
-
-### A2. Layout & display primitives (US-0.2)
-`Panel` (+ `PanelHeader`), `PageHeader`, `SectionHeader`, `StatusPill`,
-`Badge`, `Avatar`, `Alert`, `Breadcrumb`, `Tabs`.
-- `StatusPill` must render a text label, never colour alone (PRD §31).
-- One pill component serves every status union in `src/types/` — map status → tone in one place.
-
-### A3. Overlay primitives + providers (US-0.2, US-14.2)
-`Modal`, `Drawer`, `Dropdown`, `Tooltip`, `Toast` + `ToastProvider`,
-`ConfirmDialog` + a `useConfirm()` hook.
-- Focus trap, Escape to close, focus restored to the trigger on close.
-- `useConfirm()` is what every destructive action calls (PRD §28) — build it once here.
-- Mount `ToastProvider` in `App.tsx`.
-
-### A4. Data-display primitives (US-0.2)
-`Table` (sortable headers, sticky head, horizontal scroll container),
-`Pagination`, `SearchInput`, `FilterBar`, `EmptyState`, `Skeleton`
-(text/card/table variants), `KpiCard`, `Timeline`, `ActivityFeed`, `ChatBubble`.
-- `Table` must stay generic over row type; no per-screen table copies.
 
 ### A5. Async-state boundary (US-0.3, PRD §39)
 A `QueryBoundary` component (or hook) that renders Loading → Empty → Error →
