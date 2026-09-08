@@ -6,15 +6,25 @@ import { isTopEscapeHandler, popEscapeHandler, pushEscapeHandler } from '@/lib/e
 
 export interface DropdownTriggerProps {
   onClick?: (event: ReactMouseEvent<HTMLElement>) => void
+  'aria-haspopup'?: 'menu' | 'dialog'
+  'aria-expanded'?: boolean
 }
 
 export interface DropdownProps {
   trigger: ReactElement<DropdownTriggerProps>
   children: ReactNode
   align?: 'start' | 'end'
+  /**
+   * `menu` for a list of actions; `dialog` for an informational popover such as
+   * the Concierge status or notification panels, where menu-item semantics
+   * would misdescribe the content.
+   */
+  role?: 'menu' | 'dialog'
+  /** Accessible name for the panel. Supply it whenever `role` is `dialog`. */
+  label?: string
 }
 
-export function Dropdown({ trigger, children, align = 'start' }: DropdownProps) {
+export function Dropdown({ trigger, children, align = 'start', role = 'menu', label }: DropdownProps) {
   const [isOpen, setIsOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
 
@@ -46,6 +56,8 @@ export function Dropdown({ trigger, children, align = 'start' }: DropdownProps) 
       trigger.props.onClick?.(event)
       setIsOpen((open) => !open)
     },
+    'aria-haspopup': role,
+    'aria-expanded': isOpen,
   })
 
   return (
@@ -53,7 +65,8 @@ export function Dropdown({ trigger, children, align = 'start' }: DropdownProps) 
       {triggerWithHandlers}
       {isOpen ? (
         <div
-          role="menu"
+          role={role}
+          aria-label={role === 'dialog' ? label : undefined}
           className={cn(
             'absolute z-40 mt-1 min-w-40 rounded-md border border-border bg-surface p-1 shadow-md',
             align === 'end' ? 'right-0' : 'left-0',
