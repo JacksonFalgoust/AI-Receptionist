@@ -28,8 +28,11 @@ export function UserMenu() {
   if (!user) return null
 
   async function handleSignOut() {
-    await signOut()
-    navigate(paths.login, { replace: true })
+    try {
+      await signOut()
+    } finally {
+      navigate(paths.login, { replace: true })
+    }
   }
 
   return (

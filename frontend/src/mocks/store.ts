@@ -47,6 +47,23 @@ import { workflowSeed } from './workflows'
  * a deterministic starting state from `resetStore()`.
  *
  * PRD §38: only files under `src/services/` may import this module.
+ *
+ * Mock reads return references into these live arrays/objects, not copies.
+ * A caller must never mutate a value returned from a service directly —
+ * only the corresponding service method may change store state. Some
+ * service mutators (e.g. conciergeService.pause/resume) mutate the
+ * existing object in place; others (e.g. conciergeService.saveDraft/publish,
+ * workflowService.saveDraft/publish) replace it via reassignment. Both are
+ * safe from a caller's perspective — the return value always reflects
+ * current state — but this means a cached result (e.g. in React Query)
+ * CAN be silently rewritten by an unrelated in-place mutation elsewhere.
+ *
+ * The HTTP service implementations always return freshly-parsed JSON, with
+ * no such aliasing. A component that relies on reference identity of a
+ * mock-returned value will behave differently once VITE_USE_MOCKS=false.
+ * Treat this as a known, accepted trade-off for the mock layer, not a
+ * pattern to build on deliberately — Phase B+ work should not rely on
+ * mock-read aliasing for correctness.
  */
 export interface MockStore {
   organizations: Organization[]
@@ -89,17 +106,23 @@ function seed(): MockStore {
 }
 
 export const store: MockStore = seed()
+syncIdCounter()
 
-/** Restores pristine data and id sequencing. Call in `beforeEach`. */
-export function resetStore(): void {
-  Object.assign(store, seed())
-  resetIds()
-  // Compute max ID from all seeded arrays to avoid collisions
+/**
+ * Scans every seeded array for the highest numeric suffix on an `id` field
+ * (e.g. `kn_0001` -> 1) and advances the shared id counter past it, so the
+ * next `nextId('kn')`/`nextId('rr')` call can never collide with a seeded
+ * record. Must run once at module load (so the running app's first created
+ * record is safe) and again from `resetStore()` (so tests get the same
+ * guarantee after each reset).
+ */
+function syncIdCounter(): void {
   const allIds = Object.values(store)
     .flatMap((arr) => (Array.isArray(arr) ? arr : []))
     .filter((item) => typeof item === 'object' && item !== null && 'id' in item)
     .map((item) => {
-      const id = (item as any).id
+      const id = (item as { id?: unknown }).id
+      if (typeof id !== 'string') return 0
       const match = id.match(/_(\d+)$/)
       return match ? parseInt(match[1], 10) : 0
     })
@@ -107,4 +130,11 @@ export function resetStore(): void {
   if (maxId > 0) {
     initializeIdCounter(maxId)
   }
+}
+
+/** Restores pristine data and id sequencing. Call in `beforeEach`. */
+export function resetStore(): void {
+  Object.assign(store, seed())
+  resetIds()
+  syncIdCounter()
 }

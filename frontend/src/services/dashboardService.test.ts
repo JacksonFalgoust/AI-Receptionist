@@ -50,6 +50,13 @@ describe('dashboardService.getOverview', () => {
     const overview = await dashboardService.getOverview({ preset: '30d' })
     expect(overview.kpis[4].value).toBeGreaterThan(0)
   })
+
+  it('defaults to the "today" range when called with no argument', async () => {
+    const noArg = await dashboardService.getOverview()
+    const explicitToday = await dashboardService.getOverview({ preset: 'today' })
+
+    expect(noArg.kpis[0].value).toBe(explicitToday.kpis[0].value)
+  })
 })
 
 describe('dashboardService feeds', () => {

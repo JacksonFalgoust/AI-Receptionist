@@ -63,7 +63,7 @@ function buildKpis(range?: DateRange): Kpi[] {
 }
 
 const mockDashboardService: DashboardService = {
-  async getOverview(range) {
+  async getOverview(range = { preset: 'today' }) {
     await delay()
     return { kpis: buildKpis(range) }
   },
