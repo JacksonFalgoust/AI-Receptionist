@@ -2,6 +2,7 @@ import { cloneElement, useEffect, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent, ReactElement, ReactNode } from 'react'
 
 import { cn } from '@/lib/cn'
+import { isTopEscapeHandler, popEscapeHandler, pushEscapeHandler } from '@/lib/escapeStack'
 
 export interface DropdownTriggerProps {
   onClick?: (event: ReactMouseEvent<HTMLElement>) => void
@@ -20,13 +21,15 @@ export function Dropdown({ trigger, children, align = 'start' }: DropdownProps) 
   useEffect(() => {
     if (!isOpen) return
 
+    const escapeHandlerId = pushEscapeHandler()
+
     function handlePointerDown(event: MouseEvent) {
       if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
         setIsOpen(false)
       }
     }
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') setIsOpen(false)
+      if (event.key === 'Escape' && isTopEscapeHandler(escapeHandlerId)) setIsOpen(false)
     }
 
     document.addEventListener('mousedown', handlePointerDown)
@@ -34,6 +37,7 @@ export function Dropdown({ trigger, children, align = 'start' }: DropdownProps) 
     return () => {
       document.removeEventListener('mousedown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown)
+      popEscapeHandler(escapeHandlerId)
     }
   }, [isOpen])
 

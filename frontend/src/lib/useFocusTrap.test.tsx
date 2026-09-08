@@ -71,3 +71,59 @@ describe('useFocusTrap', () => {
     expect(screen.getByText('Last')).toHaveFocus()
   })
 })
+
+function StackedHarness({
+  onEscapeA,
+  onEscapeB,
+}: {
+  onEscapeA: () => void
+  onEscapeB: () => void
+}) {
+  const containerARef = useRef<HTMLDivElement>(null)
+  const containerBRef = useRef<HTMLDivElement>(null)
+  const [activeA, setActiveA] = useState(false)
+  const [activeB, setActiveB] = useState(false)
+
+  useFocusTrap(containerARef, activeA, onEscapeA)
+  useFocusTrap(containerBRef, activeB, onEscapeB)
+
+  return (
+    <div>
+      <button onClick={() => setActiveA(true)}>Trigger A</button>
+      <button onClick={() => setActiveB(true)}>Trigger B</button>
+      {activeA ? (
+        <div ref={containerARef} tabIndex={-1}>
+          <button>A First</button>
+        </div>
+      ) : null}
+      {activeB ? (
+        <div ref={containerBRef} tabIndex={-1}>
+          <button>B First</button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+describe('useFocusTrap stacked overlays', () => {
+  it('only invokes the topmost (most recently activated) trap on Escape', async () => {
+    const user = userEvent.setup()
+    const onEscapeA = vi.fn()
+    const onEscapeB = vi.fn()
+    render(<StackedHarness onEscapeA={onEscapeA} onEscapeB={onEscapeB} />)
+
+    // Activate trap A first (e.g. a Drawer opens)...
+    await user.click(screen.getByText('Trigger A'))
+    expect(screen.getByText('A First')).toHaveFocus()
+
+    // ...then trap B activates on top of it (e.g. a ConfirmDialog opened via
+    // useConfirm() while the Drawer is still open).
+    await user.click(screen.getByText('Trigger B'))
+    expect(screen.getByText('B First')).toHaveFocus()
+
+    await user.keyboard('{Escape}')
+
+    expect(onEscapeB).toHaveBeenCalledOnce()
+    expect(onEscapeA).not.toHaveBeenCalled()
+  })
+})

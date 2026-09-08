@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react'
 import type { RefObject } from 'react'
 
+import { isTopEscapeHandler, popEscapeHandler, pushEscapeHandler } from './escapeStack'
+
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
@@ -29,6 +31,7 @@ export function useFocusTrap(
 
     const container = containerRef.current
     triggerRef.current = document.activeElement as HTMLElement | null
+    const escapeHandlerId = pushEscapeHandler()
 
     const focusables = () =>
       Array.from(container?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR) ?? [])
@@ -38,7 +41,9 @@ export function useFocusTrap(
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
-        onEscapeRef.current?.()
+        if (isTopEscapeHandler(escapeHandlerId)) {
+          onEscapeRef.current?.()
+        }
         return
       }
       if (event.key !== 'Tab') return
@@ -60,6 +65,7 @@ export function useFocusTrap(
     document.addEventListener('keydown', handleKeyDown)
     return () => {
       document.removeEventListener('keydown', handleKeyDown)
+      popEscapeHandler(escapeHandlerId)
       triggerRef.current?.focus()
     }
   }, [isActive, containerRef])
