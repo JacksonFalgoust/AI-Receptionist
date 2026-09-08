@@ -4,6 +4,7 @@ import {
   matchesSearch,
   nextId,
   paginate,
+  rangeBounds,
   resetIds,
   sortByDesc,
   withinRange,
@@ -104,5 +105,31 @@ describe('nextId', () => {
     nextId('conv')
     resetIds()
     expect(nextId('conv')).toBe('conv_0001')
+  })
+})
+
+describe('rangeBounds', () => {
+  it('returns no bounds when no range is given', () => {
+    expect(rangeBounds()).toEqual({})
+  })
+
+  it('returns a rolling 24-hour window for today', () => {
+    const { from, to } = rangeBounds({ preset: 'today' })
+    expect(to).toBeUndefined()
+    expect(Date.now() - new Date(from!).getTime()).toBeCloseTo(24 * 60 * 60 * 1000, -4)
+  })
+
+  it('returns a 30-day window for the 30d preset', () => {
+    const { from } = rangeBounds({ preset: '30d' })
+    expect(Date.now() - new Date(from!).getTime()).toBeCloseTo(30 * 24 * 60 * 60 * 1000, -4)
+  })
+
+  it('passes custom bounds through unchanged', () => {
+    const range = {
+      preset: 'custom' as const,
+      from: '2026-08-01T00:00:00.000Z',
+      to: '2026-08-31T00:00:00.000Z',
+    }
+    expect(rangeBounds(range)).toEqual({ from: range.from, to: range.to })
   })
 })
