@@ -1,4 +1,5 @@
 import { cn } from '@/lib/cn'
+import type { SemanticTone } from '@/lib/statusTone'
 import { TONE_CLASSES } from '@/lib/statusTone'
 import { Button } from './Button'
 
@@ -8,7 +9,7 @@ export interface AlertAction {
 }
 
 export interface AlertProps {
-  tone: 'info' | 'success' | 'warning' | 'danger'
+  tone: Exclude<SemanticTone, 'muted'>
   title: string
   description?: string
   actions?: AlertAction[]

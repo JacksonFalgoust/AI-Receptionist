@@ -3,8 +3,9 @@ import type { ReactNode } from 'react'
 import { X } from 'lucide-react'
 
 import { cn } from '@/lib/cn'
+import type { SemanticTone } from '@/lib/statusTone'
 
-export type ToastTone = 'success' | 'info' | 'warning' | 'danger'
+export type ToastTone = Exclude<SemanticTone, 'muted'>
 
 export interface ToastOptions {
   tone?: ToastTone
