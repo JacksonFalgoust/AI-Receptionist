@@ -26,6 +26,22 @@ const SIZE_CLASSES: Record<ButtonSize, string> = {
   md: 'px-4 py-2.5 text-sm',
 }
 
+const BASE_CLASSES =
+  'inline-flex items-center justify-center gap-1.5 rounded-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60'
+
+/**
+ * Shared class builder so a `<Link>` that must look like a button (e.g. an
+ * `AppError` action carrying an href) stays visually identical without
+ * duplicating the Tailwind strings.
+ */
+export function buttonClasses(
+  variant: ButtonVariant = 'primary',
+  size: ButtonSize = 'md',
+  className?: string,
+): string {
+  return cn(BASE_CLASSES, VARIANT_CLASSES[variant], SIZE_CLASSES[size], className)
+}
+
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   {
     variant = 'primary',
@@ -46,12 +62,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       type={props.type ?? 'button'}
       disabled={disabled || isLoading}
       aria-busy={isLoading || undefined}
-      className={cn(
-        'inline-flex items-center justify-center gap-1.5 rounded-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60',
-        VARIANT_CLASSES[variant],
-        SIZE_CLASSES[size],
-        className,
-      )}
+      className={buttonClasses(variant, size, className)}
       {...props}
     >
       {isLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : leadingIcon}
