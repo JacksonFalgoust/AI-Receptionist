@@ -69,4 +69,47 @@ describe('mock store', () => {
     const orgIds = new Set(store.conversations.map((item) => item.organizationId))
     expect(orgIds.size).toBe(1)
   })
+
+  it('covers every escalation status', () => {
+    const statuses = new Set(store.escalations.map((item) => item.status))
+    expect([...statuses].sort()).toEqual(['assigned', 'in_progress', 'new', 'resolved'])
+  })
+
+  it('covers every notification kind', () => {
+    const kinds = new Set(store.notifications.map((item) => item.kind))
+    expect([...kinds].sort()).toEqual([
+      'configuration_issue',
+      'escalation',
+      'integration_failure',
+      'security_event',
+      'usage_limit',
+      'workflow_error',
+    ])
+  })
+
+  it('has both read and unread notifications', () => {
+    expect(store.notifications.some((item) => !item.read)).toBe(true)
+    expect(store.notifications.some((item) => item.read)).toBe(true)
+  })
+
+  it('covers every feature status', () => {
+    const statuses = new Set(store.features.map((item) => item.status))
+    expect([...statuses].sort()).toEqual([
+      'connection_required',
+      'disabled',
+      'enabled',
+      'error',
+      'setup_required',
+    ])
+  })
+
+  it('exposes Voice and SMS channels on the Concierge status', () => {
+    const channels = store.conciergeStatus.channels.map((item) => item.channel)
+    expect(channels).toEqual(['voice', 'sms'])
+  })
+
+  it('starts with configuration published and no unpublished changes', () => {
+    expect(store.conciergeConfiguration.hasUnpublishedChanges).toBe(false)
+    expect(store.conciergeConfiguration.lastPublishedAt).toBeDefined()
+  })
 })

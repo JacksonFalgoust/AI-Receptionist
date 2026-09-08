@@ -1,15 +1,28 @@
 import type {
+  ActivityEvent,
+  ConciergeConfiguration,
+  ConciergeStatus,
   Conversation,
   ConversationAction,
   ConversationMessage,
+  Escalation,
+  Feature,
+  Notification,
   Organization,
 } from '@/types'
 
+import { activityEventSeed, escalationSeed } from './activity'
+import {
+  conciergeConfigurationSeed,
+  conciergeStatusSeed,
+  featureSeed,
+} from './concierge'
 import {
   conversationActionSeed,
   conversationMessageSeed,
   conversationSeed,
 } from './conversations'
+import { notificationSeed } from './notifications'
 import { organizationSeed } from './organizations'
 import { resetIds } from './query'
 
@@ -28,6 +41,12 @@ export interface MockStore {
   conversations: Conversation[]
   conversationMessages: ConversationMessage[]
   conversationActions: ConversationAction[]
+  activityEvents: ActivityEvent[]
+  escalations: Escalation[]
+  notifications: Notification[]
+  conciergeStatus: ConciergeStatus
+  conciergeConfiguration: ConciergeConfiguration
+  features: Feature[]
 }
 
 function seed(): MockStore {
@@ -36,6 +55,12 @@ function seed(): MockStore {
     conversations: structuredClone(conversationSeed),
     conversationMessages: structuredClone(conversationMessageSeed),
     conversationActions: structuredClone(conversationActionSeed),
+    activityEvents: structuredClone(activityEventSeed),
+    escalations: structuredClone(escalationSeed),
+    notifications: structuredClone(notificationSeed),
+    conciergeStatus: structuredClone(conciergeStatusSeed),
+    conciergeConfiguration: structuredClone(conciergeConfigurationSeed),
+    features: structuredClone(featureSeed),
   }
 }
 
