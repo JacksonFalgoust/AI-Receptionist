@@ -1,0 +1,37 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import 'tailwindcss';
+@import './styles/theme.css';
+
+@layer base {
+  /*
+   * The prototype's whole spacing scale assumes a 15px root, not 16px.
+   * Keeping it means Tailwind's rem-based utilities land on the same
+   * proportions as the reference design.
+   */
+  html {
+    font-size: 15px;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /*
+   * PRD §31 / WCAG 2.1 AA: focus must always be visible. Applied globally so
+   * no component can silently opt out.
+   */
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  button {
+    cursor: pointer;
+  }
+}
