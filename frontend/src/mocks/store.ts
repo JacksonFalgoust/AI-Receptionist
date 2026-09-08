@@ -1,5 +1,6 @@
 import type {
   ActivityEvent,
+  BillingOverview,
   ConciergeConfiguration,
   ConciergeStatus,
   Conversation,
@@ -7,11 +8,17 @@ import type {
   ConversationMessage,
   Escalation,
   Feature,
+  Integration,
+  KnowledgeItem,
   Notification,
   Organization,
+  RoutingRule,
+  User,
+  Workflow,
 } from '@/types'
 
 import { activityEventSeed, escalationSeed } from './activity'
+import { billingOverviewSeed } from './billing'
 import {
   conciergeConfigurationSeed,
   conciergeStatusSeed,
@@ -22,9 +29,14 @@ import {
   conversationMessageSeed,
   conversationSeed,
 } from './conversations'
+import { integrationSeed } from './integrations'
+import { knowledgeSeed } from './knowledge'
 import { notificationSeed } from './notifications'
 import { organizationSeed } from './organizations'
 import { resetIds } from './query'
+import { routingRuleSeed } from './routing'
+import { userSeed } from './users'
+import { workflowSeed } from './workflows'
 
 /**
  * The mutable side of the mock layer. Fixtures stay pure data; this clones them
@@ -47,6 +59,12 @@ export interface MockStore {
   conciergeStatus: ConciergeStatus
   conciergeConfiguration: ConciergeConfiguration
   features: Feature[]
+  workflows: Workflow[]
+  knowledge: KnowledgeItem[]
+  integrations: Integration[]
+  routingRules: RoutingRule[]
+  users: User[]
+  billing: BillingOverview
 }
 
 function seed(): MockStore {
@@ -61,6 +79,12 @@ function seed(): MockStore {
     conciergeStatus: structuredClone(conciergeStatusSeed),
     conciergeConfiguration: structuredClone(conciergeConfigurationSeed),
     features: structuredClone(featureSeed),
+    workflows: structuredClone(workflowSeed),
+    knowledge: structuredClone(knowledgeSeed),
+    integrations: structuredClone(integrationSeed),
+    routingRules: structuredClone(routingRuleSeed),
+    users: structuredClone(userSeed),
+    billing: structuredClone(billingOverviewSeed),
   }
 }
 

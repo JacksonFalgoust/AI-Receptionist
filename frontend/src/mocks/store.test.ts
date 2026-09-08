@@ -112,4 +112,59 @@ describe('mock store', () => {
     expect(store.conciergeConfiguration.hasUnpublishedChanges).toBe(false)
     expect(store.conciergeConfiguration.lastPublishedAt).toBeDefined()
   })
+
+  it('covers every workflow status', () => {
+    const statuses = new Set(store.workflows.map((item) => item.status))
+    expect([...statuses].sort()).toEqual(['active', 'draft', 'inactive'])
+  })
+
+  it('covers every knowledge status', () => {
+    const statuses = new Set(store.knowledge.map((item) => item.status))
+    expect([...statuses].sort()).toEqual([
+      'active',
+      'disabled',
+      'error',
+      'needs_review',
+      'processing',
+    ])
+  })
+
+  it('covers every integration status', () => {
+    const statuses = new Set(store.integrations.map((item) => item.status))
+    expect([...statuses].sort()).toEqual([
+      'authentication_expired',
+      'connected',
+      'connection_error',
+      'not_connected',
+      'setup_required',
+    ])
+  })
+
+  it('never stores a credential on an integration (PRD §17.3, §47)', () => {
+    const forbidden = /password|secret|token|api[_-]?key/i
+    for (const integration of store.integrations) {
+      expect(forbidden.test(JSON.stringify(integration))).toBe(false)
+    }
+  })
+
+  it('covers every role and every user status', () => {
+    const roles = new Set(store.users.map((item) => item.role))
+    const statuses = new Set(store.users.map((item) => item.status))
+
+    expect(roles.size).toBe(6)
+    expect([...statuses].sort()).toEqual(['active', 'disabled', 'invited'])
+  })
+
+  it('has enabled and disabled routing rules with unique priorities', () => {
+    expect(store.routingRules.some((rule) => rule.enabled)).toBe(true)
+    expect(store.routingRules.some((rule) => !rule.enabled)).toBe(true)
+
+    const priorities = store.routingRules.map((rule) => rule.priority)
+    expect(new Set(priorities).size).toBe(priorities.length)
+  })
+
+  it('summarises the payment method without card details (PRD §47)', () => {
+    expect(store.billing.paymentMethod).toBe('Visa ending 4242')
+    expect(store.billing.usage.length).toBeGreaterThan(0)
+  })
 })
