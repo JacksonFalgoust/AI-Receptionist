@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import { resetStore, store } from '@/mocks/store'
+import { notificationService } from '@/services/notificationService'
 import { renderWithProviders, seedSession } from '@/test/renderWithProviders'
 
 import { NotificationCenter } from './NotificationCenter'
@@ -75,5 +76,32 @@ describe('NotificationCenter', () => {
     await user.click(await screen.findByRole('button', { name: /notifications/i }))
 
     expect(await screen.findByText('You are all caught up')).toBeInTheDocument()
+  })
+
+  it('does not re-mark an already-read notification when it is opened', async () => {
+    const markReadSpy = vi.spyOn(notificationService, 'markRead')
+    const user = userEvent.setup()
+    renderWithProviders(<NotificationCenter />)
+
+    await user.click(await screen.findByRole('button', { name: /notifications/i }))
+    await user.click(
+      await screen.findByRole('link', { name: /business hours are incomplete/i }),
+    )
+
+    await waitFor(() => {
+      expect(store.notifications.find((item) => item.id === 'ntf_0004')?.read).toBe(true)
+    })
+    expect(markReadSpy).not.toHaveBeenCalled()
+  })
+
+  it('renders a distinct icon per notification kind', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<NotificationCenter />)
+
+    await user.click(await screen.findByRole('button', { name: /notifications/i }))
+
+    expect(await screen.findByTestId('notification-icon-integration_failure')).toBeInTheDocument()
+    expect(screen.getByTestId('notification-icon-escalation')).toBeInTheDocument()
+    expect(screen.getByTestId('notification-icon-configuration_issue')).toBeInTheDocument()
   })
 })

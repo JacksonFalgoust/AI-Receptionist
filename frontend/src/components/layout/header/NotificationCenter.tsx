@@ -20,7 +20,10 @@ import type { NotificationKind } from '@/types'
 const NOTIFICATIONS_KEY = ['notifications']
 
 /** PRD §6.2 lists these six sources; each gets its own icon. */
-const KIND_ICONS: Record<NotificationKind, ComponentType<{ className?: string }>> = {
+const KIND_ICONS: Record<
+  NotificationKind,
+  ComponentType<{ className?: string; 'data-testid'?: string }>
+> = {
   integration_failure: PlugZap,
   escalation: UserRoundCheck,
   workflow_error: AlertTriangle,
@@ -109,7 +112,10 @@ export function NotificationCenter() {
                       }}
                       className="flex gap-3 border-b border-border px-3 py-2.5 last:border-b-0 hover:bg-canvas"
                     >
-                      <Icon className="mt-0.5 size-4 shrink-0 text-ink-muted" />
+                      <Icon
+                        className="mt-0.5 size-4 shrink-0 text-ink-muted"
+                        data-testid={`notification-icon-${notification.kind}`}
+                      />
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-ink">{notification.title}</p>
                         <p className="text-xs text-ink-secondary">{notification.body}</p>
