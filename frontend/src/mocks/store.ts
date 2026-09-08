@@ -33,7 +33,7 @@ import { integrationSeed } from './integrations'
 import { knowledgeSeed } from './knowledge'
 import { notificationSeed } from './notifications'
 import { organizationSeed } from './organizations'
-import { resetIds } from './query'
+import { initializeIdCounter, resetIds } from './query'
 import { routingRuleSeed } from './routing'
 import { userSeed } from './users'
 import { workflowSeed } from './workflows'
@@ -94,4 +94,17 @@ export const store: MockStore = seed()
 export function resetStore(): void {
   Object.assign(store, seed())
   resetIds()
+  // Compute max ID from all seeded arrays to avoid collisions
+  const allIds = Object.values(store)
+    .flatMap((arr) => (Array.isArray(arr) ? arr : []))
+    .filter((item) => typeof item === 'object' && item !== null && 'id' in item)
+    .map((item) => {
+      const id = (item as any).id
+      const match = id.match(/_(\d+)$/)
+      return match ? parseInt(match[1], 10) : 0
+    })
+  const maxId = Math.max(...allIds, 0)
+  if (maxId > 0) {
+    initializeIdCounter(maxId)
+  }
 }

@@ -63,6 +63,11 @@ export function resetIds(): void {
   idCounter = 0
 }
 
+/** Initialize idCounter based on maximum existing ID to avoid collisions. */
+export function initializeIdCounter(maxIdNum: number): void {
+  idCounter = maxIdNum
+}
+
 /**
  * A date-scope preset resolved to bounds `withinRange` understands. Rolling
  * windows rather than calendar days: the fixtures are relative to load time, so
