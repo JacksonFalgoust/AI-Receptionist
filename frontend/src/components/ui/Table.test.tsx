@@ -54,4 +54,20 @@ describe('Table', () => {
     render(<Table columns={readOnlyColumns} rows={rows} getRowId={(row) => row.id} />)
     expect(screen.queryByRole('button', { name: /sort/i })).not.toBeInTheDocument()
   })
+
+  it('draws its own frame by default', () => {
+    const { container } = render(<Table columns={columns} rows={rows} getRowId={(row) => row.id} />)
+    const wrap = container.querySelector('.table-wrap')
+    expect(wrap).toHaveClass('border')
+    expect(wrap).toHaveClass('overflow-x-auto')
+  })
+
+  it('drops its frame when a container already supplies one, but still scrolls', () => {
+    const { container } = render(
+      <Table columns={columns} rows={rows} getRowId={(row) => row.id} frame={false} />,
+    )
+    const wrap = container.querySelector('.table-wrap')
+    expect(wrap).not.toHaveClass('border')
+    expect(wrap).toHaveClass('overflow-x-auto')
+  })
 })

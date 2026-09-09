@@ -2,10 +2,10 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { ConciergeStatusCard } from '@/features/overview/ConciergeStatusCard'
 import { OverviewKpiRow } from '@/features/overview/OverviewKpiRow'
 import { RecentActivityCard } from '@/features/overview/RecentActivityCard'
+import { RecentEscalationsCard } from '@/features/overview/RecentEscalationsCard'
 
 /**
- * US-2.1: the post-login landing screen. B4 adds Recent Escalations below the
- * pair, and B5 adds the date-scope control.
+ * US-2.1: the post-login landing screen. B5 adds the date-scope control.
  */
 export function OverviewPage() {
   return (
@@ -29,6 +29,8 @@ export function OverviewPage() {
           <ConciergeStatusCard />
           <RecentActivityCard />
         </section>
+        {/* Full width: five columns do not fit beside another panel. */}
+        <RecentEscalationsCard />
       </div>
     </div>
   )

@@ -1,0 +1,85 @@
+import { beforeEach, describe, expect, it } from 'vitest'
+import { screen, within } from '@testing-library/react'
+
+import { resetStore, store } from '@/mocks/store'
+import { renderWithProviders, seedSession } from '@/test/renderWithProviders'
+
+import { RecentEscalationsCard } from './RecentEscalationsCard'
+
+/** The row a given customer's escalation is rendered in. */
+function rowFor(customerName: string): HTMLElement {
+  const row = screen.getByText(customerName).closest('tr')
+  if (!row) throw new Error(`No row found for ${customerName}`)
+  return row
+}
+
+describe('RecentEscalationsCard', () => {
+  beforeEach(() => {
+    resetStore()
+    seedSession()
+  })
+
+  it('shows the five columns US-2.5 asks for', async () => {
+    renderWithProviders(<RecentEscalationsCard />)
+
+    await screen.findByText('Ibrahim Khan')
+    const headers = screen.getAllByRole('columnheader').map((header) => header.textContent)
+    expect(headers).toEqual(['Customer', 'Time', 'Reason', 'Assigned', 'Status'])
+  })
+
+  it('names who is handling each escalation, or says plainly that nobody is', async () => {
+    renderWithProviders(<RecentEscalationsCard />)
+
+    expect(await screen.findByText('Ibrahim Khan')).toBeInTheDocument()
+    expect(rowFor('Ibrahim Khan')).toHaveTextContent('Unassigned')
+    expect(rowFor('Rosa Delgado')).toHaveTextContent('Sam Rivera')
+  })
+
+  it('states every escalation status in words, across all four values', async () => {
+    renderWithProviders(<RecentEscalationsCard />)
+
+    await screen.findByText('Ibrahim Khan')
+    expect(rowFor('Ibrahim Khan')).toHaveTextContent('New')
+    expect(rowFor('Rosa Delgado')).toHaveTextContent('Assigned')
+    expect(rowFor('Marcus Bell')).toHaveTextContent('In progress')
+    expect(rowFor('Yuki Tanaka')).toHaveTextContent('Resolved')
+  })
+
+  it('links a customer through to the conversation that escalated', async () => {
+    renderWithProviders(<RecentEscalationsCard />)
+
+    expect(await screen.findByRole('link', { name: 'Ibrahim Khan' })).toHaveAttribute(
+      'href',
+      '/conversations/conv_0003',
+    )
+  })
+
+  it('leaves the customer as plain text when no conversation is recorded', async () => {
+    store.escalations = [
+      {
+        ...store.escalations[0],
+        id: 'esc_9001',
+        customerName: 'Priya Shah',
+        conversationId: undefined,
+      },
+    ]
+    renderWithProviders(<RecentEscalationsCard />)
+
+    expect(await screen.findByText('Priya Shah')).toBeInTheDocument()
+    expect(within(rowFor('Priya Shah')).queryByRole('link')).not.toBeInTheDocument()
+  })
+
+  it('links to escalation and routing management', () => {
+    renderWithProviders(<RecentEscalationsCard />)
+
+    expect(screen.getByRole('link', { name: 'Manage routing' })).toHaveAttribute('href', '/routing')
+  })
+
+  it('shows an empty state when nobody is needed', async () => {
+    store.escalations.length = 0
+    renderWithProviders(<RecentEscalationsCard />)
+
+    expect(await screen.findByText('No recent escalations')).toBeInTheDocument()
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  })
+})

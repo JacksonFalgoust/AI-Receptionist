@@ -38,17 +38,15 @@ one only depends on things above it.
 - [x] **Overview KPI row** (B1, US-2.2) — the five KPIs `dashboardService.getOverview()` returns, label + value only; loading holds the five-card shape so nothing reflows when the numbers land
 - [x] **Concierge Status card** (B2, US-2.3) — state, last configuration change, Voice/SMS health, connected systems, Test Concierge, and a confirmed Pause that toggles to Resume; shares the header badge's query key, so pausing updates both
 - [x] **Recent Activity feed** (B3, US-2.4) — time, type, customer/context, channel, and outcome per item, each linking to its conversation; `ActivityStatus` joined `KnownStatus` so an activity outcome reads as itself rather than borrowing a workflow label. Introduces the two-column `dash-grid` pairing it with the B2 status card
+- [x] **Recent Escalations** (B4, US-2.5) — Customer, Time, Reason, Assigned, Status across all four statuses, unassigned called out rather than left blank, each customer linking to the conversation that escalated. `Table` gained an optional `frame` so it sits flush inside a `Panel`
 
 ---
 
 ## Phase B — Operations
 
-### B4. Recent Escalations (US-2.5)
-Columns: Customer, Time, Reason, Assigned, Status (New / Assigned / In Progress
-/ Resolved). Links to Escalation & Routing. Empty state.
-
 ### B5. Overview page assembly (US-2.1)
-`/overview` already renders a `PageHeader`, the B1 KPI row, and the B3/B2 pair.
+`/overview` already renders a `PageHeader`, the B1 KPI row, the B2/B3 pair, and
+the B4 escalations table.
 Add the date-scope control and thread its range into every card on the page —
 `OverviewKpiRow` takes a `range` prop for exactly this. **No Export button.**
 Note that `dashboardService.getRecentActivity`/`getRecentEscalations` take a
