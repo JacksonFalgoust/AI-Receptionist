@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { ActivityStatus } from '@/types/activity'
 import type { ConciergeState, FeatureStatus } from '@/types/concierge'
-import type { EscalationStatus } from '@/types/conversation'
+import type { ConversationOutcome, EscalationStatus } from '@/types/conversation'
 import type { IntegrationStatus } from '@/types/integration'
 import type { KnowledgeStatus } from '@/types/knowledge'
 import type { UserStatus } from '@/types/user'
@@ -43,6 +43,13 @@ const CONCIERGE_STATES: ConciergeState[] = [
 ]
 const CHANNEL_HEALTHS = ['ok', 'degraded', 'down'] as const
 const ACTIVITY_STATUSES: ActivityStatus[] = ['success', 'error', 'info', 'escalated', 'pending']
+const CONVERSATION_OUTCOMES: ConversationOutcome[] = [
+  'completed',
+  'escalated',
+  'abandoned',
+  'failed',
+  'follow_up_required',
+]
 
 const ALL_STATUSES = [
   ...FEATURE_STATUSES,
@@ -54,6 +61,7 @@ const ALL_STATUSES = [
   ...CONCIERGE_STATES,
   ...CHANNEL_HEALTHS,
   ...ACTIVITY_STATUSES,
+  ...CONVERSATION_OUTCOMES,
 ]
 
 describe('statusTone', () => {
@@ -74,6 +82,16 @@ describe('statusTone', () => {
     expect(statusTone('escalated')).toEqual({ tone: 'danger', label: 'Escalated' })
     expect(statusTone('pending')).toEqual({ tone: 'warning', label: 'Pending' })
     expect(statusTone('info')).toEqual({ tone: 'info', label: 'Info' })
+  })
+
+  it('labels a conversation outcome as how the call ended', () => {
+    expect(statusTone('completed')).toEqual({ tone: 'success', label: 'Completed' })
+    expect(statusTone('abandoned')).toEqual({ tone: 'muted', label: 'Abandoned' })
+    expect(statusTone('failed')).toEqual({ tone: 'danger', label: 'Failed' })
+    expect(statusTone('follow_up_required')).toEqual({
+      tone: 'warning',
+      label: 'Follow-up required',
+    })
   })
 
   it('exposes a Tailwind class string for every tone', () => {
