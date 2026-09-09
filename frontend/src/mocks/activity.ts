@@ -46,14 +46,19 @@ export const activityEventSeed: ActivityEvent[] = ACTIVITY_EVENTS.map((event) =>
 /**
  * US-2.5: all four statuses appear so the Overview table cannot hide a branch,
  * spread like the activity feed above so the date scope has visible effect.
+ *
+ * Each row points at a conversation whose outcome is genuinely `escalated`, and
+ * repeats that conversation's customer. B6's Conversations list shows the
+ * `escalated` flag and this status in adjacent columns, so a mismatch here
+ * renders as a row contradicting itself.
  */
 const ESCALATIONS: Omit<Escalation, 'organizationId'>[] = [
-  { id: 'esc_0001', conversationId: 'conv_0003', customerName: 'Ibrahim Khan', reason: 'Customer asked to speak to a person', assignedTo: undefined, status: 'new', createdAt: isoAgo(19) },
-  { id: 'esc_0002', conversationId: 'conv_0010', customerName: 'Rosa Delgado', reason: 'Refund requested', assignedTo: 'Sam Rivera', status: 'assigned', createdAt: daysAgo(2) },
-  { id: 'esc_0003', conversationId: 'conv_0018', customerName: 'Marcus Bell', reason: 'Complaint about a missed appointment', assignedTo: 'Taylor Brooks', status: 'in_progress', createdAt: daysAgo(6) },
-  { id: 'esc_0004', conversationId: 'conv_0023', customerName: 'Yuki Tanaka', reason: 'Concierge could not answer the question', assignedTo: 'Priya Shah', status: 'resolved', createdAt: daysAgo(12) },
-  { id: 'esc_0005', conversationId: 'conv_0031', customerName: 'Dana Wu', reason: 'Transaction over approval threshold', assignedTo: 'Avery Chen', status: 'in_progress', createdAt: daysAgo(19) },
-  { id: 'esc_0006', conversationId: 'conv_0038', customerName: 'Alex Morgan', reason: 'Scheduling system unavailable', assignedTo: undefined, status: 'new', createdAt: daysAgo(24) },
+  { id: 'esc_0001', conversationId: 'conv_0002', customerName: 'Dana Wu', reason: 'Customer asked to speak to a person', assignedTo: undefined, status: 'new', createdAt: isoAgo(19) },
+  { id: 'esc_0002', conversationId: 'conv_0007', customerName: 'Marcus Bell', reason: 'Refund requested', assignedTo: 'Priya Shah', status: 'assigned', createdAt: daysAgo(2) },
+  { id: 'esc_0003', conversationId: 'conv_0012', customerName: 'Nate Fischer', reason: 'Complaint about a missed appointment', assignedTo: 'Avery Chen', status: 'in_progress', createdAt: daysAgo(6) },
+  { id: 'esc_0004', conversationId: 'conv_0017', customerName: 'Ibrahim Khan', reason: 'Concierge could not answer the question', assignedTo: 'Sam Rivera', status: 'resolved', createdAt: daysAgo(12) },
+  { id: 'esc_0005', conversationId: 'conv_0022', customerName: 'Alex Morgan', reason: 'Transaction over approval threshold', assignedTo: 'Taylor Brooks', status: 'in_progress', createdAt: daysAgo(19) },
+  { id: 'esc_0006', conversationId: 'conv_0027', customerName: 'Yuki Tanaka', reason: 'Scheduling system unavailable', assignedTo: undefined, status: 'new', createdAt: daysAgo(24) },
 ]
 
 export const escalationSeed: Escalation[] = ESCALATIONS.map((escalation) => ({

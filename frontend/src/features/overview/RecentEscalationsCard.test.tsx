@@ -22,7 +22,7 @@ describe('RecentEscalationsCard', () => {
   it('shows the five columns US-2.5 asks for', async () => {
     renderWithProviders(<RecentEscalationsCard />)
 
-    await screen.findByText('Ibrahim Khan')
+    await screen.findByText('Dana Wu')
     const headers = screen.getAllByRole('columnheader').map((header) => header.textContent)
     expect(headers).toEqual(['Customer', 'Time', 'Reason', 'Assigned', 'Status'])
   })
@@ -30,27 +30,27 @@ describe('RecentEscalationsCard', () => {
   it('names who is handling each escalation, or says plainly that nobody is', async () => {
     renderWithProviders(<RecentEscalationsCard />)
 
-    expect(await screen.findByText('Ibrahim Khan')).toBeInTheDocument()
-    expect(rowFor('Ibrahim Khan')).toHaveTextContent('Unassigned')
-    expect(rowFor('Rosa Delgado')).toHaveTextContent('Sam Rivera')
+    expect(await screen.findByText('Dana Wu')).toBeInTheDocument()
+    expect(rowFor('Dana Wu')).toHaveTextContent('Unassigned')
+    expect(rowFor('Marcus Bell')).toHaveTextContent('Priya Shah')
   })
 
   it('states every escalation status in words, across all four values', async () => {
     renderWithProviders(<RecentEscalationsCard />)
 
-    await screen.findByText('Ibrahim Khan')
-    expect(rowFor('Ibrahim Khan')).toHaveTextContent('New')
-    expect(rowFor('Rosa Delgado')).toHaveTextContent('Assigned')
-    expect(rowFor('Marcus Bell')).toHaveTextContent('In progress')
-    expect(rowFor('Yuki Tanaka')).toHaveTextContent('Resolved')
+    await screen.findByText('Dana Wu')
+    expect(rowFor('Dana Wu')).toHaveTextContent('New')
+    expect(rowFor('Marcus Bell')).toHaveTextContent('Assigned')
+    expect(rowFor('Nate Fischer')).toHaveTextContent('In progress')
+    expect(rowFor('Ibrahim Khan')).toHaveTextContent('Resolved')
   })
 
   it('links a customer through to the conversation that escalated', async () => {
     renderWithProviders(<RecentEscalationsCard />)
 
-    expect(await screen.findByRole('link', { name: 'Ibrahim Khan' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: 'Dana Wu' })).toHaveAttribute(
       'href',
-      '/conversations/conv_0003',
+      '/conversations/conv_0002',
     )
   })
 

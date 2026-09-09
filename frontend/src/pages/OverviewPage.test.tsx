@@ -47,7 +47,7 @@ describe('OverviewPage', () => {
     renderWithProviders(<OverviewPage />)
 
     expect(screen.getByRole('heading', { name: 'Recent Escalations' })).toBeInTheDocument()
-    expect(await screen.findByText('Ibrahim Khan')).toBeInTheDocument()
+    expect(await screen.findByText('Dana Wu')).toBeInTheDocument()
 
     const paired = screen.getByRole('region', { name: 'Status and recent activity' })
     expect(

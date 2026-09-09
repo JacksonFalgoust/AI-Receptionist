@@ -148,4 +148,17 @@ describe('dashboardService feeds', () => {
     expect(week.length).toBeGreaterThan(today.length)
     expect(month.length).toBeGreaterThan(week.length)
   })
+
+  it('seeds every escalation against a conversation that actually escalated', async () => {
+    const escalations = await dashboardService.getRecentEscalations(undefined, 100)
+
+    for (const escalation of escalations) {
+      const conversation = store.conversations.find(
+        (candidate) => candidate.id === escalation.conversationId,
+      )
+      expect(conversation, `no conversation for ${escalation.id}`).toBeDefined()
+      expect(conversation!.escalated).toBe(true)
+      expect(conversation!.customerName).toBe(escalation.customerName)
+    }
+  })
 })

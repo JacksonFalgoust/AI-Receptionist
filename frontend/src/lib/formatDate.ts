@@ -46,3 +46,13 @@ export function formatDateTime(iso: IsoDateTime): string {
   const date = parse(iso)
   return date ? DATE_TIME_FORMAT.format(date) : ''
 }
+
+/** "4m 12s" · "22s" · an em dash when unknown. Seconds are padded so a column aligns. */
+export function formatDuration(seconds?: number): string {
+  if (seconds === undefined || Number.isNaN(seconds)) return '—'
+  if (seconds < 60) return `${Math.round(seconds)}s`
+
+  const minutes = Math.floor(seconds / 60)
+  const remainder = Math.round(seconds % 60)
+  return `${minutes}m ${String(remainder).padStart(2, '0')}s`
+}

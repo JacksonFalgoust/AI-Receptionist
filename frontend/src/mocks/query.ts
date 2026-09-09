@@ -1,4 +1,5 @@
 import type { DateRange, IsoDateTime, PageRequest, Paginated } from '@/types'
+import { presetBounds } from '@/lib/dateRange'
 
 /**
  * Filtering and pagination shared by every mock service, so thirteen modules
@@ -68,27 +69,10 @@ export function initializeIdCounter(maxIdNum: number): void {
   idCounter = maxIdNum
 }
 
-/**
- * A date-scope preset resolved to bounds `withinRange` understands. Rolling
- * windows rather than calendar days: the fixtures are relative to load time, so
- * a rolling window keeps "today" populated whenever the demo is opened.
- */
 export function rangeBounds(range?: DateRange): {
   from?: IsoDateTime
   to?: IsoDateTime
 } {
   if (!range) return {}
-
-  const DAY_MS = 24 * 60 * 60 * 1000
-  const windows: Record<'today' | '7d' | '30d', number> = {
-    today: DAY_MS,
-    '7d': 7 * DAY_MS,
-    '30d': 30 * DAY_MS,
-  }
-
-  if (range.preset === 'custom') {
-    return { from: range.from, to: range.to }
-  }
-
-  return { from: new Date(Date.now() - windows[range.preset]).toISOString() }
+  return presetBounds(range.preset, range.from, range.to)
 }
