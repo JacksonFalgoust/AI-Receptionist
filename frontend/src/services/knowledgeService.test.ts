@@ -61,6 +61,18 @@ describe('knowledgeService writes', () => {
     expect(found.title).toBe('Do you offer remote appointments?')
   })
 
+  it('accepts an explicit status and source, for a document upload created as Processing', async () => {
+    const created = await knowledgeService.create({
+      title: 'Client handbook 2027',
+      type: 'document',
+      status: 'processing',
+      source: 'handbook-2027.pdf',
+    })
+
+    expect(created.status).toBe('processing')
+    expect(created.source).toBe('handbook-2027.pdf')
+  })
+
   it('updates an item and stamps updatedAt', async () => {
     const before = await knowledgeService.get('kn_0001')
 

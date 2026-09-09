@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 
+import { ConfirmDialogProvider } from '@/components/ui/ConfirmDialog'
+import { ToastProvider } from '@/components/ui/ToastProvider'
 import { AuthProvider } from '@/features/auth/AuthProvider'
 import { MOCK_PASSWORD } from '@/mocks/session'
 import { seedSession } from '@/test/renderWithProviders'
@@ -15,12 +17,18 @@ function renderApp(initialPath: string) {
     defaultOptions: { queries: { retry: false } },
   })
 
+  // Mirrors App.tsx's provider tree: the knowledge editor route now reaches
+  // for both useToast and useConfirm.
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialPath]}>
-        <AuthProvider>
-          <AppRoutes />
-        </AuthProvider>
+        <ToastProvider>
+          <ConfirmDialogProvider>
+            <AuthProvider>
+              <AppRoutes />
+            </AuthProvider>
+          </ConfirmDialogProvider>
+        </ToastProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   )
