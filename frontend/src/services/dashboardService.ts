@@ -15,8 +15,12 @@ import { toQueryString } from './queryString'
 /** US-2.1–2.5: everything the Overview page reads. */
 export interface DashboardService {
   getOverview(range?: DateRange): Promise<OverviewSummary>
-  getRecentActivity(limit?: number): Promise<ActivityEvent[]>
-  getRecentEscalations(limit?: number): Promise<Escalation[]>
+  /**
+   * `range` comes first because it is what callers actually pass — the Overview
+   * cards take the page's date scope and leave `limit` at its default.
+   */
+  getRecentActivity(range?: DateRange, limit?: number): Promise<ActivityEvent[]>
+  getRecentEscalations(range?: DateRange, limit?: number): Promise<Escalation[]>
 }
 
 const DEFAULT_FEED_LIMIT = 8
@@ -68,14 +72,20 @@ const mockDashboardService: DashboardService = {
     return { kpis: buildKpis(range) }
   },
 
-  async getRecentActivity(limit = DEFAULT_FEED_LIMIT) {
+  async getRecentActivity(range, limit = DEFAULT_FEED_LIMIT) {
     await delay()
-    return sortByDesc(store.activityEvents, (event) => event.at).slice(0, limit)
+    const { from, to } = rangeBounds(range)
+    const scoped = store.activityEvents.filter((event) => withinRange(event.at, from, to))
+    return sortByDesc(scoped, (event) => event.at).slice(0, limit)
   },
 
-  async getRecentEscalations(limit = DEFAULT_FEED_LIMIT) {
+  async getRecentEscalations(range, limit = DEFAULT_FEED_LIMIT) {
     await delay()
-    return sortByDesc(store.escalations, (escalation) => escalation.createdAt).slice(0, limit)
+    const { from, to } = rangeBounds(range)
+    const scoped = store.escalations.filter((escalation) =>
+      withinRange(escalation.createdAt, from, to),
+    )
+    return sortByDesc(scoped, (escalation) => escalation.createdAt).slice(0, limit)
   },
 }
 
@@ -84,10 +94,14 @@ const httpDashboardService: DashboardService = {
     http.get<OverviewSummary>(
       `/dashboard/overview${toQueryString({ preset: range?.preset, from: range?.from, to: range?.to })}`,
     ),
-  getRecentActivity: (limit = DEFAULT_FEED_LIMIT) =>
-    http.get<ActivityEvent[]>(`/dashboard/activity${toQueryString({ limit })}`),
-  getRecentEscalations: (limit = DEFAULT_FEED_LIMIT) =>
-    http.get<Escalation[]>(`/dashboard/escalations${toQueryString({ limit })}`),
+  getRecentActivity: (range, limit = DEFAULT_FEED_LIMIT) =>
+    http.get<ActivityEvent[]>(
+      `/dashboard/activity${toQueryString({ limit, preset: range?.preset, from: range?.from, to: range?.to })}`,
+    ),
+  getRecentEscalations: (range, limit = DEFAULT_FEED_LIMIT) =>
+    http.get<Escalation[]>(
+      `/dashboard/escalations${toQueryString({ limit, preset: range?.preset, from: range?.from, to: range?.to })}`,
+    ),
 }
 
 export const dashboardService: DashboardService = USE_MOCKS

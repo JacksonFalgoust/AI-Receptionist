@@ -9,7 +9,7 @@ import type { TableColumn } from '@/components/ui/Table'
 import { relativeTime } from '@/lib/formatDate'
 import { paths } from '@/routes/paths'
 import { dashboardService } from '@/services/dashboardService'
-import type { Escalation } from '@/types'
+import type { DateRange, Escalation } from '@/types'
 
 /**
  * US-2.5's five columns, in the story's order. No `sortValue` anywhere: this is
@@ -63,10 +63,15 @@ const COLUMNS: TableColumn<Escalation>[] = [
  * US-2.5: where humans are needed. Read-only — assigning and resolving live in
  * Escalation & Routing, which the header links to.
  */
-export function RecentEscalationsCard() {
+export interface RecentEscalationsCardProps {
+  /** The Overview's date scope. Undefined means every escalation, newest first. */
+  range?: DateRange
+}
+
+export function RecentEscalationsCard({ range }: RecentEscalationsCardProps) {
   const query = useQuery({
-    queryKey: ['dashboard', 'escalations'],
-    queryFn: () => dashboardService.getRecentEscalations(),
+    queryKey: ['dashboard', 'escalations', range],
+    queryFn: () => dashboardService.getRecentEscalations(range),
   })
 
   return (

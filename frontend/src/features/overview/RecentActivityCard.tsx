@@ -9,7 +9,7 @@ import { CHANNEL_LABELS } from '@/lib/channelLabels'
 import { relativeTime } from '@/lib/formatDate'
 import { paths } from '@/routes/paths'
 import { dashboardService } from '@/services/dashboardService'
-import type { ActivityEvent } from '@/types'
+import type { ActivityEvent, DateRange } from '@/types'
 
 /**
  * An activity is either something done for a caller or something a connected
@@ -41,10 +41,15 @@ function toItem(event: ActivityEvent): ActivityItem {
  * The feed is read-only and deliberately short — the service caps it. Anyone
  * who wants the whole history follows the header link.
  */
-export function RecentActivityCard() {
+export interface RecentActivityCardProps {
+  /** The Overview's date scope. Undefined means every event, newest first. */
+  range?: DateRange
+}
+
+export function RecentActivityCard({ range }: RecentActivityCardProps) {
   const query = useQuery({
-    queryKey: ['dashboard', 'activity'],
-    queryFn: () => dashboardService.getRecentActivity(),
+    queryKey: ['dashboard', 'activity', range],
+    queryFn: () => dashboardService.getRecentActivity(range),
   })
 
   return (

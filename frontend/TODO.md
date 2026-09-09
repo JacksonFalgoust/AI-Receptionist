@@ -39,18 +39,11 @@ one only depends on things above it.
 - [x] **Concierge Status card** (B2, US-2.3) — state, last configuration change, Voice/SMS health, connected systems, Test Concierge, and a confirmed Pause that toggles to Resume; shares the header badge's query key, so pausing updates both
 - [x] **Recent Activity feed** (B3, US-2.4) — time, type, customer/context, channel, and outcome per item, each linking to its conversation; `ActivityStatus` joined `KnownStatus` so an activity outcome reads as itself rather than borrowing a workflow label. Introduces the two-column `dash-grid` pairing it with the B2 status card
 - [x] **Recent Escalations** (B4, US-2.5) — Customer, Time, Reason, Assigned, Status across all four statuses, unassigned called out rather than left blank, each customer linking to the conversation that escalated. `Table` gained an optional `frame` so it sits flush inside a `Panel`
+- [x] **Overview page assembly** (B5, US-2.1) — `DateScope` control (Today / 7 days / 30 days) in the page header, threaded into the KPI row and both feeds; no Export. `getRecentActivity`/`getRecentEscalations` now take a `DateRange`, and the activity/escalation seeds spread across a month so the control has visible effect
 
 ---
 
 ## Phase B — Operations
-
-### B5. Overview page assembly (US-2.1)
-`/overview` already renders a `PageHeader`, the B1 KPI row, the B2/B3 pair, and
-the B4 escalations table.
-Add the date-scope control and thread its range into every card on the page —
-`OverviewKpiRow` takes a `range` prop for exactly this. **No Export button.**
-Note that `dashboardService.getRecentActivity`/`getRecentEscalations` take a
-limit but no `DateRange`, so this task also widens those two signatures.
 
 ### B6. Conversations list (US-3.1)
 Columns: Date/Time, Customer, Channel, Intent, Outcome, Duration, Escalated,

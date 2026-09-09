@@ -71,4 +71,22 @@ describe('RecentActivityCard', () => {
     expect(await screen.findByText('No recent activity')).toBeInTheDocument()
     expect(screen.queryByRole('listitem')).not.toBeInTheDocument()
   })
+
+  it('honours the page date scope, hiding activity outside the window', async () => {
+    const DAY = 24 * 60 * 60 * 1000
+    const template = store.activityEvents[0]
+    store.activityEvents = [
+      { ...template, id: 'act_now', title: 'Booked this morning', at: new Date().toISOString() },
+      {
+        ...template,
+        id: 'act_old',
+        title: 'Booked a fortnight ago',
+        at: new Date(Date.now() - 14 * DAY).toISOString(),
+      },
+    ]
+    renderWithProviders(<RecentActivityCard range={{ preset: 'today' }} />)
+
+    expect(await screen.findByText('Booked this morning')).toBeInTheDocument()
+    expect(screen.queryByText('Booked a fortnight ago')).not.toBeInTheDocument()
+  })
 })
