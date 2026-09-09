@@ -41,16 +41,11 @@ one only depends on things above it.
 - [x] **Recent Escalations** (B4, US-2.5) — Customer, Time, Reason, Assigned, Status across all four statuses, unassigned called out rather than left blank, each customer linking to the conversation that escalated. `Table` gained an optional `frame` so it sits flush inside a `Panel`
 - [x] **Overview page assembly** (B5, US-2.1) — `DateScope` control (Today / 7 days / 30 days) in the page header, threaded into the KPI row and both feeds; no Export. `getRecentActivity`/`getRecentEscalations` now take a `DateRange`, and the activity/escalation seeds spread across a month so the control has visible effect
 - [x] **Conversations list** (B6, US-3.1) — eight columns, five-field search, all seven filters (four visible, three behind a disclosure) and pagination, with filter state in the URL so a query can be bookmarked and shared. `Conversation` gained `escalationStatus`, `ConversationOutcome` joined `KnownStatus`, and the escalation seed was realigned onto conversations that actually escalated
+- [x] **Conversation detail** (B7, US-3.2) — summary strip, AI summary in business language, transcript across all three speakers, and an action timeline whose system details expand behind a native disclosure. `Timeline` gained an optional `details` slot; a fixture test guards PRD §47 where it can actually be enforced
 
 ---
 
 ## Phase B — Operations
-
-### B7. Conversation detail (US-3.2)
-Summary block, AI summary in business language, transcript with
-Customer/Concierge/Employee speakers, action timeline (action, system,
-timestamp, result, success/error), expandable system details that never expose
-credentials (PRD §10.5, §47). Breadcrumb back to Conversations.
 
 ### B8. Analytics (US-4.1)
 KPI widgets: Total conversations, Escalation rate, Avg duration — **no

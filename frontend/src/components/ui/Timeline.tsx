@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+
 import { cn } from '@/lib/cn'
 
 export interface TimelineItem {
@@ -6,6 +8,12 @@ export interface TimelineItem {
   title: string
   meta?: string
   tone?: 'default' | 'error'
+  /**
+   * Optional technical context, hidden until asked for (US-3.2, PRD §10.5).
+   * A native `<details>` rather than a hand-rolled disclosure: it is keyboard
+   * operable and correctly announced without any state of our own.
+   */
+  details?: ReactNode
 }
 
 export interface TimelineProps {
@@ -27,6 +35,14 @@ export function Timeline({ items }: TimelineProps) {
           <p className="text-xs text-ink-muted">{item.time}</p>
           <p className="text-sm font-medium text-ink">{item.title}</p>
           {item.meta ? <p className="text-xs text-ink-secondary">{item.meta}</p> : null}
+          {item.details ? (
+            <details className="mt-1">
+              <summary className="cursor-pointer text-xs font-semibold text-ink-secondary hover:text-ink">
+                System details
+              </summary>
+              <div className="mt-1">{item.details}</div>
+            </details>
+          ) : null}
         </li>
       ))}
     </ol>
