@@ -3,6 +3,8 @@ import type { ReactNode } from 'react'
 import { createColumnHelper, tableFeatures, useTable } from '@tanstack/react-table'
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react'
 
+import { cn } from '@/lib/cn'
+
 // TanStack v9's `RowData` constraint (`Record<string, any> | Array<any>`)
 // is narrower than this component's fully-generic `T`. Rather than leak that
 // constraint into the public `TableColumn<T>`/`TableProps<T>` interfaces (T
@@ -23,6 +25,13 @@ export interface TableProps<T> {
   columns: TableColumn<T>[]
   rows: T[]
   getRowId: (row: T) => string
+  /**
+   * Set false when the table sits inside something that already draws a border
+   * — a `Panel`, say — so the two don't stack into a box within a box.
+   * Horizontal scrolling is kept either way; it is what makes a wide table
+   * usable on a phone, not decoration.
+   */
+  frame?: boolean
 }
 
 type SortDirection = 'asc' | 'desc'
@@ -31,7 +40,7 @@ type SortDirection = 'asc' | 'desc'
 // TanStack's row-sorting feature, so the shared feature set stays empty.
 const features = tableFeatures({})
 
-export function Table<T>({ columns, rows, getRowId }: TableProps<T>) {
+export function Table<T>({ columns, rows, getRowId, frame = true }: TableProps<T>) {
   const [sort, setSort] = useState<{ columnId: string; direction: SortDirection } | null>(null)
 
   const sortedRows = useMemo(() => {
@@ -77,7 +86,7 @@ export function Table<T>({ columns, rows, getRowId }: TableProps<T>) {
   }
 
   return (
-    <div className="table-wrap overflow-x-auto rounded-lg border border-border">
+    <div className={cn('table-wrap overflow-x-auto', frame && 'rounded-lg border border-border')}>
       <table className="w-full min-w-max border-collapse text-sm">
         <thead className="sticky top-0 bg-surface">
           {table.getHeaderGroups().map((headerGroup) => (

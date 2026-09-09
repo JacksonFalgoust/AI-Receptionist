@@ -41,4 +41,16 @@ describe('OverviewPage', () => {
     expect(within(paired).getByRole('heading', { name: 'Recent Activity' })).toBeInTheDocument()
     expect(await within(paired).findByText('Appointment booked')).toBeInTheDocument()
   })
+
+  it('shows where humans are needed, below the status and activity pair', async () => {
+    renderWithProviders(<OverviewPage />)
+
+    expect(screen.getByRole('heading', { name: 'Recent Escalations' })).toBeInTheDocument()
+    expect(await screen.findByText('Ibrahim Khan')).toBeInTheDocument()
+
+    const paired = screen.getByRole('region', { name: 'Status and recent activity' })
+    expect(
+      within(paired).queryByRole('heading', { name: 'Recent Escalations' }),
+    ).not.toBeInTheDocument()
+  })
 })
