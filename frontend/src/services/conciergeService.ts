@@ -23,6 +23,12 @@ export interface ConciergeService {
   publish(): Promise<ConciergeConfiguration>
 }
 
+/**
+ * Writes replace the stored object instead of mutating it, the way a real API
+ * response would. Returning the same reference the cache already holds leaves
+ * React Query unable to see the change, so every other consumer of the status
+ * — the header badge above all — silently keeps rendering the old state.
+ */
 const mockConciergeService: ConciergeService = {
   async getStatus() {
     await delay()
@@ -31,13 +37,13 @@ const mockConciergeService: ConciergeService = {
 
   async pause() {
     await delay(120)
-    store.conciergeStatus.state = 'paused'
+    store.conciergeStatus = { ...store.conciergeStatus, state: 'paused' }
     return store.conciergeStatus
   },
 
   async resume() {
     await delay(120)
-    store.conciergeStatus.state = 'active'
+    store.conciergeStatus = { ...store.conciergeStatus, state: 'active' }
     return store.conciergeStatus
   },
 
@@ -65,8 +71,13 @@ const mockConciergeService: ConciergeService = {
       hasUnpublishedChanges: false,
       lastPublishedAt: publishedAt,
     }
-    // The header status card reports the same moment (PRD §6.2).
-    store.conciergeStatus.lastConfigurationChangeAt = publishedAt
+    // The header badge and the Overview status card report the same moment
+    // (PRD §6.2, US-2.3), and both read it from the cache — so replace the
+    // object rather than mutating the one they already hold.
+    store.conciergeStatus = {
+      ...store.conciergeStatus,
+      lastConfigurationChangeAt: publishedAt,
+    }
     return store.conciergeConfiguration
   },
 }

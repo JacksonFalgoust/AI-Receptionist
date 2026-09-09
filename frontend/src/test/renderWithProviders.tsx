@@ -3,14 +3,20 @@ import { render } from '@testing-library/react'
 import type { ReactElement, ReactNode } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 
+import { ConfirmDialogProvider } from '@/components/ui/ConfirmDialog'
+import { ToastProvider } from '@/components/ui/ToastProvider'
 import { AuthProvider } from '@/features/auth/AuthProvider'
 import { buildMockSessionUser } from '@/mocks/session'
 import { SESSION_STORAGE_KEY } from '@/services/config'
 
 /**
- * Test harness for components that need a query client, a router, and a
- * signed-in user. `src/test/setup.ts` clears localStorage after each test, so
- * a session seeded here never leaks into the next case.
+ * Test harness for components that need a query client, a router, a signed-in
+ * user, toasts, and confirmations. It mirrors the provider tree in `App.tsx`,
+ * so a component that works under test works mounted for real —
+ * `useToast()` and `useConfirm()` both throw without their providers.
+ *
+ * `src/test/setup.ts` clears localStorage after each test, so a session seeded
+ * here never leaks into the next case.
  */
 
 export function seedSession(email = 'owner@horizonpartners.example.com'): void {
@@ -44,7 +50,11 @@ export function renderWithProviders(
     return (
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={[route]}>
-          <AuthProvider>{children}</AuthProvider>
+          <ToastProvider>
+            <ConfirmDialogProvider>
+              <AuthProvider>{children}</AuthProvider>
+            </ConfirmDialogProvider>
+          </ToastProvider>
         </MemoryRouter>
       </QueryClientProvider>
     )

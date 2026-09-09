@@ -24,6 +24,23 @@ describe('conciergeService status', () => {
     expect((await conciergeService.resume()).state).toBe('active')
     expect((await conciergeService.getStatus()).state).toBe('active')
   })
+
+  it('hands back a new status object on every write, so cached readers re-render', async () => {
+    const before = await conciergeService.getStatus()
+
+    expect(await conciergeService.pause()).not.toBe(before)
+    expect(await conciergeService.resume()).not.toBe(before)
+
+    // Publishing stamps the status card's "last configuration change" line.
+    const beforePublish = await conciergeService.getStatus()
+    await conciergeService.publish()
+    const afterPublish = await conciergeService.getStatus()
+
+    expect(afterPublish).not.toBe(beforePublish)
+    expect(afterPublish.lastConfigurationChangeAt).not.toBe(
+      beforePublish.lastConfigurationChangeAt,
+    )
+  })
 })
 
 describe('conciergeService configuration', () => {

@@ -36,19 +36,17 @@ one only depends on things above it.
 - [x] **Header panels** (A7, US-0.1, PRD §6.2) — organization selector, Concierge status panel, notification centre, user menu; `Topbar` is composition-only
 - [x] **Forgot password** (A8, US-1.2) — default, processing, success, and error states; success copy does not reveal whether the account exists
 - [x] **Overview KPI row** (B1, US-2.2) — the five KPIs `dashboardService.getOverview()` returns, label + value only; loading holds the five-card shape so nothing reflows when the numbers land
+- [x] **Concierge Status card** (B2, US-2.3) — state, last configuration change, Voice/SMS health, connected systems, Test Concierge, and a confirmed Pause that toggles to Resume; shares the header badge's query key, so pausing updates both
 
 ---
 
 ## Phase B — Operations
 
-### B2. Concierge Status card (US-2.3)
-State + last configuration change, channels **Voice and SMS only** (no Web),
-connected-systems summary with health indicators. Actions: Test Concierge,
-Pause Concierge (via `useConfirm()`), link to Configuration.
-
 ### B3. Recent Activity feed (US-2.4)
 Time, activity type, customer/context, channel, status per item. Links through
-to Conversations. Empty state.
+to Conversations. Empty state. Also introduce the prototype's two-column
+`dash-grid` pairing this with the B2 status card — Overview stacks
+panels until there are two to pair.
 
 ### B4. Recent Escalations (US-2.5)
 Columns: Customer, Time, Reason, Assigned, Status (New / Assigned / In Progress

@@ -25,4 +25,11 @@ describe('OverviewPage', () => {
     expect(await screen.findByText('Conversations Today')).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Key metrics' })).toBeInTheDocument()
   })
+
+  it('shows the Concierge status card', async () => {
+    renderWithProviders(<OverviewPage />)
+
+    expect(screen.getByRole('heading', { name: 'Concierge Status' })).toBeInTheDocument()
+    expect(await screen.findByText('Active and responding')).toBeInTheDocument()
+  })
 })
