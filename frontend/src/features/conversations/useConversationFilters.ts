@@ -47,9 +47,12 @@ export function useConversationFilters() {
       outcome: oneOf(params.get('outcome'), OUTCOMES),
       escalated: escalated === 'true' ? true : escalated === 'false' ? false : undefined,
       range: oneOf(params.get('range'), PRESETS) ?? 'any',
-      intent: params.get('intent') ?? undefined,
-      locationId: params.get('location') ?? undefined,
-      assignedEmployee: params.get('employee') ?? undefined,
+      // `||`, not `??`: an empty param (`?intent=`) must be treated the same
+      // as an absent one, or it counts toward activeCount while showing no
+      // chip and no visible value anywhere.
+      intent: params.get('intent') || undefined,
+      locationId: params.get('location') || undefined,
+      assignedEmployee: params.get('employee') || undefined,
       page: Number.isInteger(page) && page > 0 ? page : 1,
     }
   }, [params])

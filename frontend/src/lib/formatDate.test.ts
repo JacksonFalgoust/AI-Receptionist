@@ -76,4 +76,12 @@ describe('formatDuration', () => {
   it('returns an em dash when the duration is unknown', () => {
     expect(formatDuration(undefined)).toBe('—')
   })
+
+  it('rolls a remainder that rounds up to 60 seconds into the next minute', () => {
+    expect(formatDuration(119.6)).toBe('2m 00s')
+  })
+
+  it('rolls a sub-minute value that rounds up to 60 seconds into a full minute', () => {
+    expect(formatDuration(59.6)).toBe('1m 00s')
+  })
 })

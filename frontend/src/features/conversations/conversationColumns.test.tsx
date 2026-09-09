@@ -74,4 +74,14 @@ describe('conversation columns', () => {
     renderRows([base])
     expect(screen.getByText('4m 12s')).toBeInTheDocument()
   })
+
+  // Table only ever sorts the 25 rows on the current page, and any sort
+  // resets when a new page is fetched (see Table.tsx / ConversationsPage.tsx)
+  // — offering a sort control at this page size would silently misrepresent
+  // itself as sorting all 70. Real sorting needs to be server-side, which is
+  // not part of US-3.1, so no column here declares `sortValue`.
+  it('offers no column sorting', () => {
+    renderRows([base])
+    expect(screen.queryByRole('button', { name: /sort by/i })).not.toBeInTheDocument()
+  })
 })

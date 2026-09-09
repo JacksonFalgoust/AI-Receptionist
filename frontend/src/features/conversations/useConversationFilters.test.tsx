@@ -95,6 +95,17 @@ describe('useConversationFilters', () => {
     expect(result.current.state.channel).toBe('sms')
   })
 
+  it('treats an empty intent/location/employee param as absent, not an active filter', () => {
+    const { result } = renderHook(() => useConversationFilters(), {
+      wrapper: wrapperFor('/conversations?intent=&location=&employee='),
+    })
+
+    expect(result.current.state.intent).toBeUndefined()
+    expect(result.current.state.locationId).toBeUndefined()
+    expect(result.current.state.assignedEmployee).toBeUndefined()
+    expect(result.current.activeCount).toBe(0)
+  })
+
   it('clears everything', () => {
     const { result } = renderHook(() => useConversationFilters(), {
       wrapper: wrapperFor('/conversations?q=refund&channel=voice&page=2'),

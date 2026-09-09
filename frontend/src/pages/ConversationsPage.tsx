@@ -19,7 +19,11 @@ export function ConversationsPage() {
   const { state, params, activeCount, setFilter, setPage, clear } = useConversationFilters()
 
   const query = useQuery({
-    queryKey: ['conversations', params],
+    // [namespace, entity, variable] — matches the rest of the app (e.g.
+    // ['dashboard','escalations',range]) and keeps a future
+    // ['conversations', id] detail query from colliding with
+    // ['conversations', 'filter-options'].
+    queryKey: ['conversations', 'list', params],
     queryFn: () => conversationService.list(params),
   })
 
@@ -43,43 +47,54 @@ export function ConversationsPage() {
           onClear={clear}
         />
 
-        <QueryBoundary
-          query={query}
-          skeletonRows={8}
-          isEmpty={(page) => page.items.length === 0}
-          // Two different problems needing two different answers: nothing has
-          // happened yet, versus this query excludes everything.
-          empty={
-            activeCount > 0
-              ? {
-                  title: 'No conversations match these filters',
-                  description: 'Try widening the date range or clearing a filter.',
-                }
-              : {
-                  title: 'No conversations yet',
-                  description: 'Calls and messages Concierge handles will appear here.',
-                }
-          }
-        >
-          {(page) => (
-            <>
-              <Panel>
+        {/* Loading, empty, error and success all render inside this one Panel
+            so the page doesn't reflow the moment data lands — see
+            RecentEscalationsCard for the same pattern. */}
+        <Panel data-testid="conversations-panel">
+          <QueryBoundary
+            query={query}
+            skeleton="table"
+            skeletonRows={8}
+            // Not `page.items.length === 0`: an out-of-range page (a
+            // bookmarked link after the result set shrank) has an empty
+            // `items` array but a non-zero `total`, and must render the
+            // table shell plus a working Pagination — not tell the reader
+            // nothing exists.
+            isEmpty={(page) => page.total === 0}
+            // Two different problems needing two different answers: nothing
+            // has happened yet, versus this query excludes everything.
+            empty={
+              activeCount > 0
+                ? {
+                    title: 'No conversations match these filters',
+                    description: 'Try widening the date range or clearing a filter.',
+                  }
+                : {
+                    title: 'No conversations yet',
+                    description: 'Calls and messages Concierge handles will appear here.',
+                  }
+            }
+          >
+            {(page) => (
+              <>
                 <Table
                   columns={CONVERSATION_COLUMNS}
                   rows={page.items}
                   getRowId={(conversation) => conversation.id}
                   frame={false}
                 />
-              </Panel>
-              <Pagination
-                page={page.page}
-                pageSize={page.pageSize}
-                total={page.total}
-                onPageChange={setPage}
-              />
-            </>
-          )}
-        </QueryBoundary>
+                <div className="border-t border-border px-4 py-3">
+                  <Pagination
+                    page={page.page}
+                    pageSize={page.pageSize}
+                    total={page.total}
+                    onPageChange={setPage}
+                  />
+                </div>
+              </>
+            )}
+          </QueryBoundary>
+        </Panel>
       </div>
     </div>
   )

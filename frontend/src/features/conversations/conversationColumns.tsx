@@ -12,14 +12,17 @@ import type { Conversation } from '@/types'
  * page so B7's detail summary can reuse the same renderers rather than
  * formatting a duration or a status a second, subtly different way.
  *
- * Sorting is offered on the two continuous columns only. The rest are
- * categorical and are better served by their filters.
+ * No column declares `sortValue`: Table only sorts the rows it is handed —
+ * 25 of 70 at this page size — and that sort resets on every page change
+ * (a new query key makes QueryBoundary skeleton-and-remount the Table). A
+ * sort control here would present itself as sorting the whole list while
+ * actually only reordering the current page, which is worse than no control.
+ * Real sorting needs to be server-side and is not part of US-3.1.
  */
 export const CONVERSATION_COLUMNS: TableColumn<Conversation>[] = [
   {
     id: 'startedAt',
     header: 'Date / Time',
-    sortValue: (conversation) => conversation.startedAt,
     render: (conversation) => (
       <Link
         to={paths.conversation(conversation.id)}
@@ -53,7 +56,6 @@ export const CONVERSATION_COLUMNS: TableColumn<Conversation>[] = [
   {
     id: 'duration',
     header: 'Duration',
-    sortValue: (conversation) => conversation.durationSeconds ?? 0,
     render: (conversation) => (
       <span className="whitespace-nowrap">{formatDuration(conversation.durationSeconds)}</span>
     ),

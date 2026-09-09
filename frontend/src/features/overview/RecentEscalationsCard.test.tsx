@@ -31,8 +31,13 @@ describe('RecentEscalationsCard', () => {
     renderWithProviders(<RecentEscalationsCard />)
 
     expect(await screen.findByText('Dana Wu')).toBeInTheDocument()
-    expect(rowFor('Dana Wu')).toHaveTextContent('Unassigned')
+    // conv_0002's assignedEmployee is Taylor Brooks; the escalation row must
+    // agree, not contradict the Conversations list for the same conversation.
+    expect(rowFor('Dana Wu')).toHaveTextContent('Taylor Brooks')
     expect(rowFor('Marcus Bell')).toHaveTextContent('Priya Shah')
+    // Alex Morgan's escalation is deliberately left unassigned so the
+    // "Unassigned" rendering branch keeps coverage.
+    expect(rowFor('Alex Morgan')).toHaveTextContent('Unassigned')
   })
 
   it('states every escalation status in words, across all four values', async () => {

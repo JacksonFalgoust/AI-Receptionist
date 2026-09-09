@@ -13,6 +13,34 @@ describe('ConversationsPage', () => {
     seedSession()
   })
 
+  it('keeps loading, empty, error and success states inside the same panel frame', async () => {
+    renderWithProviders(<ConversationsPage />)
+
+    // Loading first — the skeleton must already sit inside the panel border,
+    // not render bare on the page background while only the loaded table
+    // gets a card. Otherwise the page reflows the moment data lands.
+    expect(screen.getByTestId('conversations-panel')).toContainElement(
+      screen.getByRole('status'),
+    )
+
+    await screen.findByRole('table')
+    expect(screen.getByTestId('conversations-panel')).toContainElement(
+      screen.getByRole('table'),
+    )
+  })
+
+  it('keys its list query [conversations, list, params], matching the rest of the app', async () => {
+    const { queryClient } = renderWithProviders(<ConversationsPage />)
+    await screen.findByRole('table')
+
+    // ['namespace', 'entity', variable] — not ['conversations', params],
+    // which would collide in shape with a future ['conversations', id]
+    // detail query and departs from every other query in the app.
+    expect(
+      queryClient.getQueryCache().findAll({ queryKey: ['conversations', 'list'] }),
+    ).toHaveLength(1)
+  })
+
   it('is a built screen, not a placeholder', async () => {
     renderWithProviders(<ConversationsPage />)
     expect(screen.getByRole('heading', { name: 'Conversations' })).toBeInTheDocument()
@@ -53,6 +81,19 @@ describe('ConversationsPage', () => {
     renderWithProviders(<ConversationsPage />)
 
     expect(await screen.findByText('No conversations yet')).toBeInTheDocument()
+  })
+
+  it('recovers from a bookmarked page beyond the result set instead of claiming the list is empty', async () => {
+    renderWithProviders(<ConversationsPage />, { route: '/conversations?page=99' })
+
+    // 70 conversations exist; page 99 does not, but this must never read as
+    // "no conversations yet" — that's a lie with 70 real rows behind it.
+    expect(await screen.findByRole('navigation')).toBeInTheDocument()
+    expect(screen.queryByText('No conversations yet')).not.toBeInTheDocument()
+    expect(screen.queryByText(/No conversations match/)).not.toBeInTheDocument()
+
+    const previous = screen.getByRole('button', { name: /previous/i })
+    expect(previous).toBeEnabled()
   })
 
   it('returns to the first page when a filter changes', async () => {

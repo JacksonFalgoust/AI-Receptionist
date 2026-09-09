@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { X } from 'lucide-react'
 
 import { Button } from '@/components/ui/Button'
@@ -89,6 +89,25 @@ export function ConversationFilterBar({
   onClear,
 }: ConversationFilterBarProps) {
   const [expanded, setExpanded] = useState(false)
+  const disclosureId = useId()
+
+  // Local echo of the typed text: SearchInput's `value` prop must update on
+  // every keystroke for the box to feel responsive, but the URL (and thus
+  // `state.search`, and thus the query) should only change once the caller
+  // has paused typing — that's what SearchInput's debounced `onSearch` is
+  // for. When `state.search` changes from outside (a chip removal, Clear
+  // filters), the box must not show stale text. Rather than a `useEffect`
+  // (which would sync a render late, after the stale value briefly paints),
+  // this adjusts state during render itself — the pattern React's docs
+  // recommend for "reset state when a prop changes": comparing against the
+  // last prop value we've seen and, on a mismatch, updating both pieces of
+  // state before this render commits.
+  const [searchText, setSearchText] = useState(state.search)
+  const [syncedSearch, setSyncedSearch] = useState(state.search)
+  if (state.search !== syncedSearch) {
+    setSyncedSearch(state.search)
+    setSearchText(state.search)
+  }
 
   const chips = [
     state.search && { key: 'Search', label: `"${state.search}"`, patch: { search: '' } },
@@ -134,8 +153,9 @@ export function ConversationFilterBar({
           <SearchInput
             aria-label="Search conversations"
             placeholder="Customer, phone, ID, intent, or keyword"
-            value={state.search}
-            onChange={(search) => onChange({ search })}
+            value={searchText}
+            onChange={setSearchText}
+            onSearch={(search) => onChange({ search })}
           />
         </div>
         <Filter
@@ -163,13 +183,14 @@ export function ConversationFilterBar({
           size="sm"
           onClick={() => setExpanded((open) => !open)}
           aria-expanded={expanded}
+          aria-controls={disclosureId}
         >
           {expanded ? 'Fewer filters' : 'More filters'}
         </Button>
       </FilterBar>
 
       {expanded ? (
-        <div className="flex flex-wrap items-end gap-2">
+        <div id={disclosureId} className="flex flex-wrap items-end gap-2">
           <Filter
             label="Date range"
             value={state.range}
