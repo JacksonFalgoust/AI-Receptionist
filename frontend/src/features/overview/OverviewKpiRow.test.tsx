@@ -88,4 +88,20 @@ describe('OverviewKpiRow', () => {
     await user.click(screen.getByRole('button', { name: 'Retry' }))
     expect(spy.mock.calls.length).toBeGreaterThan(1)
   })
+
+  it('formats a KPI by its declared format, not as a raw number', async () => {
+    // Every Overview KPI is a plain count today, so this guards the row against
+    // the day a rate or a duration is added to what the service returns.
+    vi.spyOn(dashboardService, 'getOverview').mockResolvedValue({
+      kpis: [
+        { id: 'escalation_rate', label: 'Escalation rate', value: 20, format: 'percent' },
+        { id: 'avg_duration', label: 'Avg duration', value: 303, format: 'duration' },
+      ],
+    })
+
+    renderWithProviders(<OverviewKpiRow />)
+
+    expect(await screen.findByText('20%')).toBeInTheDocument()
+    expect(screen.getByText('5m 03s')).toBeInTheDocument()
+  })
 })

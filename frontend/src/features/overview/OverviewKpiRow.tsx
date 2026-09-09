@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 
 import { KpiCard } from '@/components/ui/KpiCard'
 import { QueryBoundary } from '@/components/ui/QueryBoundary'
+import { formatKpi } from '@/lib/formatKpi'
 import { dashboardService } from '@/services/dashboardService'
 import type { DateRange } from '@/types'
 
@@ -34,7 +35,7 @@ export function OverviewKpiRow({ range = DEFAULT_RANGE }: OverviewKpiRowProps) {
         {(overview) => (
           <div className={GRID}>
             {overview.kpis.map((kpi) => (
-              <KpiCard key={kpi.id} label={kpi.label} value={kpi.value} />
+              <KpiCard key={kpi.id} label={kpi.label} value={formatKpi(kpi)} />
             ))}
           </div>
         )}

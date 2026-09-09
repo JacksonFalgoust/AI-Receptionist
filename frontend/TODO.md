@@ -42,17 +42,13 @@ one only depends on things above it.
 - [x] **Overview page assembly** (B5, US-2.1) — `DateScope` control (Today / 7 days / 30 days) in the page header, threaded into the KPI row and both feeds; no Export. `getRecentActivity`/`getRecentEscalations` now take a `DateRange`, and the activity/escalation seeds spread across a month so the control has visible effect
 - [x] **Conversations list** (B6, US-3.1) — eight columns, five-field search, all seven filters (four visible, three behind a disclosure) and pagination, with filter state in the URL so a query can be bookmarked and shared. `Conversation` gained `escalationStatus`, `ConversationOutcome` joined `KnownStatus`, and the escalation seed was realigned onto conversations that actually escalated
 - [x] **Conversation detail** (B7, US-3.2) — summary strip, AI summary in business language, transcript across all three speakers, and an action timeline whose system details expand behind a native disclosure. `Timeline` gained an optional `details` slot; a fixture test guards PRD §47 where it can actually be enforced
+- [x] **Analytics** (B8, US-4.1) — the three allowed KPIs and the Top customer intents table, scoped by `DateScope` and defaulting to 30 days. `Kpi.format` was declared but never implemented, so a rate would have read "20" and a duration "303"; `formatKpi` now backs both this row and Overview's. No chart: US-4.1, the prototype and PRD §12.2 all stop short of requiring one
 
 ---
 
 ## Phase B — Operations
 
-### B8. Analytics (US-4.1)
-KPI widgets: Total conversations, Escalation rate, Avg duration — **no
-conversion rate**. Top customer intents table: Intent, Volume — **no trend
-column**. Loading/empty/error. Lazy-load the charts (PRD §46).
-
----
+**Complete.** All eight tasks shipped; see the Done list above.
 
 ## Phase C — Concierge administration
 
