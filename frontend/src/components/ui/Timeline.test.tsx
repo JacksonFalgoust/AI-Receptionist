@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 
 import { Timeline } from './Timeline'
 
@@ -24,5 +24,32 @@ describe('Timeline', () => {
 
     expect(items[0].querySelectorAll('p')).toHaveLength(3) // time, title, meta
     expect(items[1].querySelectorAll('p')).toHaveLength(2) // time, title only
+  })
+
+  it('tucks optional details behind a disclosure, collapsed by default', () => {
+    render(
+      <Timeline
+        items={[
+          {
+            id: '1',
+            time: '10:02 AM',
+            title: 'Create appointment',
+            meta: 'Scheduling',
+            details: <dl><dt>attempts</dt><dd>2</dd></dl>,
+          },
+        ]}
+      />,
+    )
+
+    const disclosure = screen.getByRole('group')
+    expect(disclosure).not.toHaveAttribute('open')
+    expect(within(disclosure).getByText('System details')).toBeInTheDocument()
+    expect(within(disclosure).getByText('attempts')).toBeInTheDocument()
+  })
+
+  it('renders no disclosure for an entry without details', () => {
+    render(<Timeline items={[{ id: '1', time: '10:02 AM', title: 'Call ended' }]} />)
+
+    expect(screen.queryByRole('group')).not.toBeInTheDocument()
   })
 })
