@@ -3,6 +3,7 @@ import { store } from '@/mocks/store'
 import type {
   Conversation,
   ConversationDetail,
+  ConversationFilterOptions,
   ConversationFilters,
   Id,
   PageRequest,
@@ -20,6 +21,7 @@ export type ConversationListParams = ConversationFilters & PageRequest
 export interface ConversationService {
   list(params?: ConversationListParams): Promise<Paginated<Conversation>>
   get(id: Id): Promise<ConversationDetail>
+  listFilterOptions(): Promise<ConversationFilterOptions>
 }
 
 function matchesFilters(
@@ -54,6 +56,22 @@ function matchesFilters(
   )
 }
 
+/** Sorted, de-duplicated, and never including an absent value. */
+function distinct(values: (string | undefined)[]): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))].sort()
+}
+
+/**
+ * The escalation record is a separate collection keyed by conversation, so the
+ * list joins it on rather than the store duplicating the status.
+ */
+function withEscalationStatus(conversation: Conversation): Conversation {
+  const escalation = store.escalations.find(
+    (candidate) => candidate.conversationId === conversation.id,
+  )
+  return escalation ? { ...conversation, escalationStatus: escalation.status } : conversation
+}
+
 const mockConversationService: ConversationService = {
   async list(params = {}) {
     await delay()
@@ -61,10 +79,12 @@ const mockConversationService: ConversationService = {
     const matching = store.conversations.filter((conversation) =>
       matchesFilters(conversation, filters),
     )
-    return paginate(
+    const paginated = paginate(
       sortByDesc(matching, (conversation) => conversation.startedAt),
       { page, pageSize },
     )
+    // Join after slicing: only the rows actually rendered need the lookup.
+    return { ...paginated, items: paginated.items.map(withEscalationStatus) }
   },
 
   async get(id) {
@@ -80,7 +100,7 @@ const mockConversationService: ConversationService = {
     }
 
     return {
-      conversation,
+      conversation: withEscalationStatus(conversation),
       // Oldest first: a transcript and an action timeline both read forwards.
       messages: store.conversationMessages
         .filter((message) => message.conversationId === id)
@@ -90,12 +110,30 @@ const mockConversationService: ConversationService = {
         .sort((a, b) => a.at.localeCompare(b.at)),
     }
   },
+
+  async listFilterOptions() {
+    await delay()
+    const locationIds = distinct(store.conversations.map((c) => c.locationId))
+    const named = store.organizations.flatMap((organization) => organization.locations)
+
+    return {
+      intents: distinct(store.conversations.map((conversation) => conversation.intent)),
+      employees: distinct(store.conversations.map((conversation) => conversation.assignedEmployee)),
+      // Derived from conversations so no option can return nothing, but named
+      // from the organization so the dropdown never shows a raw id.
+      locations: locationIds.map((id) => ({
+        id,
+        name: named.find((location) => location.id === id)?.name ?? id,
+      })),
+    }
+  },
 }
 
 const httpConversationService: ConversationService = {
   list: (params = {}) =>
     http.get<Paginated<Conversation>>(`/conversations${toQueryString({ ...params })}`),
   get: (id) => http.get<ConversationDetail>(`/conversations/${id}`),
+  listFilterOptions: () => http.get<ConversationFilterOptions>('/conversations/filter-options'),
 }
 
 export const conversationService: ConversationService = USE_MOCKS

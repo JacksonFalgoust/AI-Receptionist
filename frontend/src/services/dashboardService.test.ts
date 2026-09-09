@@ -148,4 +148,36 @@ describe('dashboardService feeds', () => {
     expect(week.length).toBeGreaterThan(today.length)
     expect(month.length).toBeGreaterThan(week.length)
   })
+
+  it('seeds every escalation against a conversation that actually escalated', async () => {
+    const escalations = await dashboardService.getRecentEscalations(undefined, 100)
+
+    for (const escalation of escalations) {
+      const conversation = store.conversations.find(
+        (candidate) => candidate.id === escalation.conversationId,
+      )
+      expect(conversation, `no conversation for ${escalation.id}`).toBeDefined()
+      expect(conversation!.escalated).toBe(true)
+      expect(conversation!.customerName).toBe(escalation.customerName)
+    }
+  })
+
+  it('seeds every "escalated" activity event against a conversation that actually escalated', async () => {
+    const activity = await dashboardService.getRecentActivity(undefined, 100)
+    const escalatedEvents = activity.filter((event) => event.status === 'escalated')
+
+    // Guards against the same seed-drift bug fixed for ESCALATIONS: a Recent
+    // Activity row claiming "Escalated to team" must point at a conversation
+    // whose own outcome/escalated flag agrees, or the Conversations list for
+    // that same id contradicts the Overview feed.
+    expect(escalatedEvents.length).toBeGreaterThan(0)
+    for (const event of escalatedEvents) {
+      const conversation = store.conversations.find(
+        (candidate) => candidate.id === event.conversationId,
+      )
+      expect(conversation, `no conversation for ${event.id}`).toBeDefined()
+      expect(conversation!.escalated).toBe(true)
+      expect(conversation!.customerName).toBe(event.customerRef)
+    }
+  })
 })

@@ -1,6 +1,6 @@
 import type { ActivityStatus } from '@/types/activity'
 import type { ConciergeState, FeatureStatus } from '@/types/concierge'
-import type { EscalationStatus } from '@/types/conversation'
+import type { ConversationOutcome, EscalationStatus } from '@/types/conversation'
 import type { IntegrationStatus } from '@/types/integration'
 import type { KnowledgeStatus } from '@/types/knowledge'
 import type { UserStatus } from '@/types/user'
@@ -36,6 +36,7 @@ export type KnownStatus =
   | ConciergeState
   | ChannelHealth
   | ActivityStatus
+  | ConversationOutcome
 
 const STATUS_TONE: Record<KnownStatus, ToneInfo> = {
   enabled: { tone: 'success', label: 'Enabled' },
@@ -68,6 +69,11 @@ const STATUS_TONE: Record<KnownStatus, ToneInfo> = {
   info: { tone: 'info', label: 'Info' },
   escalated: { tone: 'danger', label: 'Escalated' },
   pending: { tone: 'warning', label: 'Pending' },
+  // ConversationOutcome. 'escalated' is shared with ActivityStatus above.
+  completed: { tone: 'success', label: 'Completed' },
+  abandoned: { tone: 'muted', label: 'Abandoned' },
+  failed: { tone: 'danger', label: 'Failed' },
+  follow_up_required: { tone: 'warning', label: 'Follow-up required' },
 }
 
 export function statusTone(status: KnownStatus): ToneInfo {

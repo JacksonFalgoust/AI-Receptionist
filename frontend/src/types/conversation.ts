@@ -27,6 +27,12 @@ export interface Conversation extends TenantScoped {
   /** Business-language recap shown on the detail page (PRD §10.2). */
   summary?: string
   assignedEmployee?: string
+  /**
+   * The status of this conversation's escalation, when one exists. Joined on
+   * by the service rather than stored — US-3.1's Status column asks "where
+   * does this stand now", which Outcome ("how did it end") cannot answer.
+   */
+  escalationStatus?: EscalationStatus
 }
 
 export type Speaker = 'customer' | 'concierge' | 'employee'
@@ -85,4 +91,11 @@ export interface ConversationFilters {
   assignedEmployee?: string
   from?: IsoDateTime
   to?: IsoDateTime
+}
+
+/** Option lists for the Conversations filter bar (US-3.1). */
+export interface ConversationFilterOptions {
+  intents: string[]
+  locations: { id: Id; name: string }[]
+  employees: string[]
 }

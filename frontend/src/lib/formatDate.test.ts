@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatDateTime, relativeTime } from './formatDate'
+import { formatDateTime, formatDuration, relativeTime } from './formatDate'
 
 const NOW = new Date('2026-09-08T12:00:00.000Z').getTime()
 
@@ -57,5 +57,31 @@ describe('formatDateTime', () => {
 
   it('returns an empty string for an unparseable value', () => {
     expect(formatDateTime('not-a-date')).toBe('')
+  })
+})
+
+describe('formatDuration', () => {
+  it('reads as minutes and seconds', () => {
+    expect(formatDuration(252)).toBe('4m 12s')
+  })
+
+  it('pads seconds so a column of durations aligns', () => {
+    expect(formatDuration(125)).toBe('2m 05s')
+  })
+
+  it('keeps sub-minute calls in seconds alone', () => {
+    expect(formatDuration(22)).toBe('22s')
+  })
+
+  it('returns an em dash when the duration is unknown', () => {
+    expect(formatDuration(undefined)).toBe('—')
+  })
+
+  it('rolls a remainder that rounds up to 60 seconds into the next minute', () => {
+    expect(formatDuration(119.6)).toBe('2m 00s')
+  })
+
+  it('rolls a sub-minute value that rounds up to 60 seconds into a full minute', () => {
+    expect(formatDuration(59.6)).toBe('1m 00s')
   })
 })

@@ -40,16 +40,11 @@ one only depends on things above it.
 - [x] **Recent Activity feed** (B3, US-2.4) — time, type, customer/context, channel, and outcome per item, each linking to its conversation; `ActivityStatus` joined `KnownStatus` so an activity outcome reads as itself rather than borrowing a workflow label. Introduces the two-column `dash-grid` pairing it with the B2 status card
 - [x] **Recent Escalations** (B4, US-2.5) — Customer, Time, Reason, Assigned, Status across all four statuses, unassigned called out rather than left blank, each customer linking to the conversation that escalated. `Table` gained an optional `frame` so it sits flush inside a `Panel`
 - [x] **Overview page assembly** (B5, US-2.1) — `DateScope` control (Today / 7 days / 30 days) in the page header, threaded into the KPI row and both feeds; no Export. `getRecentActivity`/`getRecentEscalations` now take a `DateRange`, and the activity/escalation seeds spread across a month so the control has visible effect
+- [x] **Conversations list** (B6, US-3.1) — eight columns, five-field search, all seven filters (four visible, three behind a disclosure) and pagination, with filter state in the URL so a query can be bookmarked and shared. `Conversation` gained `escalationStatus`, `ConversationOutcome` joined `KnownStatus`, and the escalation seed was realigned onto conversations that actually escalated
 
 ---
 
 ## Phase B — Operations
-
-### B6. Conversations list (US-3.1)
-Columns: Date/Time, Customer, Channel, Intent, Outcome, Duration, Escalated,
-Status. Search by name, phone, conversation ID, intent, keyword. Filters: date
-range, channel, intent, outcome, escalated, location, assigned employee.
-Pagination. Empty/loading/error states.
 
 ### B7. Conversation detail (US-3.2)
 Summary block, AI summary in business language, transcript with

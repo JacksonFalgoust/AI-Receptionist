@@ -72,6 +72,20 @@ describe('conversationService.list', () => {
     expect(page.items).toEqual([])
     expect(page.total).toBe(0)
   })
+
+  it('attaches the escalation status to conversations that were escalated', async () => {
+    const { items } = await conversationService.list({ pageSize: 100 })
+    const escalated = items.find((conversation) => conversation.id === 'conv_0002')
+
+    expect(escalated?.escalationStatus).toBe('new')
+  })
+
+  it('leaves escalationStatus undefined when no escalation exists', async () => {
+    const { items } = await conversationService.list({ pageSize: 100 })
+    const plain = items.find((conversation) => conversation.id === 'conv_0001')
+
+    expect(plain?.escalationStatus).toBeUndefined()
+  })
 })
 
 describe('conversationService.get', () => {
@@ -99,5 +113,32 @@ describe('conversationService.get', () => {
     await expect(conversationService.get('conv_9999')).rejects.toMatchObject({
       kind: 'not_found',
     })
+  })
+})
+
+describe('conversationService.listFilterOptions', () => {
+  beforeEach(() => {
+    resetStore()
+  })
+
+  it('offers only filter values that occur in the data', async () => {
+    const options = await conversationService.listFilterOptions()
+
+    expect(options.intents).toContain('Book appointment')
+    expect(options.intents).toEqual([...options.intents].sort())
+    expect(new Set(options.intents).size).toBe(options.intents.length)
+
+    // Only the four employees who own escalated conversations, not all nine users.
+    expect(options.employees).toEqual(['Avery Chen', 'Priya Shah', 'Sam Rivera', 'Taylor Brooks'])
+    expect(options.locations.map((location) => location.id)).toEqual(['loc_north', 'loc_riverside'])
+  })
+
+  it('names locations rather than exposing their ids', async () => {
+    const options = await conversationService.listFilterOptions()
+
+    for (const location of options.locations) {
+      expect(location.name).toBeTruthy()
+      expect(location.name).not.toBe(location.id)
+    }
   })
 })
