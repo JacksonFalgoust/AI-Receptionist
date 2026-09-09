@@ -116,6 +116,9 @@ describe('KnowledgeEditorPage — edit', () => {
     expect(await screen.findByRole('heading', { name: 'Knowledge' })).toBeInTheDocument()
     const saved = store.knowledge.find((item) => item.id === 'kn_0006')
     expect(saved?.title).toBe('Cancellation policy (updated)')
+    // A save that never touched the source must not blank it — the library's
+    // Source column has nothing else to show.
+    expect(saved?.source).toBe('Manual entry')
   })
 
   it('deletes only after confirming', async () => {

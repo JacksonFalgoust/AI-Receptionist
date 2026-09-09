@@ -100,11 +100,23 @@ export function knowledgeFormSchema(options: { hasExistingSource: boolean }) {
 }
 
 /**
+ * The three statuses PRD §16.4's toggle can never set directly — Processing,
+ * Needs review, and Error are things the system decides, not something an
+ * administrator ticks their way back into. Exported once so `KnowledgeForm`
+ * and `KnowledgeEditorPage` decide whether to show the "the system set this"
+ * note off the same list `resolveKnowledgeStatus` actually preserves, rather
+ * than each keeping its own copy that could drift from it.
+ */
+export const SYSTEM_SET_KNOWLEDGE_STATUSES: KnowledgeStatus[] = [
+  'processing',
+  'needs_review',
+  'error',
+]
+
+/**
  * PRD §16.4's "Active / inactive" toggle over five statuses. `active` is the
- * whole story going forward for a manually-authored item; the three statuses
- * the system sets on its own (Processing, Needs review, Error) are never
- * something an administrator ticks their way back into, so switching the
- * toggle off preserves one of those instead of overwriting it with Disabled.
+ * whole story going forward for a manually-authored item; turning the toggle
+ * off preserves a system-set status instead of overwriting it with Disabled.
  * A newly uploaded document overrides the toggle entirely — nothing is
  * editable until the upload has been read, so the toggle cannot force it
  * straight to Active.
@@ -118,8 +130,7 @@ export function resolveKnowledgeStatus(params: {
   if (params.isNewDocumentUpload) return 'processing'
   if (params.active) return 'active'
 
-  const preserved: KnowledgeStatus[] = ['processing', 'needs_review', 'error']
-  if (params.previousStatus && preserved.includes(params.previousStatus)) {
+  if (params.previousStatus && SYSTEM_SET_KNOWLEDGE_STATUSES.includes(params.previousStatus)) {
     return params.previousStatus
   }
   return 'disabled'
@@ -202,12 +213,18 @@ export function knowledgeFormValuesToOutput(
 
   const isNewDocumentUpload = type === 'document' && values.documentFileName.trim() !== ''
 
+  // Every branch falls back to the original's source on an edit — only a
+  // brand-new item (no `original`) can legitimately end up with none, which
+  // the service then defaults to "Manual entry". Object.assign(item, patch)
+  // in the mock service copies an `undefined` key as readily as any other
+  // value, so leaving a branch that produces bare `undefined` on an edit
+  // would blank the item's real source rather than leave it alone.
   const source =
     type === 'url'
       ? values.websiteUrl.trim()
       : type === 'document'
         ? values.documentFileName.trim() || original?.source
-        : undefined
+        : original?.source
 
   return {
     title: values.title.trim(),

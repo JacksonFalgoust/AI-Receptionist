@@ -12,6 +12,7 @@ import {
   emptyKnowledgeFormValues,
   itemToFormValues,
   knowledgeFormValuesToOutput,
+  SYSTEM_SET_KNOWLEDGE_STATUSES,
 } from '@/features/knowledge/knowledgeFormSchema'
 import type { KnowledgeFormValues } from '@/features/knowledge/knowledgeFormSchema'
 import { KNOWLEDGE_TYPES } from '@/lib/knowledgeLabels'
@@ -19,10 +20,7 @@ import { paths } from '@/routes/paths'
 import { knowledgeService } from '@/services/knowledgeService'
 import { toAppError } from '@/services/errors'
 import type { CreateKnowledgeInput, KnowledgePatch } from '@/services/knowledgeService'
-import type { KnowledgeItem, KnowledgeStatus, KnowledgeType } from '@/types'
-
-/** The three statuses PRD §16.4's toggle never sets directly. */
-const SYSTEM_SET_STATUSES: KnowledgeStatus[] = ['processing', 'needs_review', 'error']
+import type { KnowledgeItem, KnowledgeType } from '@/types'
 
 function seedTypeFromParam(value: string | null): KnowledgeType | undefined {
   return (KNOWLEDGE_TYPES as string[]).includes(value ?? '') ? (value as KnowledgeType) : undefined
@@ -138,7 +136,7 @@ export function KnowledgeEditorPage() {
                 hasExistingSource={item.type === 'document'}
                 existingSource={item.type === 'document' ? item.source : undefined}
                 previousStatus={
-                  SYSTEM_SET_STATUSES.includes(item.status) ? item.status : undefined
+                  SYSTEM_SET_KNOWLEDGE_STATUSES.includes(item.status) ? item.status : undefined
                 }
                 submitLabel="Save changes"
                 isSubmitting={update.isPending}

@@ -11,13 +11,10 @@ import { Toggle } from '@/components/ui/Toggle'
 import { KNOWLEDGE_TYPES, knowledgeTypeLabel } from '@/lib/knowledgeLabels'
 import type { KnowledgeStatus } from '@/types'
 
-import { knowledgeFormSchema } from './knowledgeFormSchema'
+import { knowledgeFormSchema, SYSTEM_SET_KNOWLEDGE_STATUSES } from './knowledgeFormSchema'
 import type { KnowledgeFormValues } from './knowledgeFormSchema'
 
 const TYPE_OPTIONS = KNOWLEDGE_TYPES.map((type) => ({ value: type, label: knowledgeTypeLabel(type) }))
-
-/** The three statuses PRD §16.4's toggle can never set directly — see `resolveKnowledgeStatus`. */
-const SYSTEM_SET_STATUSES: KnowledgeStatus[] = ['processing', 'needs_review', 'error']
 
 export interface KnowledgeFormProps {
   defaultValues: KnowledgeFormValues
@@ -131,7 +128,7 @@ export function KnowledgeForm({
 
       <div className="mb-4">
         <Toggle label="Active" {...register('active')} />
-        {previousStatus && SYSTEM_SET_STATUSES.includes(previousStatus) ? (
+        {previousStatus && SYSTEM_SET_KNOWLEDGE_STATUSES.includes(previousStatus) ? (
           <p className="mt-1.5 flex items-center gap-1.5 text-xs text-ink-secondary">
             <StatusPill status={previousStatus} />
             Concierge set this status; turning Active on replaces it. Leaving Active off keeps it as

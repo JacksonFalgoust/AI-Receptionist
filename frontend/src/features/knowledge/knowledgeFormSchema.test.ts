@@ -8,6 +8,7 @@ import {
   knowledgeFormSchema,
   knowledgeFormValuesToOutput,
   resolveKnowledgeStatus,
+  SYSTEM_SET_KNOWLEDGE_STATUSES,
 } from './knowledgeFormSchema'
 
 const baseValues = {
@@ -253,9 +254,20 @@ describe('knowledgeFormValuesToOutput', () => {
     expect(output.source).toBe('handbook.pdf')
   })
 
-  it('leaves source unset for a manually-authored type', () => {
+  it('leaves source unset for a brand-new manually-authored item', () => {
     const output = knowledgeFormValuesToOutput({ ...baseValues, type: 'faq' })
     expect(output.source).toBeUndefined()
+  })
+
+  it('preserves the existing source when editing a manually-authored item', () => {
+    // knowledgeService.update does Object.assign(item, patch) — an
+    // `undefined` here is still an own property and overwrites "Manual
+    // entry" with undefined, blanking the Source column for good.
+    const output = knowledgeFormValuesToOutput(
+      { ...baseValues, type: 'policy' },
+      { ...baseItem, type: 'policy', source: 'Manual entry' },
+    )
+    expect(output.source).toBe('Manual entry')
   })
 
   it('sets Processing on a fresh document upload regardless of the toggle', () => {
@@ -308,5 +320,12 @@ describe('emptyKnowledgeFormValues', () => {
 
   it('defaults a new item to Active', () => {
     expect(emptyKnowledgeFormValues().active).toBe(true)
+  })
+
+  it('exports what it treats as preserved on toggle-off, so no other file has to repeat it', () => {
+    // KnowledgeForm and KnowledgeEditorPage both decide whether to show the
+    // "the system set this" note off this same list — a hand-copied second
+    // list there could drift from what this function actually preserves.
+    expect(SYSTEM_SET_KNOWLEDGE_STATUSES).toEqual(['processing', 'needs_review', 'error'])
   })
 })
