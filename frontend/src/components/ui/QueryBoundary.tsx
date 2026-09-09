@@ -27,6 +27,13 @@ export interface QueryBoundaryProps<T> {
   children: (data: T) => ReactNode
   skeleton?: SkeletonVariant
   skeletonRows?: number
+  /**
+   * Replaces the default skeleton while pending, for views whose loading shape
+   * the three `Skeleton` variants cannot express — a KPI row of five cards, a
+   * chart. Supplying it keeps the five-state decision here rather than pushing
+   * a hand-rolled pending branch back into the caller.
+   */
+  loading?: ReactNode
   isEmpty?: (data: T) => boolean
   empty?: EmptyStateProps
 }
@@ -41,11 +48,12 @@ export function QueryBoundary<T>({
   children,
   skeleton = 'text',
   skeletonRows,
+  loading,
   isEmpty,
   empty,
 }: QueryBoundaryProps<T>) {
   if (query.isPending) {
-    return <Skeleton variant={skeleton} rows={skeletonRows} />
+    return loading ?? <Skeleton variant={skeleton} rows={skeletonRows} />
   }
 
   if (query.isError) {

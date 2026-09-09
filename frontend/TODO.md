@@ -35,15 +35,11 @@ one only depends on things above it.
 - [x] **Service modules + mock data** (A6, US-0.3) — thirteen services (the eleven listed, plus `notificationService` and `organizationService`, both needed by A7) over a fixtures/store/query mock stack in `src/mocks/`; reads honour filters and pagination, writes mutate an in-memory store, no presentational component imports `src/mocks/` (PRD §38)
 - [x] **Header panels** (A7, US-0.1, PRD §6.2) — organization selector, Concierge status panel, notification centre, user menu; `Topbar` is composition-only
 - [x] **Forgot password** (A8, US-1.2) — default, processing, success, and error states; success copy does not reveal whether the account exists
+- [x] **Overview KPI row** (B1, US-2.2) — the five KPIs `dashboardService.getOverview()` returns, label + value only; loading holds the five-card shape so nothing reflows when the numbers land
 
 ---
 
 ## Phase B — Operations
-
-### B1. Overview KPI row (US-2.2)
-Exactly five: Conversations Today, Calls Answered, Requests Completed, Human
-Escalations, Transactions Created. **Label + value only** — no sparkline, no
-"vs yesterday". Loading and error states for the row.
 
 ### B2. Concierge Status card (US-2.3)
 State + last configuration change, channels **Voice and SMS only** (no Web),
@@ -59,7 +55,9 @@ Columns: Customer, Time, Reason, Assigned, Status (New / Assigned / In Progress
 / Resolved). Links to Escalation & Routing. Empty state.
 
 ### B5. Overview page assembly (US-2.1)
-Compose B1–B4 into `/overview` with a date-scope control. **No Export button.**
+`/overview` already renders a `PageHeader` and the B1 KPI row. Add the
+date-scope control and thread its range into every card on the page —
+`OverviewKpiRow` takes a `range` prop for exactly this. **No Export button.**
 
 ### B6. Conversations list (US-3.1)
 Columns: Date/Time, Customer, Channel, Intent, Outcome, Duration, Escalated,
