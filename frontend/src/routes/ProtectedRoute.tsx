@@ -13,11 +13,13 @@ import { paths } from './paths'
  * same rules.
  */
 export function ProtectedRoute({ permission }: { permission?: Permission }) {
-  const { user } = useAuth()
+  const { user, sessionExpired } = useAuth()
   const location = useLocation()
 
   if (!user) {
-    return <Navigate to={paths.login} state={{ from: location }} replace />
+    return (
+      <Navigate to={paths.login} state={{ from: location, sessionExpired }} replace />
+    )
   }
 
   if (permission && !can(user.role, permission)) {

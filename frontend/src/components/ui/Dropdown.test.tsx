@@ -73,4 +73,37 @@ describe('Dropdown', () => {
     expect(screen.queryByText('Inner menu')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Inner' })).toBeInTheDocument()
   })
+
+  it('marks the trigger with haspopup and reflects the open state', async () => {
+    const user = userEvent.setup()
+    render(
+      <Dropdown trigger={<button type="button">Open</button>}>
+        <p>Panel</p>
+      </Dropdown>,
+    )
+
+    const trigger = screen.getByRole('button', { name: 'Open' })
+    expect(trigger).toHaveAttribute('aria-haspopup', 'menu')
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+
+    await user.click(trigger)
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('renders as a dialog with an accessible name when asked', async () => {
+    const user = userEvent.setup()
+    render(
+      <Dropdown role="dialog" label="Concierge status" trigger={<button type="button">Status</button>}>
+        <p>Concierge is active</p>
+      </Dropdown>,
+    )
+
+    const trigger = screen.getByRole('button', { name: 'Status' })
+    expect(trigger).toHaveAttribute('aria-haspopup', 'dialog')
+
+    await user.click(trigger)
+
+    expect(screen.getByRole('dialog', { name: 'Concierge status' })).toBeInTheDocument()
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  })
 })
