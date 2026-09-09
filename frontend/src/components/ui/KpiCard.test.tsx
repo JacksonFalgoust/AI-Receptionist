@@ -9,4 +9,9 @@ describe('KpiCard', () => {
     expect(screen.getByText('Conversations Today')).toBeInTheDocument()
     expect(screen.getByText('128')).toBeInTheDocument()
   })
+
+  it('is a self-contained article, so a row of cards is navigable', () => {
+    render(<KpiCard label="Calls Answered" value={86} />)
+    expect(screen.getByRole('article')).toHaveTextContent('Calls Answered')
+  })
 })
