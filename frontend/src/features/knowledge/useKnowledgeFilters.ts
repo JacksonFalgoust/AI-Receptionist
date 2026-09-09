@@ -1,17 +1,9 @@
 import { useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
-import { KNOWLEDGE_TYPES } from '@/lib/knowledgeLabels'
+import { KNOWLEDGE_STATUSES, KNOWLEDGE_TYPES } from '@/lib/knowledgeLabels'
 import type { KnowledgeListParams } from '@/services/knowledgeService'
 import type { KnowledgeStatus, KnowledgeType } from '@/types'
-
-export const KNOWLEDGE_STATUSES: KnowledgeStatus[] = [
-  'active',
-  'processing',
-  'needs_review',
-  'error',
-  'disabled',
-]
 
 export interface KnowledgeFilterState {
   search: string

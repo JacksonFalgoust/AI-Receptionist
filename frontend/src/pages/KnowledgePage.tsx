@@ -9,6 +9,7 @@ import { AddKnowledgeMenu, addKnowledgeHref } from '@/features/knowledge/AddKnow
 import { KNOWLEDGE_COLUMNS } from '@/features/knowledge/knowledgeColumns'
 import { KnowledgeFilterBar } from '@/features/knowledge/KnowledgeFilterBar'
 import { useKnowledgeFilters } from '@/features/knowledge/useKnowledgeFilters'
+import { useClampPage } from '@/lib/useClampPage'
 import { knowledgeService } from '@/services/knowledgeService'
 
 /**
@@ -25,6 +26,10 @@ export function KnowledgePage() {
     queryKey: ['knowledge', 'list', params],
     queryFn: () => knowledgeService.list(params),
   })
+
+  // A bookmark kept after the library shrank asks for a page that no longer
+  // exists; land it on the last one that does rather than on an empty table.
+  useClampPage(query.data, setPage)
 
   return (
     <div className="mx-auto max-w-7xl">

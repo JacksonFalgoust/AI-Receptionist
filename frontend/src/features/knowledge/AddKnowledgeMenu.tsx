@@ -16,11 +16,18 @@ export interface AddKnowledgeAction {
   type?: KnowledgeType
 }
 
+/**
+ * Named rather than looked up out of the list below: the shortcut and the menu
+ * item are then the same action by construction, and renaming it cannot leave
+ * a module-scope `find(...)!` throwing at import time and blanking the route.
+ */
+const UPLOAD_ACTION: AddKnowledgeAction = { label: 'Upload document', type: 'document' }
+
 /** PRD §16.3, in the order the PRD lists them. */
 export const ADD_KNOWLEDGE_ACTIONS: AddKnowledgeAction[] = [
   { label: 'Create FAQ', type: 'faq' },
   { label: 'Add text', type: 'instruction' },
-  { label: 'Upload document', type: 'document' },
+  UPLOAD_ACTION,
   { label: 'Add URL', type: 'url' },
   { label: 'Create policy', type: 'policy' },
   { label: 'Add business information' },
@@ -29,8 +36,6 @@ export const ADD_KNOWLEDGE_ACTIONS: AddKnowledgeAction[] = [
 export function addKnowledgeHref(type?: KnowledgeType): string {
   return type ? `${paths.knowledgeNew}?type=${type}` : paths.knowledgeNew
 }
-
-const UPLOAD_ACTION = ADD_KNOWLEDGE_ACTIONS.find((action) => action.type === 'document')!
 
 /**
  * US-5.1's add actions. All six sit together under one primary trigger so the

@@ -79,12 +79,18 @@ describe('KnowledgePage', () => {
     ).toBeInTheDocument()
   })
 
-  it('recovers from a bookmarked page beyond the result set instead of claiming the library is empty', async () => {
+  it('lands a bookmarked page beyond the result set on the last real page, with rows', async () => {
+    // The library shrank since the link was saved. Showing "Page 99 of 2"
+    // over an empty table, with Previous stepping back one page at a time,
+    // is 97 clicks from anything — so the page corrects itself to the last
+    // page that exists and shows its rows, and never reads as an empty
+    // library when 34 real items sit behind it.
     renderWithProviders(<KnowledgePage />, { route: '/concierge/knowledge?page=99' })
 
-    expect(await screen.findByRole('navigation', { name: 'Pagination' })).toBeInTheDocument()
+    expect(await screen.findByText('Page 2 of 2 · 34 total')).toBeInTheDocument()
+    expect(screen.getAllByRole('row').length).toBeGreaterThan(1)
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
     expect(screen.queryByText('Give Concierge something to work with')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Previous' })).toBeEnabled()
   })
 
   it('returns to the first page when a filter changes', async () => {

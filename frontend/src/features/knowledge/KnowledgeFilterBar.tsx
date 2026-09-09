@@ -4,11 +4,11 @@ import { X } from 'lucide-react'
 import { FilterBar } from '@/components/ui/FilterBar'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Select } from '@/components/ui/Select'
-import { KNOWLEDGE_TYPES, knowledgeTypeLabel } from '@/lib/knowledgeLabels'
+import { KNOWLEDGE_STATUSES, KNOWLEDGE_TYPES, knowledgeTypeLabel } from '@/lib/knowledgeLabels'
 import { statusTone } from '@/lib/statusTone'
 import type { KnowledgeStatus, KnowledgeType } from '@/types'
 
-import { KNOWLEDGE_STATUSES, type KnowledgeFilterState } from './useKnowledgeFilters'
+import type { KnowledgeFilterState } from './useKnowledgeFilters'
 
 const ANY = ''
 

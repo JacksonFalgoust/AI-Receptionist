@@ -8,6 +8,7 @@ import { Table } from '@/components/ui/Table'
 import { ConversationFilterBar } from '@/features/conversations/ConversationFilterBar'
 import { CONVERSATION_COLUMNS } from '@/features/conversations/conversationColumns'
 import { useConversationFilters } from '@/features/conversations/useConversationFilters'
+import { useClampPage } from '@/lib/useClampPage'
 import { conversationService } from '@/services/conversationService'
 
 /**
@@ -26,6 +27,10 @@ export function ConversationsPage() {
     queryKey: ['conversations', 'list', params],
     queryFn: () => conversationService.list(params),
   })
+
+  // A bookmark kept after the history was filtered or trimmed can ask for a
+  // page that no longer exists; land it on the last one that does.
+  useClampPage(query.data, setPage)
 
   const options = useQuery({
     queryKey: ['conversations', 'filter-options'],

@@ -1,15 +1,33 @@
 import { describe, expect, it } from 'vitest'
 
-import { KNOWLEDGE_TYPE_LABELS, KNOWLEDGE_TYPES, knowledgeTypeLabel } from './knowledgeLabels'
+import { statusTone } from './statusTone'
+import {
+  KNOWLEDGE_STATUSES,
+  KNOWLEDGE_TYPE_LABELS,
+  KNOWLEDGE_TYPES,
+  knowledgeTypeLabel,
+} from './knowledgeLabels'
 
 describe('knowledgeLabels', () => {
+  // Drift is caught at compile time — both arrays are derived from a
+  // `Record` keyed by the union, so growing `KnowledgeType` or
+  // `KnowledgeStatus` fails the build until the new member is named. These
+  // guard the other direction: that nobody quietly shrinks the set the
+  // filters offer, which would leave rows in the table unreachable by filter.
   it('covers all ten knowledge sources in PRD §16.1', () => {
-    // `Record<KnowledgeType, string>` makes a missing label a compile error;
-    // this guards the ordered array staying in step with the record, since
-    // the filter's option list is built from the array and would silently
-    // drop a type otherwise.
     expect(KNOWLEDGE_TYPES).toHaveLength(10)
-    expect([...KNOWLEDGE_TYPES].sort()).toEqual(Object.keys(KNOWLEDGE_TYPE_LABELS).sort())
+    expect(KNOWLEDGE_TYPES).toContain('faq')
+    expect(KNOWLEDGE_TYPES).toContain('url')
+  })
+
+  it('covers all five statuses in US-5.1, in the order the story lists them', () => {
+    expect(KNOWLEDGE_STATUSES.map((status) => statusTone(status).label)).toEqual([
+      'Active',
+      'Processing',
+      'Needs review',
+      'Error',
+      'Disabled',
+    ])
   })
 
   it('names each type the way the business does, not the way the storage does', () => {
