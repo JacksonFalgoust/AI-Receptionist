@@ -45,6 +45,7 @@ export const conciergeConfigurationSeed: ConciergeConfiguration = {
     website: 'https://horizonpartners.example.com',
     timezone: 'America/Chicago',
     address: '1200 Meridian Way, Suite 400',
+    locations: '3 locations',
     hours: BUSINESS_HOURS,
   },
   identity: {

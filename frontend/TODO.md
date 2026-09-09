@@ -45,6 +45,7 @@ one only depends on things above it.
 - [x] **Analytics** (B8, US-4.1) — the three allowed KPIs and the Top customer intents table, scoped by `DateScope` and defaulting to 30 days. `Kpi.format` was declared but never implemented, so a rate would have read "20" and a duration "303"; `formatKpi` now backs both this row and Overview's. No chart: US-4.1, the prototype and PRD §12.2 all stop short of requiring one
 - [x] **Knowledge library** (C1, US-5.1) — the six PRD §16.2 columns, search, and type/status filters over the whole library, with filter state in the URL so "everything that needs review" is a shareable link. All six PRD §16.3 add actions ship under one trigger, five seeding the editor's type and "Add business information" leaving it open, since six actions cannot preselect ten types. Both filters list every domain value rather than the prototype's shortened set, which left six seeded types unreachable. The add and Edit links resolve to US-5.2's editor route, a stub until C2 — the same order B6 and B7 took. `EmptyState` gained an optional `href` so a CTA that navigates is a link; the seed grew to 34 items so pagination has a second page to reach
 - [x] **Knowledge editor** (C2, US-5.2) — the seven PRD §16.4 fields plus one that only appears for the type that needs it: Website address for `url`, a file picker for `document`. Both add actions that needed a source `knowledgeService` had no field for now have one — `CreateKnowledgeInput` gained optional `status`/`source`. The Active toggle isn't a strict two-state switch: turning it on always sets Active, but turning it off preserves Processing/Needs review/Error rather than overwriting a status the system set, shown as a pill with an explanation above the toggle; a fresh document upload sets Processing regardless of the toggle, since nothing is editable until it's been read. Create and update both toast and return to the library rather than staying on the item, which sidesteps resyncing the form's defaults from a server response. Delete sits behind `useConfirm()`, edit-route only. A missing id needs no branch of its own — the service's existing `not_found` AppError and `QueryBoundary` already handle it
+- [x] **Configuration — business profile** (C3, US-6.1) — name, description, phone, website, time zone, address, locations, and business hours, validated. `BusinessProfile` had no `locations` field yet; added as free text (e.g. "3 locations") rather than a per-location manager, matching the prototype and PRD §13.1 — a real multi-location editor is the Post-MVP multi-organization item, not this. Business hours got a real seven-row editor (day, Closed toggle, Open/Close time inputs) rather than the prototype's single text field, since `BusinessHours[]` already modeled per-day open/close. This section saves its own draft (`conciergeService.saveDraft({ businessProfile })`, toasted) rather than waiting on a page-level action — the page-level Save Draft / Publish pair, plus Identity, Terminology, and Preview, are C4's, which will fold this section under them
 
 ---
 
@@ -53,10 +54,6 @@ one only depends on things above it.
 **Complete.** All eight tasks shipped; see the Done list above.
 
 ## Phase C — Concierge administration
-
-### C3. Configuration — business profile (US-6.1)
-Name, description, phone, website, timezone, address, locations, business
-hours. Validation.
 
 ### C4. Configuration — identity, terminology, publishing (US-6.1)
 Concierge name, greeting, closing, voice, tone presets (Professional, Friendly,
