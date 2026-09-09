@@ -82,4 +82,22 @@ describe('RecentEscalationsCard', () => {
     expect(await screen.findByText('No recent escalations')).toBeInTheDocument()
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
   })
+
+  it('honours the page date scope, hiding escalations outside the window', async () => {
+    const DAY = 24 * 60 * 60 * 1000
+    const template = store.escalations[0]
+    store.escalations = [
+      { ...template, id: 'esc_now', customerName: 'Nadia Rahman', createdAt: new Date().toISOString() },
+      {
+        ...template,
+        id: 'esc_old',
+        customerName: 'Owen Pritchard',
+        createdAt: new Date(Date.now() - 14 * DAY).toISOString(),
+      },
+    ]
+    renderWithProviders(<RecentEscalationsCard range={{ preset: 'today' }} />)
+
+    expect(await screen.findByText('Nadia Rahman')).toBeInTheDocument()
+    expect(screen.queryByText('Owen Pritchard')).not.toBeInTheDocument()
+  })
 })
