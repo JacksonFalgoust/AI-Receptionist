@@ -12,6 +12,7 @@ import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage'
 import { HelpPage } from '@/pages/HelpPage'
 import { IntegrationsPage } from '@/pages/IntegrationsPage'
 import { InvitePage } from '@/pages/InvitePage'
+import { KnowledgeEditorPage } from '@/pages/KnowledgeEditorPage'
 import { KnowledgePage } from '@/pages/KnowledgePage'
 import { LoginPage } from '@/pages/LoginPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
@@ -56,6 +57,10 @@ export function AppRoutes() {
 
           <Route element={<ProtectedRoute permission="manage:knowledge" />}>
             <Route path={paths.knowledge} element={<KnowledgePage />} />
+            {/* Static `new` outranks `:id`, so the add route is never read as
+                an item whose id is the word "new". */}
+            <Route path={paths.knowledgeNew} element={<KnowledgeEditorPage />} />
+            <Route path={paths.knowledgeItem()} element={<KnowledgeEditorPage />} />
           </Route>
 
           <Route element={<ProtectedRoute permission="manage:configuration" />}>

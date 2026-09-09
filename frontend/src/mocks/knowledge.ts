@@ -44,6 +44,16 @@ const ENTRIES: KnowledgeSeedInput[] = [
   { title: 'Client handbook 2026', type: 'document', status: 'active', source: 'client-handbook-2026.pdf', category: 'General', tags: ['handbook'], content: 'The full client handbook covering services, policies, and contact routes.' },
   { title: 'Service terms', type: 'document', status: 'error', source: 'service-terms.pdf', category: 'Policies', tags: ['policy'], content: 'The uploaded document could not be read. Re-upload it as a text-based PDF.' },
   { title: 'Public services page', type: 'url', status: 'active', source: 'https://horizonpartners.example.com/services', category: 'Services', tags: ['services', 'website'], content: 'Mirrors the public services listing so Concierge and the website never disagree.' },
+  { title: 'Do you offer virtual appointments?', type: 'faq', status: 'active', source: 'Manual entry', category: 'Appointments', tags: ['appointments', 'virtual'], content: 'Video appointments are available for every service except document signing.' },
+  { title: 'How long does a consultation take?', type: 'faq', status: 'active', source: 'Manual entry', category: 'Services', tags: ['services', 'appointments'], content: 'A standard consultation runs 60 minutes. Allow 90 minutes for a first visit.' },
+  { title: 'Data retention policy', type: 'policy', status: 'active', source: 'Manual entry', category: 'Policies', tags: ['policy', 'privacy'], content: 'Client records are retained for seven years, then securely destroyed.' },
+  { title: 'Complaint handling procedure', type: 'procedure', status: 'active', source: 'Manual entry', category: 'Operations', tags: ['escalation', 'complaints'], content: 'Acknowledge within one business day, assign an owner, and respond in writing within five.' },
+  { title: 'Client onboarding checklist', type: 'procedure', status: 'needs_review', source: 'Manual entry', category: 'Operations', tags: ['intake'], content: 'Identity check, engagement letter, contact preferences, and first appointment booked.' },
+  { title: 'Document preparation service', type: 'service', status: 'active', source: 'Manual entry', category: 'Services', tags: ['services'], content: 'Preparation of standard client documents, delivered within three business days.' },
+  { title: 'Annual review service', type: 'service', status: 'active', source: 'Manual entry', category: 'Services', tags: ['services'], content: 'A yearly review of position and objectives, included in the advisory retainer.' },
+  { title: 'Rush service surcharge', type: 'pricing', status: 'active', source: 'Manual entry', category: 'Pricing', tags: ['pricing'], content: 'Work required inside two business days carries a 25% surcharge.' },
+  { title: 'Parking and access at North Office', type: 'location', status: 'active', source: 'Manual entry', category: 'Locations', tags: ['locations', 'access'], content: 'Step-free access from the garage on level 2. Visitor bays are marked in blue.' },
+  { title: 'Public pricing page', type: 'url', status: 'processing', source: 'https://horizonpartners.example.com/pricing', category: 'Pricing', tags: ['pricing', 'website'], content: 'Public rate card, read so Concierge quotes the same figures the website shows.' },
 ]
 
 export const knowledgeSeed: KnowledgeItem[] = ENTRIES.map((entry, index) => ({
