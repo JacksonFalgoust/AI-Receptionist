@@ -7,6 +7,7 @@ import { QueryBoundary } from '@/components/ui/QueryBoundary'
 import { StatusPill } from '@/components/ui/StatusPill'
 import { useConfirm } from '@/components/ui/useConfirm'
 import { useToast } from '@/components/ui/ToastProvider'
+import { CHANNEL_LABELS } from '@/lib/channelLabels'
 import { relativeTime } from '@/lib/formatDate'
 import { paths } from '@/routes/paths'
 import { conciergeService } from '@/services/conciergeService'
@@ -26,13 +27,6 @@ const CONCIERGE_STATUS_KEY = ['concierge', 'status']
  * constraint belongs to this card, not to the data.
  */
 const OVERVIEW_CHANNELS: Channel[] = ['voice', 'sms']
-
-const CHANNEL_LABELS: Record<Channel, string> = {
-  voice: 'Voice',
-  sms: 'SMS',
-  web: 'Web',
-  other: 'Other',
-}
 
 /** The pill carries the short status; the hero says what it means for callers. */
 const STATE_SENTENCE: Record<ConciergeState, string> = {

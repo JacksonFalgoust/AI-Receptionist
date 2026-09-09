@@ -1,3 +1,4 @@
+import type { ActivityStatus } from '@/types/activity'
 import type { ConciergeState, FeatureStatus } from '@/types/concierge'
 import type { EscalationStatus } from '@/types/conversation'
 import type { IntegrationStatus } from '@/types/integration'
@@ -34,6 +35,7 @@ export type KnownStatus =
   | WorkflowStatus
   | ConciergeState
   | ChannelHealth
+  | ActivityStatus
 
 const STATUS_TONE: Record<KnownStatus, ToneInfo> = {
   enabled: { tone: 'success', label: 'Enabled' },
@@ -61,6 +63,11 @@ const STATUS_TONE: Record<KnownStatus, ToneInfo> = {
   ok: { tone: 'success', label: 'Operational' },
   degraded: { tone: 'warning', label: 'Degraded' },
   down: { tone: 'danger', label: 'Down' },
+  // ActivityStatus. 'error' is shared with FeatureStatus/KnowledgeStatus above.
+  success: { tone: 'success', label: 'Success' },
+  info: { tone: 'info', label: 'Info' },
+  escalated: { tone: 'danger', label: 'Escalated' },
+  pending: { tone: 'warning', label: 'Pending' },
 }
 
 export function statusTone(status: KnownStatus): ToneInfo {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import type { ActivityStatus } from '@/types/activity'
 import type { ConciergeState, FeatureStatus } from '@/types/concierge'
 import type { EscalationStatus } from '@/types/conversation'
 import type { IntegrationStatus } from '@/types/integration'
@@ -41,6 +42,7 @@ const CONCIERGE_STATES: ConciergeState[] = [
   'connection_issue',
 ]
 const CHANNEL_HEALTHS = ['ok', 'degraded', 'down'] as const
+const ACTIVITY_STATUSES: ActivityStatus[] = ['success', 'error', 'info', 'escalated', 'pending']
 
 const ALL_STATUSES = [
   ...FEATURE_STATUSES,
@@ -51,6 +53,7 @@ const ALL_STATUSES = [
   ...WORKFLOW_STATUSES,
   ...CONCIERGE_STATES,
   ...CHANNEL_HEALTHS,
+  ...ACTIVITY_STATUSES,
 ]
 
 describe('statusTone', () => {
@@ -64,6 +67,13 @@ describe('statusTone', () => {
     expect(statusTone('setup_required').label).toBe('Setup required')
     expect(statusTone('in_progress').label).toBe('In progress')
     expect(statusTone('not_connected').label).toBe('Not connected')
+  })
+
+  it('labels an activity outcome as the outcome, not as a workflow state', () => {
+    expect(statusTone('success')).toEqual({ tone: 'success', label: 'Success' })
+    expect(statusTone('escalated')).toEqual({ tone: 'danger', label: 'Escalated' })
+    expect(statusTone('pending')).toEqual({ tone: 'warning', label: 'Pending' })
+    expect(statusTone('info')).toEqual({ tone: 'info', label: 'Info' })
   })
 
   it('exposes a Tailwind class string for every tone', () => {

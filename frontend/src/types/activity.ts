@@ -1,6 +1,13 @@
 import type { Id, IsoDateTime, TenantScoped } from './common'
 import type { Channel } from './conversation'
 
+/**
+ * Outcome of a single activity item. Deliberately its own vocabulary rather
+ * than reusing a workflow or escalation status: an activity records what
+ * happened, not what state something is in.
+ */
+export type ActivityStatus = 'success' | 'error' | 'info' | 'escalated' | 'pending'
+
 /** A row in the Overview "Recent Activity" feed (USER_STORIES US-2.4). */
 export interface ActivityEvent extends TenantScoped {
   id: Id
@@ -10,7 +17,7 @@ export interface ActivityEvent extends TenantScoped {
   customerRef?: string
   channel?: Channel
   system?: string
-  status: 'success' | 'error' | 'info' | 'escalated' | 'pending'
+  status: ActivityStatus
   conversationId?: Id
 }
 

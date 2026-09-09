@@ -5,18 +5,11 @@ import { Dropdown } from '@/components/ui/Dropdown'
 import { QueryBoundary } from '@/components/ui/QueryBoundary'
 import { StatusPill } from '@/components/ui/StatusPill'
 import { cn } from '@/lib/cn'
+import { CHANNEL_LABELS } from '@/lib/channelLabels'
 import { relativeTime } from '@/lib/formatDate'
 import { statusTone, TONE_CLASSES } from '@/lib/statusTone'
 import { paths } from '@/routes/paths'
 import { conciergeService } from '@/services/conciergeService'
-import type { Channel } from '@/types'
-
-const CHANNEL_LABELS: Record<Channel, string> = {
-  voice: 'Voice',
-  sms: 'SMS',
-  web: 'Web',
-  other: 'Other',
-}
 
 /**
  * PRD §6.2: clicking the header status opens a panel showing the current
