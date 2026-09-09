@@ -31,6 +31,10 @@ export interface CreateKnowledgeInput {
   tags?: string[]
   effectiveDate?: string
   expirationDate?: string
+  /** Defaults to 'active'. The editor sets this explicitly — e.g. 'processing' for a fresh document upload. */
+  status?: KnowledgeStatus
+  /** Defaults to 'Manual entry'. The editor sets this for a url (the address) or a document (the filename). */
+  source?: string
 }
 
 export type KnowledgePatch = Partial<
@@ -98,8 +102,8 @@ const mockKnowledgeService: KnowledgeService = {
       organizationId: MOCK_ORGANIZATION_ID,
       title: input.title,
       type: input.type,
-      status: 'active',
-      source: 'Manual entry',
+      status: input.status ?? 'active',
+      source: input.source ?? 'Manual entry',
       category: input.category,
       content: input.content,
       tags: input.tags ?? [],
