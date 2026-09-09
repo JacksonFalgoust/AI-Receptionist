@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 import { AuthProvider } from '@/features/auth/AuthProvider'
 import { MOCK_PASSWORD } from '@/mocks/session'
+import { seedSession } from '@/test/renderWithProviders'
 
 import { AppRoutes } from './AppRoutes'
 
@@ -74,5 +75,29 @@ describe('application routing', () => {
     expect(screen.queryByRole('link', { name: 'Users & Roles' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Billing' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Analytics' })).toBeInTheDocument()
+  })
+
+  it('resolves the knowledge editor routes C1 links to', async () => {
+    // US-5.1's add actions and row Edit links point at these two routes. They
+    // render US-5.2's editor once C2 lands; until then a stub, so the links
+    // are real navigation rather than dead buttons.
+    seedSession()
+
+    renderApp('/concierge/knowledge/new')
+    expect(await screen.findByRole('heading', { name: 'Add knowledge' })).toBeInTheDocument()
+
+    renderApp('/concierge/knowledge/kn_0001')
+    expect(await screen.findByRole('heading', { name: 'Edit knowledge' })).toBeInTheDocument()
+  })
+
+  it('guards the knowledge editor with the same permission as the library', async () => {
+    seedSession('analyst@horizonpartners.example.com')
+
+    renderApp('/concierge/knowledge/new')
+
+    // An analyst has no manage:knowledge — the guard must send them away
+    // rather than render the editor.
+    expect(await screen.findByRole('heading', { name: 'Overview' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Add knowledge' })).not.toBeInTheDocument()
   })
 })

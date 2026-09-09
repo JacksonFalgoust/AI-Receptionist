@@ -86,14 +86,13 @@ describe('ConversationsPage', () => {
   it('recovers from a bookmarked page beyond the result set instead of claiming the list is empty', async () => {
     renderWithProviders(<ConversationsPage />, { route: '/conversations?page=99' })
 
-    // 70 conversations exist; page 99 does not, but this must never read as
-    // "no conversations yet" — that's a lie with 70 real rows behind it.
-    expect(await screen.findByRole('navigation')).toBeInTheDocument()
+    // 70 conversations exist; page 99 does not. This must never read as "no
+    // conversations yet" — a lie with 70 real rows behind it — and must not
+    // strand the reader on an empty table 96 Previous clicks from data.
+    expect(await screen.findByText('Page 3 of 3 · 70 total')).toBeInTheDocument()
+    expect(screen.getAllByRole('row').length).toBeGreaterThan(1)
     expect(screen.queryByText('No conversations yet')).not.toBeInTheDocument()
     expect(screen.queryByText(/No conversations match/)).not.toBeInTheDocument()
-
-    const previous = screen.getByRole('button', { name: /previous/i })
-    expect(previous).toBeEnabled()
   })
 
   it('returns to the first page when a filter changes', async () => {

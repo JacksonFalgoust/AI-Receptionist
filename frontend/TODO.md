@@ -43,6 +43,7 @@ one only depends on things above it.
 - [x] **Conversations list** (B6, US-3.1) — eight columns, five-field search, all seven filters (four visible, three behind a disclosure) and pagination, with filter state in the URL so a query can be bookmarked and shared. `Conversation` gained `escalationStatus`, `ConversationOutcome` joined `KnownStatus`, and the escalation seed was realigned onto conversations that actually escalated
 - [x] **Conversation detail** (B7, US-3.2) — summary strip, AI summary in business language, transcript across all three speakers, and an action timeline whose system details expand behind a native disclosure. `Timeline` gained an optional `details` slot; a fixture test guards PRD §47 where it can actually be enforced
 - [x] **Analytics** (B8, US-4.1) — the three allowed KPIs and the Top customer intents table, scoped by `DateScope` and defaulting to 30 days. `Kpi.format` was declared but never implemented, so a rate would have read "20" and a duration "303"; `formatKpi` now backs both this row and Overview's. No chart: US-4.1, the prototype and PRD §12.2 all stop short of requiring one
+- [x] **Knowledge library** (C1, US-5.1) — the six PRD §16.2 columns, search, and type/status filters over the whole library, with filter state in the URL so "everything that needs review" is a shareable link. All six PRD §16.3 add actions ship under one trigger, five seeding the editor's type and "Add business information" leaving it open, since six actions cannot preselect ten types. Both filters list every domain value rather than the prototype's shortened set, which left six seeded types unreachable. The add and Edit links resolve to US-5.2's editor route, a stub until C2 — the same order B6 and B7 took. `EmptyState` gained an optional `href` so a CTA that navigates is a link; the seed grew to 34 items so pagination has a second page to reach
 
 ---
 
@@ -52,17 +53,14 @@ one only depends on things above it.
 
 ## Phase C — Concierge administration
 
-### C1. Knowledge library (US-5.1)
-Table: Name, Type, Status, Source, Updated, Actions. Statuses: Active,
-Processing, Needs Review, Error, Disabled. Search + type/status filters. Add
-actions (Create FAQ, Add text, Upload document, Add URL, Create policy, Add
-business information) — a subset may ship with a clear CTA for the rest. Empty
-state: "Give Concierge something to work with".
-
 ### C2. Knowledge editor (US-5.2)
 Fields: Title, Category, Content, Tags, Active/inactive, Effective date,
 Expiration date. Validation on required fields. Save toast. Delete behind
 `useConfirm()`.
+- Replaces the stub at `src/pages/KnowledgeEditorPage.tsx`; the routes
+  (`paths.knowledgeNew`, `paths.knowledgeItem`) and the `?type=` seed C1's add
+  actions pass already exist. `type` absent means "let them pick" — that is the
+  only route to procedure, product, service, pricing and location.
 
 ### C3. Configuration — business profile (US-6.1)
 Name, description, phone, website, timezone, address, locations, business

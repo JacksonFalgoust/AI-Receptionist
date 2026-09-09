@@ -15,6 +15,8 @@ export const paths = {
   analytics: '/analytics',
 
   knowledge: '/concierge/knowledge',
+  knowledgeNew: '/concierge/knowledge/new',
+  knowledgeItem: (id = ':id') => `/concierge/knowledge/${id}`,
   configuration: '/concierge/configuration',
   features: '/concierge/features',
   workflows: '/concierge/workflows',
