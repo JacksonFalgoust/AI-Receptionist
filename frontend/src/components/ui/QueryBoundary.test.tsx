@@ -54,6 +54,14 @@ describe('QueryBoundary', () => {
     expect(container.querySelectorAll('[data-skeleton-row]')).toHaveLength(5)
   })
 
+  it('renders a custom loading node instead of the default skeleton', () => {
+    renderBoundary(result({ isPending: true }), {
+      loading: <p>Loading key metrics</p>,
+    })
+    expect(screen.getByText('Loading key metrics')).toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: 'Loading' })).not.toBeInTheDocument()
+  })
+
   it('renders an error state with a retry bound to refetch', async () => {
     const user = userEvent.setup()
     const refetch = vi.fn()
