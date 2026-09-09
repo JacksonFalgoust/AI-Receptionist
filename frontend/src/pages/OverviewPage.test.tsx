@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 
 import { resetStore } from '@/mocks/store'
 import { renderWithProviders, seedSession } from '@/test/renderWithProviders'
@@ -31,5 +31,14 @@ describe('OverviewPage', () => {
 
     expect(screen.getByRole('heading', { name: 'Concierge Status' })).toBeInTheDocument()
     expect(await screen.findByText('Active and responding')).toBeInTheDocument()
+  })
+
+  it('pairs the status card with the recent activity feed', async () => {
+    renderWithProviders(<OverviewPage />)
+
+    const paired = screen.getByRole('region', { name: 'Status and recent activity' })
+    expect(within(paired).getByRole('heading', { name: 'Concierge Status' })).toBeInTheDocument()
+    expect(within(paired).getByRole('heading', { name: 'Recent Activity' })).toBeInTheDocument()
+    expect(await within(paired).findByText('Appointment booked')).toBeInTheDocument()
   })
 })
