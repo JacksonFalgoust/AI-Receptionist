@@ -142,3 +142,19 @@ describe('conversationService.listFilterOptions', () => {
     }
   })
 })
+
+describe('conversation action details', () => {
+  it('never seeds a credential into a system-details payload (PRD §47)', async () => {
+    // US-3.2 exposes `details` verbatim on the detail screen. The guarantee has
+    // to hold in the data, not in a render-time filter — by the time a secret
+    // reaches the client it has already leaked.
+    const FORBIDDEN = /pass(word)?|token|secret|api[-_]?key|authorization|credential/i
+
+    for (const action of store.conversationActions) {
+      for (const [key, value] of Object.entries(action.details ?? {})) {
+        expect(key, `key on ${action.id}`).not.toMatch(FORBIDDEN)
+        expect(value, `value on ${action.id}`).not.toMatch(FORBIDDEN)
+      }
+    }
+  })
+})
