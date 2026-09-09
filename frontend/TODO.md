@@ -31,44 +31,10 @@ one only depends on things above it.
 - [x] **Layout & display primitives** (A2, US-0.2) — `Panel`/`PanelHeader`, `PageHeader`, `SectionHeader`, `StatusPill`, `Badge`, `Avatar`, `Alert`, `Breadcrumb`, `Tabs`
 - [x] **Overlay primitives + providers** (A3, US-0.2, US-14.2) — `Modal`, `Drawer`, `Dropdown`, `Tooltip`, `Toast`/`ToastProvider`, `ConfirmDialog`/`useConfirm`; both providers mounted in `App.tsx`
 - [x] **Data-display primitives** (A4, US-0.2) — `Table` (on `@tanstack/react-table` v9), `Pagination`, `SearchInput`, `FilterBar`, `EmptyState`, `Skeleton`, `KpiCard`, `Timeline`, `ActivityFeed`, `ChatBubble`
-
----
-
-## Phase A — Foundation
-
-Everything here is shared infrastructure. Building screens before it means
-duplicating markup that has to be torn out later (PRD §53.4).
-
-### A5. Async-state boundary (US-0.3, PRD §39)
-A `QueryBoundary` component (or hook) that renders Loading → Empty → Error →
-Success from a TanStack Query result, using A4's `Skeleton`/`EmptyState` and an
-`ErrorState` built from `AppError.title`/`.description`/`.actions`.
-- Handles the `unauthorized` kind by redirecting to `/login` with a session-expired message (US-0.4).
-- Every data view in Phases B–E goes through this. Nothing hand-rolls loading markup.
-
-### A6. Service modules + mock data (US-0.3)
-One module per domain in `src/services/`, each following the `authService`
-pattern (interface → mock impl → HTTP impl → `USE_MOCKS` export):
-`dashboardService`, `conversationService`, `analyticsService`,
-`conciergeService`, `featureService`, `workflowService`, `knowledgeService`,
-`integrationService`, `routingService`, `userService`, `billingService`.
-- Realistic Horizon Partners sample data in `src/mocks/`, industry-neutral (PRD §53.9).
-- Mock reads honour filters/pagination so list UIs are exercised properly.
-- Mock writes mutate an in-memory store, so save/publish round-trips visibly work.
-- **No presentational component imports from `src/mocks/`** (PRD §38).
-
-### A7. Header panels (US-0.1, PRD §6.2)
-Wire the four header controls that currently render but do nothing:
-organization selector, Concierge status panel (state, channels, recent issues,
-last configuration change), notification center, user menu (profile, settings,
-logout).
-- Logout calls `useAuth().signOut()` and returns to `/login`.
-- Notification list comes from a service, not hard-coded.
-
-### A8. Forgot password (US-1.2)
-Replace the `ForgotPasswordPage` placeholder.
-- States: default, processing, success, error. Success copy must not reveal whether the account exists.
-- Link back to sign in.
+- [x] **Async-state boundary** (A5, US-0.3, PRD §39) — `QueryBoundary` + `ErrorState`; session expiry routes a 401 from any query or mutation back to `/login` with a message
+- [x] **Service modules + mock data** (A6, US-0.3) — thirteen services (the eleven listed, plus `notificationService` and `organizationService`, both needed by A7) over a fixtures/store/query mock stack in `src/mocks/`; reads honour filters and pagination, writes mutate an in-memory store, no presentational component imports `src/mocks/` (PRD §38)
+- [x] **Header panels** (A7, US-0.1, PRD §6.2) — organization selector, Concierge status panel, notification centre, user menu; `Topbar` is composition-only
+- [x] **Forgot password** (A8, US-1.2) — default, processing, success, and error states; success copy does not reveal whether the account exists
 
 ---
 

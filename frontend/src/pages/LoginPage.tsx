@@ -25,6 +25,16 @@ export function LoginPage() {
   const location = useLocation()
   const [formError, setFormError] = useState<string | null>(null)
 
+  const locationState = location.state as
+    | { from?: { pathname?: string }; sessionExpired?: boolean }
+    | null
+
+  // Nav state rather than auth context: it is per-navigation, so browsing back
+  // to /login later never shows a stale expiry notice.
+  const notice = locationState?.sessionExpired
+    ? 'Your session has expired. Sign in again to continue.'
+    : null
+
   const {
     register,
     handleSubmit,
@@ -40,8 +50,7 @@ export function LoginPage() {
     try {
       await signIn(values.email, values.password)
       // Return the user to whatever they were trying to reach.
-      const from = (location.state as { from?: Location } | null)?.from
-      navigate(from?.pathname ?? paths.overview, { replace: true })
+      navigate(locationState?.from?.pathname ?? paths.overview, { replace: true })
     } catch (error) {
       setFormError(toAppError(error).description)
     }
@@ -63,12 +72,12 @@ export function LoginPage() {
           noValidate
           className="rounded-lg border border-border bg-surface p-6 shadow-sm"
         >
-          {formError ? (
+          {formError ?? notice ? (
             <p
               role="alert"
               className="mb-4 rounded-sm bg-danger-soft px-3 py-2 text-sm text-danger"
             >
-              {formError}
+              {formError ?? notice}
             </p>
           ) : null}
 

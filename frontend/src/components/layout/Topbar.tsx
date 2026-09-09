@@ -1,25 +1,17 @@
-import { Bell, ChevronDown, Menu, Play } from 'lucide-react'
+import { Menu, Play } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { useAuth } from '@/features/auth/useAuth'
 import { paths } from '@/routes/paths'
 
-function initials(name: string): string {
-  return name
-    .split(' ')
-    .map((part) => part[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase()
-}
+import { ConciergeStatusPanel } from './header/ConciergeStatusPanel'
+import { NotificationCenter } from './header/NotificationCenter'
+import { OrganizationMenu } from './header/OrganizationMenu'
+import { UserMenu } from './header/UserMenu'
 
 /**
- * Application header (PRD §6.2).
- *
- * Scaffold state: the organization selector, status badge, and notification
- * bell render but do not yet open their panels — those are separate TODO
- * items. Each is a real control with an accessible name so keyboard and
- * screen-reader behaviour is correct from the start.
+ * Application header (PRD §6.2). Composition only — each of the four controls
+ * owns its own data and open/close behaviour, so this file stays layout.
  */
 export function Topbar({ onOpenNav }: { onOpenNav: () => void }) {
   const { user } = useAuth()
@@ -37,25 +29,8 @@ export function Topbar({ onOpenNav }: { onOpenNav: () => void }) {
           <Menu className="size-[18px]" aria-hidden="true" />
         </button>
 
-        <button
-          type="button"
-          className="flex items-center gap-2 rounded-sm border border-border px-3 py-1.5 text-sm font-semibold hover:bg-canvas"
-          aria-label={`Organization: ${user.organizationName}`}
-        >
-          <span className="size-2 rounded-full bg-brand" aria-hidden="true" />
-          {user.organizationName}
-          <ChevronDown className="size-3.5 text-ink-muted" aria-hidden="true" />
-        </button>
-
-        {/* PRD §31: status is conveyed by the text label, not the dot alone. */}
-        <button
-          type="button"
-          className="hidden items-center gap-2 rounded-full bg-success-soft px-3 py-1.5 text-xs font-semibold text-success sm:flex"
-          aria-label="Concierge status: Active"
-        >
-          <span className="size-2 rounded-full bg-success" aria-hidden="true" />
-          Concierge Active
-        </button>
+        <OrganizationMenu />
+        <ConciergeStatusPanel />
       </div>
 
       <div className="flex items-center gap-2">
@@ -67,24 +42,8 @@ export function Topbar({ onOpenNav }: { onOpenNav: () => void }) {
           <span className="hidden sm:inline">Test Concierge</span>
         </Link>
 
-        <button
-          type="button"
-          className="relative grid size-9 place-items-center rounded-sm border border-border text-ink-secondary hover:bg-canvas"
-          aria-label="Notifications, 3 unread"
-        >
-          <Bell className="size-[18px]" strokeWidth={1.8} aria-hidden="true" />
-          <span className="absolute -top-1 -right-1 grid size-4 place-items-center rounded-full bg-danger text-[0.6rem] font-bold text-ink-inverse">
-            3
-          </span>
-        </button>
-
-        <button
-          type="button"
-          className="grid size-9 place-items-center rounded-full bg-brand-soft text-xs font-bold text-brand-ink"
-          aria-label={`Account for ${user.name}`}
-        >
-          {initials(user.name)}
-        </button>
+        <NotificationCenter />
+        <UserMenu />
       </div>
     </header>
   )

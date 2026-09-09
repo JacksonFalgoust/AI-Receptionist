@@ -13,9 +13,10 @@ export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
 /**
  * Artificial delay on mock responses. Without it, loading skeletons never
- * render during development and we ship untested loading states.
+ * render during development and we ship untested loading states. Zeroed under
+ * Vitest, where it would only add dead time to every service test.
  */
-export const MOCK_LATENCY_MS = 400
+export const MOCK_LATENCY_MS = import.meta.env.MODE === 'test' ? 0 : 400
 
 export function delay(ms: number = MOCK_LATENCY_MS): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
