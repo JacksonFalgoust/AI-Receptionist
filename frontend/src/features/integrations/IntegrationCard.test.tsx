@@ -1,66 +1,198 @@
-import { describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 
+import { ACCOUNT_LABEL_FIELD, integrationAuthFields } from '@/lib/integrationAuthFields'
+import { resetStore, store } from '@/mocks/store'
+import { AppError } from '@/services/errors'
+import { integrationService } from '@/services/integrationService'
+import { renderWithProviders, seedSession } from '@/test/renderWithProviders'
 import type { Integration } from '@/types'
 
 import { IntegrationCard } from './IntegrationCard'
 
-function buildIntegration(overrides: Partial<Integration> = {}): Integration {
+function integrationWith(overrides: Partial<Integration>): Integration {
   return {
     id: 'int_test',
     organizationId: 'org_test',
-    name: 'Horizon CRM',
-    category: 'crm',
-    status: 'connected',
-    features: [],
+    name: 'StockSync',
+    category: 'inventory',
+    status: 'not_connected',
+    features: ['Inventory Lookup'],
     ...overrides,
   }
 }
 
-describe('IntegrationCard', () => {
-  it('shows the name, category, and status', () => {
-    render(<IntegrationCard integration={buildIntegration()} />)
-    expect(screen.getByRole('heading', { name: 'Horizon CRM' })).toBeInTheDocument()
-    expect(screen.getByText('CRM')).toBeInTheDocument()
-    expect(screen.getByText('Connected')).toBeInTheDocument()
+/**
+ * Fills whatever the integration's category actually asks for. Reading the
+ * field map rather than hard-coding labels keeps these cases working against
+ * any seed entry — the not-connected seed's category is not fixed by this
+ * test, and a category change should not break it.
+ */
+async function fillRequiredFields(
+  user: ReturnType<typeof userEvent.setup>,
+  integration: Integration,
+  value: string,
+) {
+  await user.type(screen.getByLabelText(ACCOUNT_LABEL_FIELD.label), 'ops@horizonpartners.example.com')
+  for (const field of integrationAuthFields(integration.category)) {
+    if (field.required) await user.type(screen.getByLabelText(field.label), value)
+  }
+}
+
+describe('IntegrationCard actions', () => {
+  beforeEach(() => {
+    resetStore()
+    seedSession()
   })
 
-  it('shows last activity as a relative time when present', () => {
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
-    render(<IntegrationCard integration={buildIntegration({ lastActivityAt: fiveMinutesAgo })} />)
-    expect(screen.getByText(/5 minutes ago/)).toBeInTheDocument()
+  it('offers the action each status calls for', () => {
+    const cases: [Integration['status'], string][] = [
+      ['not_connected', 'Connect'],
+      ['setup_required', 'Continue setup'],
+      ['connection_error', 'Repair connection'],
+      ['authentication_expired', 'Reconnect'],
+    ]
+    for (const [status, label] of cases) {
+      const { unmount } = renderWithProviders(
+        <IntegrationCard integration={integrationWith({ status })} />,
+      )
+      expect(screen.getByRole('button', { name: label })).toBeInTheDocument()
+      unmount()
+    }
   })
 
-  it('falls back to "No activity yet" when there is no last activity', () => {
-    render(<IntegrationCard integration={buildIntegration({ lastActivityAt: undefined })} />)
-    expect(screen.getByText(/No activity yet/)).toBeInTheDocument()
+  it('offers only Disconnect on a working connection', () => {
+    renderWithProviders(
+      <IntegrationCard integration={integrationWith({ status: 'connected' })} />,
+    )
+    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument()
   })
 
-  it('shows the connected account when present', () => {
-    render(
+  it('offers no disconnect for a connection that was never made', () => {
+    renderWithProviders(
+      <IntegrationCard integration={integrationWith({ status: 'not_connected' })} />,
+    )
+    expect(screen.queryByRole('button', { name: 'Disconnect' })).not.toBeInTheDocument()
+  })
+
+  it('connects through the service and reports it', async () => {
+    const user = userEvent.setup()
+    const seeded = store.integrations.find((item) => item.status === 'not_connected')!
+    renderWithProviders(<IntegrationCard integration={seeded} />)
+
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+    await fillRequiredFields(user, seeded, 'value-123')
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+
+    // This isolated render never gets a fresh `integration` prop after the
+    // mutation (only the query cache is patched), so its `StatusPill` stays
+    // on its initial "Not connected" render — which itself satisfies a case
+    // insensitive /connected/i match. The toast is the only thing here that
+    // genuinely renders only on success.
+    expect(await screen.findByText(`${seeded.name} is set up and ready.`)).toBeInTheDocument()
+    expect(store.integrations.find((item) => item.id === seeded.id)?.status).toBe('connected')
+  })
+
+  it('never lets a submitted secret reach the store (PRD §17.3, §47)', async () => {
+    const user = userEvent.setup()
+    const seeded = store.integrations.find((item) => item.status === 'not_connected')!
+    const SECRET = 'super-secret-value-do-not-store'
+    renderWithProviders(<IntegrationCard integration={seeded} />)
+
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+    await fillRequiredFields(user, seeded, SECRET)
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+
+    await screen.findByText(/connected/i)
+    expect(JSON.stringify(store.integrations)).not.toContain(SECRET)
+  })
+
+  it('keeps the dialog open and explains a failure', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(integrationService, 'connect').mockRejectedValueOnce(
+      new AppError({
+        kind: 'server',
+        title: 'Could not reach StockSync',
+        description: 'The address was refused.',
+      }),
+    )
+    renderWithProviders(
+      <IntegrationCard integration={integrationWith({ status: 'not_connected' })} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+    await user.type(screen.getByLabelText('Account name'), 'ops@horizonpartners.example.com')
+    await user.type(screen.getByLabelText('Warehouse ID'), 'wh-1')
+    await user.type(screen.getByLabelText('API key'), 'sk-1')
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+
+    expect(await screen.findByText('Could not reach StockSync')).toBeInTheDocument()
+    expect(screen.getByLabelText('Account name')).toBeInTheDocument()
+    vi.restoreAllMocks()
+  })
+
+  it('names what stops working before disconnecting', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(
       <IntegrationCard
-        integration={buildIntegration({ connectedAccount: 'ops@horizonpartners.example.com' })}
+        integration={integrationWith({ status: 'connected', features: ['Inventory Lookup'] })}
       />,
     )
-    expect(screen.getByText(/ops@horizonpartners.example.com/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Disconnect' }))
+
+    expect(await screen.findByText(/Inventory Lookup/)).toBeInTheDocument()
   })
 
-  it('does not show a connected-account line when there is none', () => {
-    render(<IntegrationCard integration={buildIntegration({ connectedAccount: undefined })} />)
-    expect(screen.queryByText(/Account:/)).not.toBeInTheDocument()
-  })
-
-  it('lists the features using the connection', () => {
-    render(
-      <IntegrationCard
-        integration={buildIntegration({ features: ['Customer Lookup', 'Human Escalation'] })}
-      />,
+  it('does not disconnect when the confirmation is declined', async () => {
+    const user = userEvent.setup()
+    const disconnect = vi.spyOn(integrationService, 'disconnect')
+    renderWithProviders(
+      <IntegrationCard integration={integrationWith({ status: 'connected' })} />,
     )
-    expect(screen.getByText(/Customer Lookup, Human Escalation/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Disconnect' }))
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }))
+
+    expect(disconnect).not.toHaveBeenCalled()
+    vi.restoreAllMocks()
   })
 
-  it('says when no feature uses the connection yet', () => {
-    render(<IntegrationCard integration={buildIntegration({ features: [] })} />)
-    expect(screen.getByText(/Not used by any feature yet/)).toBeInTheDocument()
+  it('shows exactly one Disconnect control while its own confirmation is open, and returns focus once it closes', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(
+      <IntegrationCard integration={integrationWith({ status: 'connected' })} />,
+    )
+
+    const trigger = screen.getByRole('button', { name: 'Disconnect' })
+    await user.click(trigger)
+
+    // The same collision class as Connect vs. its modal's submit button:
+    // `useConfirm()`'s own confirm button is also labelled "Disconnect"
+    // (`confirmLabel: 'Disconnect'`), so the card's trigger must not still
+    // be visible to the accessibility tree alongside it.
+    expect(screen.getAllByRole('button', { name: 'Disconnect' })).toHaveLength(1)
+
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }))
+
+    // `useFocusTrap` restores focus to whatever was active when the dialog
+    // opened — the trigger, in this case — which only works if that DOM node
+    // stayed mounted (hidden via aria-hidden, not unmounted) the whole time.
+    expect(trigger).toHaveFocus()
+  })
+
+  it('returns focus to its own trigger after the connect dialog closes', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(
+      <IntegrationCard integration={integrationWith({ status: 'not_connected' })} />,
+    )
+
+    const trigger = screen.getByRole('button', { name: 'Connect' })
+    await user.click(trigger)
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }))
+
+    expect(trigger).toHaveFocus()
   })
 })

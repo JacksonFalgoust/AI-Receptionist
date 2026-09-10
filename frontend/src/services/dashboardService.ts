@@ -21,6 +21,12 @@ export interface DashboardService {
    */
   getRecentActivity(range?: DateRange, limit?: number): Promise<ActivityEvent[]>
   getRecentEscalations(range?: DateRange, limit?: number): Promise<Escalation[]>
+  /**
+   * US-10.1's optional summary stat on the routing page. A count rather than a
+   * capped list: `getRecentEscalations` tops out at its limit, so counting its
+   * result would silently cap the number too.
+   */
+  countEscalations(range?: DateRange): Promise<number>
 }
 
 const DEFAULT_FEED_LIMIT = 8
@@ -87,6 +93,26 @@ const mockDashboardService: DashboardService = {
     )
     return sortByDesc(scoped, (escalation) => escalation.createdAt).slice(0, limit)
   },
+
+  async countEscalations(range) {
+    // Plain `delay()`, not `delay(120)`: every other explicit-latency mock in
+    // this codebase is a mutation a test awaits directly (a toggle click, a
+    // submit), so its delay is absorbed by that await. This is a `useQuery`
+    // that fires on mount alongside `routingService.list()` — nothing in
+    // RoutingPage's tests ever explicitly waits for it to settle, so a real
+    // (non-test-mode) delay here is a background timer that can fire at any
+    // point during a later, unrelated interaction. It intermittently did:
+    // landing mid-`userEvent.click()` on another element, it re-rendered
+    // `RoutingPage` (and, since `RoutingRulesTable` isn't memoized, the row
+    // being clicked) out from under the click, dropping it. `delay()` alone
+    // honours `MOCK_LATENCY_MS`'s test-mode override to 0, matching how
+    // every sibling query in this file already behaves.
+    await delay()
+    const { from, to } = rangeBounds(range)
+    return store.escalations.filter((escalation) =>
+      withinRange(escalation.createdAt, from, to),
+    ).length
+  },
 }
 
 const httpDashboardService: DashboardService = {
@@ -101,6 +127,14 @@ const httpDashboardService: DashboardService = {
   getRecentEscalations: (range, limit = DEFAULT_FEED_LIMIT) =>
     http.get<Escalation[]>(
       `/dashboard/escalations${toQueryString({ limit, preset: range?.preset, from: range?.from, to: range?.to })}`,
+    ),
+  countEscalations: (range) =>
+    http.get<number>(
+      `/dashboard/escalations/count${toQueryString({
+        preset: range?.preset,
+        from: range?.from,
+        to: range?.to,
+      })}`,
     ),
 }
 

@@ -38,10 +38,21 @@ export function renderWithProviders(
   ui: ReactElement,
   { route = '/' }: RenderWithProvidersOptions = {},
 ) {
-  // Retries would turn a deliberate error case into a multi-second timeout.
   const queryClient = new QueryClient({
     defaultOptions: {
-      queries: { retry: false },
+      queries: {
+        // Matches App.tsx's real defaults: staleTime keeps a freshly-loaded
+        // query from being immediately eligible for a background refetch,
+        // and refetchOnWindowFocus stays off since jsdom/CI can dispatch a
+        // spurious window focus event mid-test that App.tsx never has to
+        // handle in production. A refetch replacing `rulesQuery.data` while
+        // a test holds a reference to a row it read earlier is exactly the
+        // kind of test-environment-only noise this is meant to rule out.
+        staleTime: 30_000,
+        refetchOnWindowFocus: false,
+        // Retries would turn a deliberate error case into a multi-second timeout.
+        retry: false,
+      },
       mutations: { retry: false },
     },
   })
