@@ -86,7 +86,12 @@ describe('IntegrationCard actions', () => {
     await fillRequiredFields(user, seeded, 'value-123')
     await user.click(screen.getByRole('button', { name: 'Connect' }))
 
-    expect(await screen.findByText(/connected/i)).toBeInTheDocument()
+    // This isolated render never gets a fresh `integration` prop after the
+    // mutation (only the query cache is patched), so its `StatusPill` stays
+    // on its initial "Not connected" render — which itself satisfies a case
+    // insensitive /connected/i match. The toast is the only thing here that
+    // genuinely renders only on success.
+    expect(await screen.findByText(`${seeded.name} is set up and ready.`)).toBeInTheDocument()
     expect(store.integrations.find((item) => item.id === seeded.id)?.status).toBe('connected')
   })
 
