@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+
 import { Table } from '@/components/ui/Table'
 import type { TableColumn } from '@/components/ui/Table'
 import {
@@ -11,6 +13,8 @@ import { RuleStatusToggle } from './RuleStatusToggle'
 
 export interface RoutingRulesTableProps {
   rules: RoutingRule[]
+  /** D4's Edit action. Omitted, the table is read-only. */
+  renderRowAction?: (rule: RoutingRule) => ReactNode
 }
 
 /**
@@ -22,7 +26,7 @@ export interface RoutingRulesTableProps {
  * `routingService.list()` already sorts priority-ascending, so rows arrive in
  * the order the rules are actually evaluated.
  */
-export function RoutingRulesTable({ rules }: RoutingRulesTableProps) {
+export function RoutingRulesTable({ rules, renderRowAction }: RoutingRulesTableProps) {
   const columns: TableColumn<RoutingRule>[] = [
     {
       id: 'name',
@@ -77,6 +81,14 @@ export function RoutingRulesTable({ rules }: RoutingRulesTableProps) {
       sortValue: (rule) => (rule.enabled ? 'Active' : 'Inactive'),
     },
   ]
+
+  if (renderRowAction) {
+    columns.push({
+      id: 'actions',
+      header: '',
+      render: (rule) => renderRowAction(rule),
+    })
+  }
 
   return <Table columns={columns} rows={rules} getRowId={(rule) => rule.id} frame={false} />
 }

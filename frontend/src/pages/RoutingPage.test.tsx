@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 
 import { resetStore, store } from '@/mocks/store'
 import { AppError } from '@/services/errors'
@@ -63,5 +64,55 @@ describe('RoutingPage', () => {
     renderWithProviders(<RoutingPage />)
     expect(await screen.findByText('Could not load routing rules')).toBeInTheDocument()
     vi.restoreAllMocks()
+  })
+
+  it('adds a rule from the page header', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<RoutingPage />)
+    await screen.findByText('Client asks for a person')
+
+    await user.click(screen.getByRole('button', { name: 'Add rule' }))
+
+    expect(await screen.findByRole('heading', { name: 'Add rule' })).toBeInTheDocument()
+  })
+
+  it('starts a new rule after the rules that already exist', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<RoutingPage />)
+    await screen.findByText('Client asks for a person')
+
+    await user.click(screen.getByRole('button', { name: 'Add rule' }))
+
+    expect(await screen.findByLabelText('Priority')).toHaveValue(
+      store.routingRules.length + 1,
+    )
+  })
+
+  it('opens an existing rule for editing', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<RoutingPage />)
+    await screen.findByText('Client asks for a person')
+
+    const row = screen.getByRole('row', { name: /Client asks for a person/ })
+    await user.click(within(row).getByRole('button', { name: 'Edit' }))
+
+    expect(await screen.findByRole('heading', { name: 'Edit rule' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Rule name')).toHaveValue('Client asks for a person')
+  })
+
+  it('offers a first rule from the empty state', async () => {
+    const user = userEvent.setup()
+    store.routingRules = []
+    renderWithProviders(<RoutingPage />)
+    await screen.findByText('Create your first routing rule')
+
+    // Two buttons carry this label once the catalog is empty — the page
+    // header's and the empty state's CTA. The empty state's is the one under
+    // test, and it renders last.
+    const addButtons = screen.getAllByRole('button', { name: 'Add rule' })
+    expect(addButtons).toHaveLength(2)
+    await user.click(addButtons[addButtons.length - 1])
+
+    expect(await screen.findByRole('heading', { name: 'Add rule' })).toBeInTheDocument()
   })
 })

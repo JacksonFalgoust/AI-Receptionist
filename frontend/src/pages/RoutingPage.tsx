@@ -1,13 +1,17 @@
 import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 
+import { Button } from '@/components/ui/Button'
 import { KpiCard } from '@/components/ui/KpiCard'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Panel } from '@/components/ui/Panel'
 import { QueryBoundary } from '@/components/ui/QueryBoundary'
+import { RoutingRuleModal } from '@/features/routing/RoutingRuleModal'
 import { RoutingRulesTable } from '@/features/routing/RoutingRulesTable'
 import { ROUTING_RULES_KEY } from '@/features/routing/RuleStatusToggle'
 import { dashboardService } from '@/services/dashboardService'
 import { routingService } from '@/services/routingService'
+import type { RoutingRule } from '@/types'
 
 /**
  * US-10.1 / PRD §18. Two summary stats rather than the prototype's three:
@@ -30,11 +34,23 @@ export function RoutingPage() {
   // it moves the instant a row's toggle patches the cache.
   const activeRules = (rulesQuery.data ?? []).filter((rule) => rule.enabled).length
 
+  const [isCreating, setCreating] = useState(false)
+  const [editingRule, setEditingRule] = useState<RoutingRule | null>(null)
+
+  const rules = rulesQuery.data ?? []
+  const isModalOpen = isCreating || editingRule !== null
+
+  function closeModal() {
+    setCreating(false)
+    setEditingRule(null)
+  }
+
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Escalation & Routing"
         description="Control when and how Concierge hands a customer to a person."
+        actions={<Button onClick={() => setCreating(true)}>Add rule</Button>}
       />
 
       {/* Rendered above the boundary so the page keeps its shape while the
@@ -51,16 +67,35 @@ export function RoutingPage() {
         <QueryBoundary
           query={rulesQuery}
           skeletonRows={6}
-          isEmpty={(rules) => rules.length === 0}
+          isEmpty={(loaded) => loaded.length === 0}
           empty={{
             title: 'Create your first routing rule',
             description:
               'Rules decide when Concierge hands a conversation to a person, and who receives it.',
+            action: { label: 'Add rule', onClick: () => setCreating(true) },
           }}
         >
-          {(rules) => <RoutingRulesTable rules={rules} />}
+          {(loaded) => (
+            <RoutingRulesTable
+              rules={loaded}
+              renderRowAction={(rule) => (
+                <Button variant="ghost" size="sm" onClick={() => setEditingRule(rule)}>
+                  Edit
+                </Button>
+              )}
+            />
+          )}
         </QueryBoundary>
       </Panel>
+
+      <RoutingRuleModal
+        isOpen={isModalOpen}
+        onClose={closeModal}
+        rule={editingRule ?? undefined}
+        // A new rule lands after the rules that already exist rather than
+        // colliding with the top of the evaluation order.
+        defaultPriority={rules.length + 1}
+      />
     </div>
   )
 }
