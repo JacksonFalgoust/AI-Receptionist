@@ -6,6 +6,7 @@ import { resetStore, store } from '@/mocks/store'
 import { AppError } from '@/services/errors'
 import { routingService } from '@/services/routingService'
 import { renderWithProviders, seedSession } from '@/test/renderWithProviders'
+import type { RoutingRule } from '@/types'
 
 import { RoutingPage } from './RoutingPage'
 
@@ -114,5 +115,34 @@ describe('RoutingPage', () => {
     await user.click(addButtons[addButtons.length - 1])
 
     expect(await screen.findByRole('heading', { name: 'Add rule' })).toBeInTheDocument()
+  })
+
+  it('keeps an in-progress new rule when the rules query settles after the modal opens', async () => {
+    const user = userEvent.setup()
+    let resolveList!: (rules: RoutingRule[]) => void
+    const pending = new Promise<RoutingRule[]>((resolve) => {
+      resolveList = resolve
+    })
+    // Holds the rules query open, so "Add rule" is clicked while
+    // `rulesQuery.data` is still undefined — the exact window in which
+    // `defaultPriority` used to be computed as `0 + 1` and then jump once the
+    // query resolved out from under the still-open modal.
+    vi.spyOn(routingService, 'list').mockReturnValueOnce(pending)
+
+    renderWithProviders(<RoutingPage />)
+
+    await user.click(screen.getByRole('button', { name: 'Add rule' }))
+    expect(await screen.findByRole('heading', { name: 'Add rule' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Priority')).toHaveValue(1)
+
+    await user.type(screen.getByLabelText('Rule name'), 'Drafted while loading')
+
+    // The rules query resolves in the background while the modal is still
+    // open — this must not reset the form the user is mid-way through.
+    resolveList([...store.routingRules].sort((a, b) => a.priority - b.priority))
+    await screen.findByText('Client asks for a person')
+
+    expect(screen.getByLabelText('Rule name')).toHaveValue('Drafted while loading')
+    vi.restoreAllMocks()
   })
 })

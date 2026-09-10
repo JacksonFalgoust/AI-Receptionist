@@ -36,9 +36,23 @@ export function RoutingPage() {
 
   const [isCreating, setCreating] = useState(false)
   const [editingRule, setEditingRule] = useState<RoutingRule | null>(null)
+  // Snapshotted at the moment "Add rule" is clicked, not recomputed on every
+  // render. `defaultPriority={rules.length + 1}` used to be passed straight
+  // through live: if the rules query was still loading when the modal opened
+  // (rules.length === 0) and then resolved while the modal stayed open, the
+  // prop's value would jump, `RoutingRuleModal`'s reset effect would see that
+  // change and fire again, and an in-progress "Add rule" form would be
+  // silently wiped mid-edit. Freezing the value at click time removes the
+  // only thing that could change out from under an open modal.
+  const [pendingPriority, setPendingPriority] = useState(1)
 
   const rules = rulesQuery.data ?? []
   const isModalOpen = isCreating || editingRule !== null
+
+  function openCreateModal() {
+    setPendingPriority(rules.length + 1)
+    setCreating(true)
+  }
 
   function closeModal() {
     setCreating(false)
@@ -50,7 +64,7 @@ export function RoutingPage() {
       <PageHeader
         title="Escalation & Routing"
         description="Control when and how Concierge hands a customer to a person."
-        actions={<Button onClick={() => setCreating(true)}>Add rule</Button>}
+        actions={<Button onClick={openCreateModal}>Add rule</Button>}
       />
 
       {/* Rendered above the boundary so the page keeps its shape while the
@@ -72,7 +86,7 @@ export function RoutingPage() {
             title: 'Create your first routing rule',
             description:
               'Rules decide when Concierge hands a conversation to a person, and who receives it.',
-            action: { label: 'Add rule', onClick: () => setCreating(true) },
+            action: { label: 'Add rule', onClick: openCreateModal },
           }}
         >
           {(loaded) => (
@@ -93,8 +107,10 @@ export function RoutingPage() {
         onClose={closeModal}
         rule={editingRule ?? undefined}
         // A new rule lands after the rules that already exist rather than
-        // colliding with the top of the evaluation order.
-        defaultPriority={rules.length + 1}
+        // colliding with the top of the evaluation order. Snapshotted in
+        // `openCreateModal`, not derived live — see the comment on
+        // `pendingPriority` above.
+        defaultPriority={pendingPriority}
       />
     </div>
   )
