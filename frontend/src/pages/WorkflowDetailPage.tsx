@@ -161,6 +161,17 @@ function WorkflowStepsForm({
     }
   }
 
+  function handleMoveStep(stepId: string, direction: 'up' | 'down') {
+    const current = form.getValues('steps')
+    const index = current.findIndex((step) => step.id === stepId)
+    const swapWith = direction === 'up' ? index - 1 : index + 1
+    if (index === -1 || swapWith < 0 || swapWith >= current.length) return
+
+    const next = [...current]
+    ;[next[index], next[swapWith]] = [next[swapWith], next[index]]
+    form.setValue('steps', next, { shouldDirty: true })
+  }
+
   const steps = form.watch('steps')
   const selectedIndex = steps.findIndex((step) => step.id === selectedStepId)
 
@@ -194,6 +205,7 @@ function WorkflowStepsForm({
           selectedId={selectedStepId}
           onSelect={setSelectedStepId}
           onAdd={handleAddStep}
+          onMove={handleMoveStep}
         />
         <StepEditor
           index={selectedIndex === -1 ? null : selectedIndex}

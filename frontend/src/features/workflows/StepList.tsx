@@ -11,6 +11,8 @@ export interface StepListProps {
   selectedId: string | null
   onSelect: (id: string) => void
   onAdd: () => void
+  /** Swaps the step with its neighbor. PRD §15.4 defers drag-and-drop to Phase F; this is the MVP's accessible stand-in. */
+  onMove: (id: string, direction: 'up' | 'down') => void
 }
 
 /**
@@ -19,7 +21,7 @@ export interface StepListProps {
  * drag-and-drop builder can reuse it in place of `StepEditor` without
  * inheriting anything this component doesn't declare in its props.
  */
-export function StepList({ steps, selectedId, onSelect, onAdd }: StepListProps) {
+export function StepList({ steps, selectedId, onSelect, onAdd, onMove }: StepListProps) {
   return (
     <Panel data-testid="step-list-panel">
       <PanelHeader
@@ -46,25 +48,56 @@ export function StepList({ steps, selectedId, onSelect, onAdd }: StepListProps) 
                     ↓
                   </div>
                 ) : null}
-                <button
-                  type="button"
-                  aria-current={step.id === selectedId ? 'true' : undefined}
-                  onClick={() => onSelect(step.id)}
+                <div
                   className={cn(
-                    'w-full rounded-md border px-3 py-2 text-left text-sm',
+                    'rounded-md border',
                     step.id === selectedId
                       ? 'border-brand bg-brand/5'
-                      : 'border-border bg-surface hover:bg-canvas-tint',
+                      : 'border-border bg-surface',
                   )}
                 >
-                  <span className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
-                    {WORKFLOW_STEP_TYPE_LABELS[step.type]}
-                  </span>
-                  <div className="font-medium text-ink">{step.name || 'Untitled step'}</div>
-                  {step.description ? (
-                    <p className="mt-0.5 text-xs text-ink-secondary">{step.description}</p>
+                  <button
+                    type="button"
+                    aria-current={step.id === selectedId ? 'true' : undefined}
+                    onClick={() => onSelect(step.id)}
+                    className={cn(
+                      'w-full px-3 py-2 text-left text-sm',
+                      step.id !== selectedId && 'hover:bg-canvas-tint',
+                    )}
+                  >
+                    <span className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                      {WORKFLOW_STEP_TYPE_LABELS[step.type]}
+                    </span>
+                    <div className="font-medium text-ink">{step.name || 'Untitled step'}</div>
+                    {step.description ? (
+                      <p className="mt-0.5 text-xs text-ink-secondary">{step.description}</p>
+                    ) : null}
+                  </button>
+                  {steps.length > 1 ? (
+                    <div className="flex justify-end gap-1 border-t border-border px-2 py-1">
+                      {index > 0 ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Move ${step.name || 'this step'} up`}
+                          onClick={() => onMove(step.id, 'up')}
+                        >
+                          ↑
+                        </Button>
+                      ) : null}
+                      {index < steps.length - 1 ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Move ${step.name || 'this step'} down`}
+                          onClick={() => onMove(step.id, 'down')}
+                        >
+                          ↓
+                        </Button>
+                      ) : null}
+                    </div>
                   ) : null}
-                </button>
+                </div>
               </li>
             ))}
           </ol>

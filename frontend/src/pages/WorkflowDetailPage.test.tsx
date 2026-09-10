@@ -60,7 +60,7 @@ describe('WorkflowDetailPage', () => {
     renderPage(paths.workflow('wf_booking'))
     await screen.findByLabelText('Name')
 
-    await user.click(screen.getByRole('button', { name: /Confirm the chosen time/ }))
+    await user.click(screen.getByRole('button', { name: /^(?!Move ).*Confirm the chosen time/ }))
 
     expect(screen.getByLabelText('Name')).toHaveValue('Confirm the chosen time')
   })
@@ -69,7 +69,9 @@ describe('WorkflowDetailPage', () => {
     renderPage(paths.workflow('wf_booking'))
     await screen.findByLabelText('Name')
 
-    await userEvent.setup().click(screen.getByRole('button', { name: /Check the client record/ }))
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: /^(?!Move ).*Check the client record/ }))
     expect(screen.getByLabelText('Required integration')).toHaveValue('int_customer_records')
     expect(screen.getByText('Customer Records')).toBeInTheDocument()
   })
@@ -88,6 +90,47 @@ describe('WorkflowDetailPage', () => {
     expect(workflow.steps[0].name).toBe('Ask what the client needs today')
     expect(workflow.status).toBe('active')
     expect(workflow.version).toBe(7)
+  })
+
+  it('moves a step and saves the new order', async () => {
+    const user = userEvent.setup()
+    renderPage(paths.workflow('wf_booking'))
+    await screen.findByLabelText('Name')
+
+    const before = store.workflows.find((w) => w.id === 'wf_booking')!.steps.map((s) => s.name)
+    await user.click(screen.getByRole('button', { name: `Move ${before[1]} up` }))
+    await user.click(screen.getByRole('button', { name: 'Save draft' }))
+
+    expect(await screen.findByText('Draft saved.')).toBeInTheDocument()
+    const workflow = store.workflows.find((w) => w.id === 'wf_booking')!
+    expect(workflow.steps[0].name).toBe(before[1])
+    expect(workflow.steps[1].name).toBe(before[0])
+  })
+
+  it('keeps the step selected in the editor after moving it', async () => {
+    const user = userEvent.setup()
+    renderPage(paths.workflow('wf_booking'))
+    await screen.findByLabelText('Name')
+
+    await user.click(screen.getByRole('button', { name: /^(?!Move ).*Confirm the chosen time/ }))
+    await user.click(screen.getByRole('button', { name: 'Move Confirm the chosen time up' }))
+
+    expect(screen.getByLabelText('Name')).toHaveValue('Confirm the chosen time')
+  })
+
+  it('shows the moved step\'s own configuration after reordering, not the row count of whichever step now sits at its old position', async () => {
+    const user = userEvent.setup()
+    renderPage(paths.workflow('wf_booking'))
+    const firstStepName = await screen.findByLabelText('Name')
+    expect(firstStepName).toHaveValue('Ask what the client needs')
+
+    await user.click(screen.getByRole('button', { name: 'Add configuration' }))
+    await user.type(screen.getByLabelText('Configuration key'), 'note')
+
+    await user.click(screen.getByRole('button', { name: 'Move Ask what the client needs down' }))
+
+    expect(screen.getByLabelText('Name')).toHaveValue('Ask what the client needs')
+    expect(screen.getByDisplayValue('note')).toBeInTheDocument()
   })
 
   it('adds a step and saves it', async () => {

@@ -45,14 +45,16 @@ export function StepEditor({ index, integrationOptions, onDelete }: StepEditorPr
     )
   }
 
-  // Keyed by the step's own id rather than `index`: `useFieldArray` below
-  // does not support a dynamically-changing array path on one mounted
-  // instance, so switching the selection must remount it. Keying by index
-  // alone would miss the case where a step is deleted and the fallback
-  // selection lands on the same index a different step now occupies.
+  // Keyed by both the step's own id and its index: `useFieldArray` below does
+  // not support a dynamically-changing array path on one mounted instance, so
+  // anything that changes which path `steps.${index}.configuration` points
+  // at must remount it. Id alone misses a step moving to a different index
+  // (Move up/down keeps the same id); index alone misses a step being
+  // deleted and the fallback selection landing on the same index a different
+  // step now occupies.
   return (
     <StepFields
-      key={watch(`steps.${index}.id`)}
+      key={`${watch(`steps.${index}.id`)}:${index}`}
       index={index}
       integrationOptions={integrationOptions}
       onDelete={onDelete}
