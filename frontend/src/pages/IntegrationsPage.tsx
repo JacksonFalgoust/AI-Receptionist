@@ -5,7 +5,7 @@ import { FilterBar } from '@/components/ui/FilterBar'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { QueryBoundary } from '@/components/ui/QueryBoundary'
 import { Select } from '@/components/ui/Select'
-import { IntegrationCard } from '@/features/integrations/IntegrationCard'
+import { IntegrationCard, INTEGRATIONS_KEY } from '@/features/integrations/IntegrationCard'
 import { INTEGRATION_CATEGORIES, integrationCategoryLabel } from '@/lib/integrationLabels'
 import { integrationService } from '@/services/integrationService'
 import type { Integration, IntegrationCategory } from '@/types'
@@ -34,7 +34,7 @@ export function IntegrationsPage() {
   const [category, setCategory] = useState<IntegrationCategory | ''>(ANY)
 
   const query = useQuery({
-    queryKey: ['integrations', 'list'],
+    queryKey: INTEGRATIONS_KEY,
     queryFn: () => integrationService.list(),
   })
 
