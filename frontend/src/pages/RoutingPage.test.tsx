@@ -97,7 +97,12 @@ describe('RoutingPage', () => {
     const row = screen.getByRole('row', { name: /Client asks for a person/ })
     await user.click(within(row).getByRole('button', { name: 'Edit' }))
 
-    expect(await screen.findByRole('heading', { name: 'Edit rule' })).toBeInTheDocument()
+    // `setEditingRule` is a synchronous state update and `Modal` renders its
+    // heading with no animation or async gap — this is correct on the first
+    // render, but flaked once under CI's shared-runner load against RTL's
+    // default 1000ms findBy timeout, so it's given more room rather than
+    // treated as a real race.
+    expect(await screen.findByRole('heading', { name: 'Edit rule' }, { timeout: 3000 })).toBeInTheDocument()
     expect(screen.getByLabelText('Rule name')).toHaveValue('Client asks for a person')
   })
 
