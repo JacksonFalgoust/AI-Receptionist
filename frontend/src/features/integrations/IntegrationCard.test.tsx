@@ -159,4 +159,40 @@ describe('IntegrationCard actions', () => {
     expect(disconnect).not.toHaveBeenCalled()
     vi.restoreAllMocks()
   })
+
+  it('shows exactly one Disconnect control while its own confirmation is open, and returns focus once it closes', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(
+      <IntegrationCard integration={integrationWith({ status: 'connected' })} />,
+    )
+
+    const trigger = screen.getByRole('button', { name: 'Disconnect' })
+    await user.click(trigger)
+
+    // The same collision class as Connect vs. its modal's submit button:
+    // `useConfirm()`'s own confirm button is also labelled "Disconnect"
+    // (`confirmLabel: 'Disconnect'`), so the card's trigger must not still
+    // be visible to the accessibility tree alongside it.
+    expect(screen.getAllByRole('button', { name: 'Disconnect' })).toHaveLength(1)
+
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }))
+
+    // `useFocusTrap` restores focus to whatever was active when the dialog
+    // opened — the trigger, in this case — which only works if that DOM node
+    // stayed mounted (hidden via aria-hidden, not unmounted) the whole time.
+    expect(trigger).toHaveFocus()
+  })
+
+  it('returns focus to its own trigger after the connect dialog closes', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(
+      <IntegrationCard integration={integrationWith({ status: 'not_connected' })} />,
+    )
+
+    const trigger = screen.getByRole('button', { name: 'Connect' })
+    await user.click(trigger)
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }))
+
+    expect(trigger).toHaveFocus()
+  })
 })

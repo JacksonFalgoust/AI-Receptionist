@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/Button'
 import { Panel } from '@/components/ui/Panel'
@@ -38,6 +38,46 @@ export function IntegrationCard({ integration }: IntegrationCardProps) {
   const [isConfirmingDisconnect, setConfirmingDisconnect] = useState(false)
 
   const action = integrationAction(integration.status)
+
+  // Both triggers below stay mounted the whole time (only `aria-hidden` /
+  // `tabIndex` toggle) rather than being conditionally unmounted while their
+  // own dialog is open. `useFocusTrap` (src/lib/useFocusTrap.ts, shared by
+  // `Modal`/`ConfirmDialog`) captures `document.activeElement` into a ref
+  // when a dialog opens and calls `.focus()` on that same node when it
+  // closes — conditionally unmounting the trigger detaches the node the trap
+  // captured, making that `.focus()` call a silent no-op. Keeping the node
+  // mounted keeps the trap's own restoration attempt valid.
+  //
+  // The explicit restoration below is a second, independent guarantee on top
+  // of that, not a replacement for it: for the Connect/Repair trigger, one
+  // component (this one) drives both "hide the trigger" and "close the
+  // modal" in the same render, so `useFocusTrap`'s restoration alone is
+  // already reliable. For Disconnect, `useConfirm()`'s dialog is owned by a
+  // *different* component (`ConfirmDialogProvider`), reacting to the same
+  // click via a resolved Promise rather than a shared state update — two
+  // separate commits with no ordering guarantee between "the dialog closes"
+  // and "this card un-hides its own trigger." Rather than depend on
+  // React/microtask scheduling details to land in the order that happens to
+  // work, both triggers restore their own focus explicitly, tied to their
+  // own state transitioning back to false — which is guaranteed to run after
+  // this component's own commit (aria-hidden already removed) regardless of
+  // what the trap does elsewhere.
+  const connectTriggerRef = useRef<HTMLButtonElement>(null)
+  const disconnectTriggerRef = useRef<HTMLButtonElement>(null)
+  const wasModalOpenRef = useRef(false)
+  const wasConfirmingDisconnectRef = useRef(false)
+
+  useEffect(() => {
+    if (wasModalOpenRef.current && !isModalOpen) connectTriggerRef.current?.focus()
+    wasModalOpenRef.current = isModalOpen
+  }, [isModalOpen])
+
+  useEffect(() => {
+    if (wasConfirmingDisconnectRef.current && !isConfirmingDisconnect) {
+      disconnectTriggerRef.current?.focus()
+    }
+    wasConfirmingDisconnectRef.current = isConfirmingDisconnect
+  }, [isConfirmingDisconnect])
 
   function patchCache(updated: Integration) {
     queryClient.setQueryData<Integration[]>(INTEGRATIONS_KEY, (current) =>
@@ -123,12 +163,18 @@ export function IntegrationCard({ integration }: IntegrationCardProps) {
       </div>
 
       <div className="mt-auto flex flex-wrap gap-2 pt-1">
-        {/* Hidden rather than merely disabled while its own modal is open: the
+        {/* aria-hidden (not unmounted) while its own modal is open: the
             modal's submit button carries the same label (e.g. "Connect"), so
             leaving this one in the accessibility tree behind the overlay
-            makes the name ambiguous for queries and assistive tech alike. */}
-        {action && !isModalOpen ? (
+            makes the name ambiguous for queries and assistive tech alike.
+            tabIndex={-1} keeps it out of the tab order while aria-hidden, and
+            the node itself stays mounted so `useFocusTrap` (see above) has a
+            live element to restore focus to. */}
+        {action ? (
           <Button
+            ref={connectTriggerRef}
+            aria-hidden={isModalOpen || undefined}
+            tabIndex={isModalOpen ? -1 : undefined}
             onClick={() => {
               setConnectError(null)
               setModalOpen(true)
@@ -138,7 +184,14 @@ export function IntegrationCard({ integration }: IntegrationCardProps) {
           </Button>
         ) : null}
         {canDisconnect(integration.status) ? (
-          <Button variant="ghost" onClick={handleDisconnect} isLoading={disconnect.isPending}>
+          <Button
+            ref={disconnectTriggerRef}
+            variant="ghost"
+            aria-hidden={isConfirmingDisconnect || undefined}
+            tabIndex={isConfirmingDisconnect ? -1 : undefined}
+            onClick={handleDisconnect}
+            isLoading={disconnect.isPending}
+          >
             Disconnect
           </Button>
         ) : null}
