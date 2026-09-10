@@ -21,6 +21,12 @@ export interface DashboardService {
    */
   getRecentActivity(range?: DateRange, limit?: number): Promise<ActivityEvent[]>
   getRecentEscalations(range?: DateRange, limit?: number): Promise<Escalation[]>
+  /**
+   * US-10.1's optional summary stat on the routing page. A count rather than a
+   * capped list: `getRecentEscalations` tops out at its limit, so counting its
+   * result would silently cap the number too.
+   */
+  countEscalations(range?: DateRange): Promise<number>
 }
 
 const DEFAULT_FEED_LIMIT = 8
@@ -87,6 +93,14 @@ const mockDashboardService: DashboardService = {
     )
     return sortByDesc(scoped, (escalation) => escalation.createdAt).slice(0, limit)
   },
+
+  async countEscalations(range) {
+    await delay(120)
+    const { from, to } = rangeBounds(range)
+    return store.escalations.filter((escalation) =>
+      withinRange(escalation.createdAt, from, to),
+    ).length
+  },
 }
 
 const httpDashboardService: DashboardService = {
@@ -101,6 +115,14 @@ const httpDashboardService: DashboardService = {
   getRecentEscalations: (range, limit = DEFAULT_FEED_LIMIT) =>
     http.get<Escalation[]>(
       `/dashboard/escalations${toQueryString({ limit, preset: range?.preset, from: range?.from, to: range?.to })}`,
+    ),
+  countEscalations: (range) =>
+    http.get<number>(
+      `/dashboard/escalations/count${toQueryString({
+        preset: range?.preset,
+        from: range?.from,
+        to: range?.to,
+      })}`,
     ),
 }
 

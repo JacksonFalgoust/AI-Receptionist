@@ -181,3 +181,31 @@ describe('dashboardService feeds', () => {
     }
   })
 })
+
+describe('countEscalations', () => {
+  it('counts only the escalations inside the range', async () => {
+    resetStore()
+    const base = {
+      organizationId: 'org_test',
+      customerName: 'Rosa Delgado',
+      reason: 'Refund requested',
+      status: 'new' as const,
+    }
+    store.escalations = [
+      { ...base, id: 'esc_today_1', createdAt: new Date().toISOString() },
+      { ...base, id: 'esc_today_2', createdAt: new Date().toISOString() },
+      {
+        ...base,
+        id: 'esc_old',
+        createdAt: new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+    ]
+
+    await expect(dashboardService.countEscalations({ preset: 'today' })).resolves.toBe(2)
+  })
+
+  it('counts every escalation when no range is given', async () => {
+    resetStore()
+    await expect(dashboardService.countEscalations()).resolves.toBe(store.escalations.length)
+  })
+})
