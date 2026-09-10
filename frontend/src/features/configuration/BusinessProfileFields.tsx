@@ -1,80 +1,75 @@
-import { zodResolver } from '@hookform/resolvers/zod'
-import { useForm } from 'react-hook-form'
+import { useFormContext } from 'react-hook-form'
 
-import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Textarea } from '@/components/ui/Textarea'
+import { withCurrentValue } from '@/lib/selectOptions'
 import { TIMEZONE_OPTIONS } from '@/lib/timezones'
 
-import { businessProfileFormSchema, DAY_LABELS } from './businessProfileFormSchema'
-import type { BusinessProfileFormValues } from './businessProfileFormSchema'
-
-export interface BusinessProfileFormProps {
-  defaultValues: BusinessProfileFormValues
-  isSubmitting?: boolean
-  submitLabel: string
-  onSubmit: (values: BusinessProfileFormValues) => void
-}
+import { DAY_LABELS } from './businessProfileFormSchema'
+import type { ConfigurationFormValues } from './configurationFormSchema'
 
 /**
- * US-6.1's business profile fields. Purely presentational — `ConfigurationPage`
- * owns the service call, the toast, and the query cache — so this stays easy
- * to test in isolation, the same split `KnowledgeForm`/`KnowledgeEditorPage` use.
+ * US-6.1's business profile fields — one slice of the Configuration page's
+ * single shared form (see `configurationFormSchema.ts`). Reads and writes
+ * through `useFormContext` under the `businessProfile` key rather than
+ * owning a form of its own, so it saves and publishes together with Identity
+ * and Terminology under one Save Draft / Publish pair.
  */
-export function BusinessProfileForm({
-  defaultValues,
-  isSubmitting = false,
-  submitLabel,
-  onSubmit,
-}: BusinessProfileFormProps) {
+export function BusinessProfileFields() {
   const {
     register,
-    handleSubmit,
     watch,
     formState: { errors },
-  } = useForm<BusinessProfileFormValues>({
-    defaultValues,
-    resolver: zodResolver(businessProfileFormSchema),
-  })
+  } = useFormContext<ConfigurationFormValues>()
 
-  const hours = watch('hours')
+  const hours = watch('businessProfile.hours')
+  const timezone = watch('businessProfile.timezone')
+  const businessProfileErrors = errors.businessProfile
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} noValidate className="max-w-2xl space-y-1">
-      <Field label="Business name" htmlFor="name" error={errors.name?.message}>
-        <Input {...register('name')} />
+    <div className="max-w-2xl space-y-1">
+      <Field label="Business name" htmlFor="name" error={businessProfileErrors?.name?.message}>
+        <Input {...register('businessProfile.name')} />
       </Field>
 
       <Field label="Description" htmlFor="description">
-        <Textarea rows={3} {...register('description')} />
+        <Textarea rows={3} {...register('businessProfile.description')} />
       </Field>
 
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Primary phone" htmlFor="phone" error={errors.phone?.message}>
-          <Input type="tel" {...register('phone')} />
+        <Field
+          label="Primary phone"
+          htmlFor="phone"
+          error={businessProfileErrors?.phone?.message}
+        >
+          <Input type="tel" {...register('businessProfile.phone')} />
         </Field>
-        <Field label="Website" htmlFor="website" error={errors.website?.message}>
-          <Input type="url" placeholder="https://example.com" {...register('website')} />
+        <Field label="Website" htmlFor="website" error={businessProfileErrors?.website?.message}>
+          <Input type="url" placeholder="https://example.com" {...register('businessProfile.website')} />
         </Field>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Time zone" htmlFor="timezone" error={errors.timezone?.message}>
+        <Field
+          label="Time zone"
+          htmlFor="timezone"
+          error={businessProfileErrors?.timezone?.message}
+        >
           <Select
-            {...register('timezone')}
-            options={TIMEZONE_OPTIONS}
+            {...register('businessProfile.timezone')}
+            options={withCurrentValue(TIMEZONE_OPTIONS, timezone)}
             placeholder="Select a time zone"
           />
         </Field>
         <Field label="Locations" htmlFor="locations">
-          <Input {...register('locations')} />
+          <Input {...register('businessProfile.locations')} />
         </Field>
       </div>
 
-      <Field label="Address" htmlFor="address" error={errors.address?.message}>
-        <Input {...register('address')} />
+      <Field label="Address" htmlFor="address" error={businessProfileErrors?.address?.message}>
+        <Input {...register('businessProfile.address')} />
       </Field>
 
       <fieldset className="mb-4">
@@ -99,9 +94,10 @@ export function BusinessProfileForm({
             </thead>
             <tbody>
               {DAY_LABELS.map((label, index) => {
-                const closed = hours[index]?.closed ?? false
-                const openError = errors.hours?.[index]?.open?.message
-                const closeError = errors.hours?.[index]?.close?.message
+                const closed = hours?.[index]?.closed ?? false
+                const dayErrors = businessProfileErrors?.hours?.[index]
+                const openError = dayErrors?.open?.message
+                const closeError = dayErrors?.close?.message
                 return (
                   <tr key={label} className="border-b border-border last:border-b-0">
                     <th scope="row" className="px-3 py-2 text-left font-medium text-ink">
@@ -111,7 +107,7 @@ export function BusinessProfileForm({
                       <input
                         type="checkbox"
                         aria-label="Closed"
-                        {...register(`hours.${index}.closed`)}
+                        {...register(`businessProfile.hours.${index}.closed`)}
                       />
                     </td>
                     <td className="px-3 py-2">
@@ -121,7 +117,7 @@ export function BusinessProfileForm({
                         aria-invalid={Boolean(openError)}
                         disabled={closed}
                         className="rounded-sm border border-border bg-surface px-2 py-1 text-sm disabled:opacity-50"
-                        {...register(`hours.${index}.open`)}
+                        {...register(`businessProfile.hours.${index}.open`)}
                       />
                       {openError ? <p className="mt-1 text-xs text-danger">{openError}</p> : null}
                     </td>
@@ -132,7 +128,7 @@ export function BusinessProfileForm({
                         aria-invalid={Boolean(closeError)}
                         disabled={closed}
                         className="rounded-sm border border-border bg-surface px-2 py-1 text-sm disabled:opacity-50"
-                        {...register(`hours.${index}.close`)}
+                        {...register(`businessProfile.hours.${index}.close`)}
                       />
                       {closeError ? (
                         <p className="mt-1 text-xs text-danger">{closeError}</p>
@@ -145,10 +141,6 @@ export function BusinessProfileForm({
           </table>
         </div>
       </fieldset>
-
-      <Button type="submit" isLoading={isSubmitting} className="mt-2">
-        {submitLabel}
-      </Button>
-    </form>
+    </div>
   )
 }

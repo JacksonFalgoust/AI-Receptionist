@@ -6,6 +6,8 @@ import { cn } from '@/lib/cn'
 export interface TabItem {
   value: string
   label: string
+  /** Flags a validation error inside this tab's content — visible even while another tab is active. */
+  hasError?: boolean
 }
 
 export interface TabsProps {
@@ -71,6 +73,11 @@ export function Tabs({ items, value, onChange, children }: TabsProps) {
               )}
             >
               {item.label}
+              {item.hasError ? (
+                <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-danger align-middle">
+                  <span className="sr-only"> (has an error)</span>
+                </span>
+              ) : null}
             </button>
           )
         })}
