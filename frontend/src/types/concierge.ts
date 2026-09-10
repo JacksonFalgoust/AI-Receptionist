@@ -44,6 +44,8 @@ export interface BusinessProfile {
   website: string
   timezone: string
   address: string
+  /** Free text (e.g. "3 locations") — PRD §13.1 asks for the field, not a per-location manager. */
+  locations: string
   hours: BusinessHours[]
 }
 
