@@ -52,7 +52,7 @@ export const conciergeConfigurationSeed: ConciergeConfiguration = {
     name: 'Horizon Concierge',
     greeting: 'Thanks for contacting Horizon Partners. How can I help today?',
     closing: 'Thanks for your time. We look forward to speaking again.',
-    voice: 'Warm — Female',
+    voice: 'Avery — Warm',
     tone: 'professional',
     primaryLanguage: 'en-US',
     supportedLanguages: ['en-US', 'es-US'],

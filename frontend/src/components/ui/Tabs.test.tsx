@@ -76,6 +76,22 @@ describe('Tabs', () => {
     expect(screen.getByRole('tab', { name: 'Summary' })).toHaveAttribute('aria-selected', 'true')
   })
 
+  it('flags a tab with hasError so an error on a hidden tab is not invisible', () => {
+    const itemsWithError = [items[0], { ...items[1], hasError: true }, items[2]]
+
+    function Harness() {
+      const [value, setValue] = useState('summary')
+      return (
+        <Tabs items={itemsWithError} value={value} onChange={setValue}>
+          <p>Panel: {value}</p>
+        </Tabs>
+      )
+    }
+    render(<Harness />)
+    expect(screen.getByRole('tab', { name: /Transcript/ })).toHaveTextContent(/has an error/i)
+    expect(screen.getByRole('tab', { name: 'Summary' })).not.toHaveTextContent(/has an error/i)
+  })
+
   it('scopes tab/panel DOM ids per instance so two Tabs on one page never collide', () => {
     function TwoInstances() {
       const [a, setA] = useState('summary')
