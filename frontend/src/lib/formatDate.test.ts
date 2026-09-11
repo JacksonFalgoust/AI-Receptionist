@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatDateTime, formatDuration, relativeTime } from './formatDate'
+import { formatDate, formatDateRange, formatDateTime, formatDuration, relativeTime } from './formatDate'
 
 const NOW = new Date('2026-09-08T12:00:00.000Z').getTime()
 
@@ -83,5 +83,29 @@ describe('formatDuration', () => {
 
   it('rolls a sub-minute value that rounds up to 60 seconds into a full minute', () => {
     expect(formatDuration(59.6)).toBe('1m 00s')
+  })
+})
+
+describe('formatDate', () => {
+  it('renders a date with no clock time', () => {
+    expect(formatDate('2026-08-30T14:05:00.000Z')).toBe('Aug 30, 2026')
+  })
+
+  it('returns an empty string for an unparseable value', () => {
+    expect(formatDate('not-a-date')).toBe('')
+  })
+})
+
+describe('formatDateRange', () => {
+  it('states the year once when both ends share it', () => {
+    expect(formatDateRange('2026-08-30T00:00:00.000Z', '2026-09-29T00:00:00.000Z')).toBe(
+      'Aug 30 – Sep 29, 2026',
+    )
+  })
+
+  it('states both years across a year boundary', () => {
+    expect(formatDateRange('2026-12-15T00:00:00.000Z', '2027-01-14T00:00:00.000Z')).toBe(
+      'Dec 15, 2026 – Jan 14, 2027',
+    )
   })
 })
