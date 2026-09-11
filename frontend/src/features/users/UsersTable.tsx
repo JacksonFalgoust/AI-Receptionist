@@ -29,7 +29,11 @@ export function UsersTable({ users, currentUserId, onManage }: UsersTableProps) 
       render: (user) => (
         <span className="font-medium text-ink">
           {user.name}
-          {user.id === currentUserId && ' (you)'}
+          {/* Without this, the Manage modal's disabled controls on this one
+              row look arbitrary rather than explained. */}
+          {user.id === currentUserId ? (
+            <span className="font-normal text-ink-muted"> (you)</span>
+          ) : null}
         </span>
       ),
       sortValue: (user) => user.name,

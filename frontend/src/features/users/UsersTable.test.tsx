@@ -52,8 +52,22 @@ describe('UsersTable', () => {
 
   it('marks the signed-in user own row', () => {
     render(<UsersTable users={USERS} currentUserId="user_owner" onManage={vi.fn()} />)
-    expect(screen.getByText(/Jordan Lee \(you\)/)).toBeInTheDocument()
-    expect(screen.queryByText(/Robin Alvarez \(you\)/)).not.toBeInTheDocument()
+    expect(
+      screen.getByText((_, element) => {
+        return (
+          element?.classList.contains('font-medium') === true &&
+          element?.textContent === 'Jordan Lee (you)'
+        )
+      }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText((_, element) => {
+        return (
+          element?.classList.contains('font-medium') === true &&
+          element?.textContent === 'Robin Alvarez (you)'
+        )
+      }),
+    ).not.toBeInTheDocument()
   })
 
   it('hands the whole user back when Manage is clicked', async () => {
