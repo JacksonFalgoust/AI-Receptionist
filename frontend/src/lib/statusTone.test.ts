@@ -100,3 +100,19 @@ describe('statusTone', () => {
     }
   })
 })
+
+describe('billing statuses', () => {
+  it('gives every subscription status a tone and a business-language label', () => {
+    expect(statusTone('past_due')).toEqual({ tone: 'danger', label: 'Past due' })
+    expect(statusTone('trialing')).toEqual({ tone: 'info', label: 'Trial' })
+    expect(statusTone('canceled')).toEqual({ tone: 'muted', label: 'Canceled' })
+    // Shared with users and features, and correct for a subscription too.
+    expect(statusTone('active')).toEqual({ tone: 'success', label: 'Active' })
+  })
+
+  it('gives every invoice status a tone and a label', () => {
+    expect(statusTone('paid')).toEqual({ tone: 'success', label: 'Paid' })
+    expect(statusTone('due')).toEqual({ tone: 'warning', label: 'Due' })
+    expect(statusTone('overdue')).toEqual({ tone: 'danger', label: 'Overdue' })
+  })
+})
