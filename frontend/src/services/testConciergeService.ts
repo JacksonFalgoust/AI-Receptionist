@@ -32,6 +32,9 @@ const CANNED_REPLIES: CannedReply[] = [
     knowledgeUsed: ['What are your opening hours?'],
   },
   {
+    // Must stay before the 'book'/'appointment'/'schedule' entry below:
+    // "reschedule" contains "schedule" and "cancel my appointment" contains
+    // "appointment", so checking that entry first would swallow these.
     keywords: ['cancel', 'reschedul'],
     reply:
       'Call or text us at least 24 hours ahead and we will move your appointment to the next available time.',

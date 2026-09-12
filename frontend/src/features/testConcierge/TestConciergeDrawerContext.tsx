@@ -26,6 +26,16 @@ export const TestConciergeDrawerContext =
  * Mounted once in `App.tsx`, above `AppRoutes` — the same reason
  * `ToastProvider`/`ConfirmDialogProvider` sit there. This is what makes the
  * test conversation outlive closing the drawer and switching pages.
+ *
+ * Known gap: this state (isOpen/turns/pendingMessage) is never reset on
+ * sign-out or session expiry, so the drawer can stay mounted, open, and
+ * focus-trapped — with the previous user's transcript still in it — across
+ * an auth transition. Not reachable today because the mock `send()` never
+ * rejects, but becomes reachable once E6 wires a real backend (a 401 during
+ * `send()` routes through the global `MutationCache.onError` → session
+ * dropped → redirect to `/login`, while this provider, rendered outside
+ * `AppRoutes`, stays mounted). E6 should address this — either by resetting
+ * on auth state change or accepting the current behavior deliberately.
  */
 export function TestConciergeDrawerProvider({ children }: { children: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false)

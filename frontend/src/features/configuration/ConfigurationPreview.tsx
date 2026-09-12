@@ -1,8 +1,8 @@
-import { Link } from 'react-router-dom'
-
-import { buttonClasses } from '@/components/ui/Button'
+import { Button } from '@/components/ui/Button'
 import { Panel, PanelHeader } from '@/components/ui/Panel'
-import { paths } from '@/routes/paths'
+import { useAuth } from '@/features/auth/useAuth'
+import { useTestConciergeDrawer } from '@/features/testConcierge/useTestConciergeDrawer'
+import { can } from '@/lib/permissions'
 import type { ConciergeIdentity } from '@/types'
 
 export interface ConfigurationPreviewProps {
@@ -16,6 +16,9 @@ export interface ConfigurationPreviewProps {
  * No audio: that needs GuideAnts' TTS, which isn't wired up until E6.
  */
 export function ConfigurationPreview({ identity }: ConfigurationPreviewProps) {
+  const { user } = useAuth()
+  const { open } = useTestConciergeDrawer()
+
   return (
     <div className="max-w-2xl space-y-4">
       <Panel>
@@ -26,9 +29,11 @@ export function ConfigurationPreview({ identity }: ConfigurationPreviewProps) {
         <PanelHeader title="Closing message" />
         <div className="p-4 text-sm text-ink">{identity.closing}</div>
       </Panel>
-      <Link to={paths.test} className={buttonClasses('primary')}>
-        Test Concierge
-      </Link>
+      {user && can(user.role, 'use:test') ? (
+        <Button variant="primary" onClick={open}>
+          Test Concierge
+        </Button>
+      ) : null}
     </div>
   )
 }

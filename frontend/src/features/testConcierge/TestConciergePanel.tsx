@@ -131,7 +131,10 @@ export function TestConciergePanel() {
             type="button"
             variant="ghost"
             size="sm"
-            onClick={clear}
+            onClick={() => {
+              clear()
+              setError(null)
+            }}
             disabled={turns.length === 0}
           >
             Clear conversation

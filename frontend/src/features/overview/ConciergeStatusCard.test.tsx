@@ -76,7 +76,7 @@ describe('ConciergeStatusCard', () => {
     seedSession('agent@horizonpartners.example.com')
     renderWithProviders(<ConciergeStatusCard />)
 
-    await screen.findByRole('link', { name: 'View configuration' })
+    await screen.findByRole('button', { name: 'Pause Concierge' })
     expect(screen.queryByRole('button', { name: 'Test Concierge' })).not.toBeInTheDocument()
   })
 

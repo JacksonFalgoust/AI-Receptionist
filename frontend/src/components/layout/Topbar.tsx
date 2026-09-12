@@ -37,7 +37,7 @@ export function Topbar({ onOpenNav }: { onOpenNav: () => void }) {
 
       <div className="flex items-center gap-2">
         {can(user.role, 'use:test') ? (
-          <Button variant="primary" size="sm" onClick={open}>
+          <Button variant="primary" size="sm" onClick={open} aria-label="Test Concierge">
             <Play className="size-4" aria-hidden="true" />
             <span className="hidden sm:inline">Test Concierge</span>
           </Button>
