@@ -108,4 +108,15 @@ describe('application routing', () => {
     expect(await screen.findByRole('heading', { name: 'Overview' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Add knowledge' })).not.toBeInTheDocument()
   })
+
+  it('guards /test with the use:test permission', async () => {
+    seedSession('analyst@horizonpartners.example.com')
+
+    renderApp('/test')
+
+    // An analyst has no use:test — the guard must send them away rather than
+    // render the drawer's page destination.
+    expect(await screen.findByRole('heading', { name: 'Overview' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Test Concierge' })).not.toBeInTheDocument()
+  })
 })
