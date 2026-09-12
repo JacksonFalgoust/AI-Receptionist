@@ -95,6 +95,7 @@ support CTA.
 - Every primary page has intentional empty + loading states.
 - Toasts on every save/publish/invite/connect; error toasts state a next step.
 - Confirmation on every destructive action listed in PRD §28.
+- `RoutingRuleModal`'s delete confirmation has the same Cancel/Cancel label-collision `ManageUserModal` fixed in E1 (aria-hidden/tabIndex on the outer footer while a confirmation is pending) — untested and unfixed here; same fix pattern applies.
 - Responsive check: Overview, Conversations, and escalations usable on mobile.
 - Accessibility sweep against WCAG 2.1 AA — labels, focus order, contrast, status never by colour alone.
 - No console errors during normal interaction (PRD §52).
@@ -105,7 +106,7 @@ Replace mock implementations with live calls behind `VITE_USE_MOCKS=false`.
   currently assume endpoints that do not exist yet.
 - Conversation history is the natural first real feed — Conversation Relay
   calls already flow through `app/main.py`.
-- **Enforce every permission in `src/lib/permissions.ts` server-side** (PRD §40).
+- **Enforce every permission in `src/lib/permissions.ts` server-side** (PRD §40). This includes `src/lib/userGuards.ts`'s two lockout rules (self-protection, last active Owner) — both are currently enforced only in the mock `userService`, documented there and in `userGuards.ts` as client-side-only.
 
 ---
 

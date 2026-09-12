@@ -108,4 +108,19 @@ describe('formatDateRange', () => {
       'Dec 15, 2026 – Jan 14, 2027',
     )
   })
+
+  it('decides the same-year check from the UTC year, not the local year', () => {
+    // In a western timezone (e.g. UTC-5) both instants below fall on "Dec 31" the
+    // previous local day, but in UTC — which is what these dates are meant to be read
+    // in, per formatDate.ts's own doc comment — they land on "Dec 31, 2026" and
+    // "Jan 1, 2027": different years. getFullYear() would key off the local year and
+    // could wrongly take the same-year branch (dropping the leading year); this fix
+    // uses getUTCFullYear() so the decision never depends on the viewer's timezone.
+    // Note: vite.config.ts pins the test runner's own TZ to UTC, so local time here
+    // already equals UTC time — this assertion documents the intended UTC behavior
+    // but can't actually fail on the old getFullYear() code from inside this suite.
+    expect(formatDateRange('2026-12-31T22:00:00.000Z', '2027-01-01T02:00:00.000Z')).toBe(
+      'Dec 31, 2026 – Jan 1, 2027',
+    )
+  })
 })

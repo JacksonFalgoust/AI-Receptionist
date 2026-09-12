@@ -16,8 +16,12 @@ const DATE_TIME_FORMAT = new Intl.DateTimeFormat('en-US', {
   dateStyle: 'medium',
   timeStyle: 'short',
 })
-const DATE_FORMAT = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium' })
-const DATE_NO_YEAR_FORMAT = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' })
+const DATE_FORMAT = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeZone: 'UTC' })
+const DATE_NO_YEAR_FORMAT = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  timeZone: 'UTC',
+})
 
 function parse(iso: IsoDateTime): Date | null {
   const date = new Date(iso)
@@ -80,7 +84,7 @@ export function formatDateRange(from: IsoDateTime, to: IsoDateTime): string {
   const end = parse(to)
   if (!start || !end) return ''
 
-  if (start.getFullYear() === end.getFullYear()) {
+  if (start.getUTCFullYear() === end.getUTCFullYear()) {
     return `${DATE_NO_YEAR_FORMAT.format(start)} – ${DATE_FORMAT.format(end)}`
   }
   return `${DATE_FORMAT.format(start)} – ${DATE_FORMAT.format(end)}`
