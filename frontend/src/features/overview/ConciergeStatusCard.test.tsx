@@ -59,18 +59,25 @@ describe('ConciergeStatusCard', () => {
     expect(within(systems).getByText('Payments').closest('li')).toHaveTextContent('Operational')
   })
 
-  it('links to Configuration and to Test Concierge', async () => {
+  it('opens the test drawer from Test Concierge, and still links to Configuration', async () => {
+    const user = userEvent.setup()
     renderWithProviders(<ConciergeStatusCard />)
 
-    // The header link renders before the body loads; wait for the body's own.
-    expect(await screen.findByRole('link', { name: 'Test Concierge' })).toHaveAttribute(
-      'href',
-      '/test',
-    )
+    await user.click(await screen.findByRole('button', { name: 'Test Concierge' }))
+    expect(await screen.findByRole('dialog', { name: 'Test Concierge' })).toBeInTheDocument()
+
     expect(screen.getByRole('link', { name: 'View configuration' })).toHaveAttribute(
       'href',
       '/concierge/configuration',
     )
+  })
+
+  it('hides Test Concierge for a role without use:test', async () => {
+    seedSession('agent@horizonpartners.example.com')
+    renderWithProviders(<ConciergeStatusCard />)
+
+    await screen.findByRole('link', { name: 'View configuration' })
+    expect(screen.queryByRole('button', { name: 'Test Concierge' })).not.toBeInTheDocument()
   })
 
   it('pauses only after the confirmation is accepted', async () => {
