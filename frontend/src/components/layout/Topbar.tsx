@@ -1,8 +1,9 @@
 import { Menu, Play } from 'lucide-react'
-import { Link } from 'react-router-dom'
 
+import { Button } from '@/components/ui/Button'
 import { useAuth } from '@/features/auth/useAuth'
-import { paths } from '@/routes/paths'
+import { useTestConciergeDrawer } from '@/features/testConcierge/useTestConciergeDrawer'
+import { can } from '@/lib/permissions'
 
 import { ConciergeStatusPanel } from './header/ConciergeStatusPanel'
 import { NotificationCenter } from './header/NotificationCenter'
@@ -15,6 +16,7 @@ import { UserMenu } from './header/UserMenu'
  */
 export function Topbar({ onOpenNav }: { onOpenNav: () => void }) {
   const { user } = useAuth()
+  const { open } = useTestConciergeDrawer()
   if (!user) return null
 
   return (
@@ -34,13 +36,12 @@ export function Topbar({ onOpenNav }: { onOpenNav: () => void }) {
       </div>
 
       <div className="flex items-center gap-2">
-        <Link
-          to={paths.test}
-          className="flex items-center gap-2 rounded-sm bg-brand px-3.5 py-2 text-sm font-semibold text-ink-inverse hover:bg-brand-strong"
-        >
-          <Play className="size-4" aria-hidden="true" />
-          <span className="hidden sm:inline">Test Concierge</span>
-        </Link>
+        {can(user.role, 'use:test') ? (
+          <Button variant="primary" size="sm" onClick={open}>
+            <Play className="size-4" aria-hidden="true" />
+            <span className="hidden sm:inline">Test Concierge</span>
+          </Button>
+        ) : null}
 
         <NotificationCenter />
         <UserMenu />

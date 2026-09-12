@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest'
 import { ConfirmDialogProvider } from '@/components/ui/ConfirmDialog'
 import { ToastProvider } from '@/components/ui/ToastProvider'
 import { AuthProvider } from '@/features/auth/AuthProvider'
+import { TestConciergeDrawer } from '@/features/testConcierge/TestConciergeDrawer'
+import { TestConciergeDrawerProvider } from '@/features/testConcierge/TestConciergeDrawerContext'
 import { MOCK_PASSWORD } from '@/mocks/session'
 import { seedSession } from '@/test/renderWithProviders'
 
@@ -25,7 +27,10 @@ function renderApp(initialPath: string) {
         <ToastProvider>
           <ConfirmDialogProvider>
             <AuthProvider>
-              <AppRoutes />
+              <TestConciergeDrawerProvider>
+                <AppRoutes />
+                <TestConciergeDrawer />
+              </TestConciergeDrawerProvider>
             </AuthProvider>
           </ConfirmDialogProvider>
         </ToastProvider>
