@@ -22,7 +22,8 @@ export interface TableColumn<T> {
    * purpose is carried entirely by its cell content (a trailing row-action
    * button, say) rather than by a heading a sighted user would read, this
    * still gives the column an accessible name without a redundant visible
-   * label.
+   * label. Has no effect on a sortable column, which always renders a
+   * visible sort control.
    */
   visuallyHiddenHeader?: boolean
   render: (row: T) => ReactNode

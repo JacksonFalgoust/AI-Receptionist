@@ -3,7 +3,8 @@
  * (https://www.w3.org/TR/WCAG21/#dfn-relative-luminance). Returns a value
  * from 1 (identical colors) to 21 (black against white). Argument order
  * doesn't matter — the formula always compares the lighter color to the
- * darker one.
+ * darker one. Colors must be the full 6-digit `#rrggbb` form; the 3-digit
+ * shorthand (e.g. `#fff`) is not supported.
  */
 export function contrastRatio(hexA: string, hexB: string): number {
   const luminanceA = relativeLuminance(hexA)

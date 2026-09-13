@@ -95,7 +95,7 @@ support CTA.
 - Every primary page has intentional empty + loading states.
 - Toasts on every save/publish/invite/connect; error toasts state a next step.
 - Confirmation on every destructive action listed in PRD §28.
-- `RoutingRuleModal`'s delete confirmation has the same Cancel/Cancel label-collision `ManageUserModal` fixed in E1 (aria-hidden/tabIndex on the outer footer while a confirmation is pending) — untested and unfixed here; same fix pattern applies.
+- `RoutingRuleModal`'s delete confirmation had the same Cancel/Cancel label-collision `ManageUserModal` fixed in E1 — fixed with the same pattern (aria-hidden/tabIndex on the outer footer while a confirmation is pending).
 - Responsive check: Overview, Conversations, and escalations usable on mobile.
 - Accessibility sweep against WCAG 2.1 AA — labels, focus order, contrast, status never by colour alone.
 - No console errors during normal interaction (PRD §52).

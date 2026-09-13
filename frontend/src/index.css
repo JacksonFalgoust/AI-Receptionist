@@ -55,8 +55,8 @@
     background-image:
       linear-gradient(to right, var(--color-surface) 30%, transparent),
       linear-gradient(to left, var(--color-surface) 30%, transparent),
-      linear-gradient(to right, rgb(21 32 40 / 0.12), transparent),
-      linear-gradient(to left, rgb(21 32 40 / 0.12), transparent);
+      linear-gradient(to right, var(--color-scroll-shadow), transparent),
+      linear-gradient(to left, var(--color-scroll-shadow), transparent);
     background-position: left, right, left, right;
     background-size: 24px 100%, 24px 100%, 8px 100%, 8px 100%;
     background-attachment: local, local, scroll, scroll;

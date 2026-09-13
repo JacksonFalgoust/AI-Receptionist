@@ -65,6 +65,9 @@
   /* Elevation */
   --shadow-sm: 0 1px 2px rgba(21, 32, 40, 0.06);
   --shadow-md: 0 4px 16px rgba(21, 32, 40, 0.08);
+  /* --color-ink at low opacity, used for the horizontal-scroll edge shadow
+   * (see .table-wrap in src/index.css). */
+  --color-scroll-shadow: rgb(21 32 40 / 0.12);
 
   /* Motion */
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
