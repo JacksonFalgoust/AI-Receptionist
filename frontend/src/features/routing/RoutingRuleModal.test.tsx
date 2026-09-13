@@ -132,4 +132,15 @@ describe('RoutingRuleModal', () => {
       expect(store.routingRules.some((item) => item.id === rule.id)).toBe(false),
     )
   })
+
+  it('leaves Cancel unambiguous while the delete confirmation is open', async () => {
+    const user = userEvent.setup()
+    const rule = keywordRule()
+    renderWithProviders(<RoutingRuleModal isOpen onClose={vi.fn()} rule={rule} />)
+
+    await user.click(screen.getByRole('button', { name: 'Delete rule' }))
+    await user.click(await screen.findByRole('button', { name: /cancel/i }))
+
+    expect(store.routingRules.some((item) => item.id === rule.id)).toBe(true)
+  })
 })
