@@ -153,7 +153,7 @@ export function RoutingRuleModal({
       title={rule ? 'Edit rule' : 'Add rule'}
       actions={
         <div
-          className="flex w-full gap-2"
+          className="flex w-full justify-end gap-2"
           aria-hidden={isConfirming}
           tabIndex={isConfirming ? -1 : undefined}
         >

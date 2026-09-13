@@ -32,7 +32,15 @@ describe('theme token contrast (WCAG AA, 4.5:1)', () => {
   const MIN_AA = 4.5
 
   it('--color-ink-muted on white (KPI eyebrow labels, muted text)', () => {
-    expect(contrastRatio('#677785', '#ffffff')).toBeGreaterThanOrEqual(MIN_AA)
+    expect(contrastRatio('#5c6a77', '#ffffff')).toBeGreaterThanOrEqual(MIN_AA)
+  })
+
+  it('--color-ink-muted on --color-canvas (FilterBar labels)', () => {
+    expect(contrastRatio('#5c6a77', '#f3f5f7')).toBeGreaterThanOrEqual(MIN_AA)
+  })
+
+  it('--color-ink-muted on --color-canvas-tint (statusTone muted pill, e.g. "Disabled")', () => {
+    expect(contrastRatio('#5c6a77', '#e8edf1')).toBeGreaterThanOrEqual(MIN_AA)
   })
 
   it('--color-rail-text-muted on the nav rail (composited with its 5% white overlay)', () => {
