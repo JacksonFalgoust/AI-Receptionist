@@ -1,15 +1,16 @@
 import { useFormContext } from 'react-hook-form'
-import { Link } from 'react-router-dom'
 
-import { Button, buttonClasses } from '@/components/ui/Button'
+import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Textarea } from '@/components/ui/Textarea'
+import { useAuth } from '@/features/auth/useAuth'
+import { useTestConciergeDrawer } from '@/features/testConcierge/useTestConciergeDrawer'
 import { LANGUAGE_OPTIONS } from '@/lib/languages'
+import { can } from '@/lib/permissions'
 import { withCurrentValue, withCurrentValues } from '@/lib/selectOptions'
 import { VOICE_OPTIONS } from '@/lib/voices'
-import { paths } from '@/routes/paths'
 import type { Tone } from '@/types'
 
 import type { ConfigurationFormValues } from './configurationFormSchema'
@@ -33,6 +34,8 @@ export interface IdentityFieldsProps {
  * the same split rationale).
  */
 export function IdentityFields({ onPreviewGreeting }: IdentityFieldsProps) {
+  const { user } = useAuth()
+  const { open } = useTestConciergeDrawer()
   const {
     register,
     watch,
@@ -130,9 +133,11 @@ export function IdentityFields({ onPreviewGreeting }: IdentityFieldsProps) {
         <Button type="button" variant="ghost" onClick={onPreviewGreeting}>
           Preview greeting
         </Button>
-        <Link to={paths.test} className={buttonClasses('primary')}>
-          Test Concierge
-        </Link>
+        {user && can(user.role, 'use:test') ? (
+          <Button type="button" variant="primary" onClick={open}>
+            Test Concierge
+          </Button>
+        ) : null}
       </div>
     </div>
   )

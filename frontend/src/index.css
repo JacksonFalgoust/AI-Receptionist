@@ -35,3 +35,30 @@
     cursor: pointer;
   }
 }
+
+@layer components {
+  /*
+   * E5 (US-14.2): `.table-wrap` (Table.tsx) already scrolls horizontally
+   * when a table is wider than its container — verified, it works — but at
+   * phone width nothing showed there was more to see; the last column just
+   * clipped at the edge. This is the standard CSS-only scrolling-shadow
+   * technique: two solid masks scroll *with* the content (`background-
+   * attachment: local`) and cover the shadow layers completely once an edge
+   * has nothing left to reveal; two shadow gradients stay pinned to the
+   * container (`background-attachment: scroll`) and only show through where
+   * a mask has scrolled away from that edge. No JS scroll listener, no new
+   * component state.
+   */
+  .table-wrap {
+    background-repeat: no-repeat;
+    background-color: var(--color-surface);
+    background-image:
+      linear-gradient(to right, var(--color-surface) 30%, transparent),
+      linear-gradient(to left, var(--color-surface) 30%, transparent),
+      linear-gradient(to right, var(--color-scroll-shadow), transparent),
+      linear-gradient(to left, var(--color-scroll-shadow), transparent);
+    background-position: left, right, left, right;
+    background-size: 24px 100%, 24px 100%, 8px 100%, 8px 100%;
+    background-attachment: local, local, scroll, scroll;
+  }
+}

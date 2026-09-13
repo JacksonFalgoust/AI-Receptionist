@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 
+import { renderWithProviders, seedSession } from '@/test/renderWithProviders'
 import type { ConciergeIdentity } from '@/types'
 
 import { ConfigurationPreview } from './ConfigurationPreview'
@@ -17,14 +18,14 @@ const identity: ConciergeIdentity = {
 }
 
 function renderPreview() {
-  render(
-    <MemoryRouter>
-      <ConfigurationPreview identity={identity} />
-    </MemoryRouter>,
-  )
+  renderWithProviders(<ConfigurationPreview identity={identity} />)
 }
 
 describe('ConfigurationPreview', () => {
+  beforeEach(() => {
+    seedSession()
+  })
+
   it('shows the saved greeting', () => {
     renderPreview()
     expect(
@@ -39,8 +40,11 @@ describe('ConfigurationPreview', () => {
     ).toBeInTheDocument()
   })
 
-  it('links Test Concierge to the /test route', () => {
+  it('opens the test drawer instead of navigating', async () => {
+    const user = userEvent.setup()
     renderPreview()
-    expect(screen.getByRole('link', { name: 'Test Concierge' })).toHaveAttribute('href', '/test')
+
+    await user.click(screen.getByRole('button', { name: 'Test Concierge' }))
+    expect(await screen.findByRole('dialog', { name: 'Test Concierge' })).toBeInTheDocument()
   })
 })

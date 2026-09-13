@@ -6,6 +6,8 @@ import { MemoryRouter } from 'react-router-dom'
 import { ConfirmDialogProvider } from '@/components/ui/ConfirmDialog'
 import { ToastProvider } from '@/components/ui/ToastProvider'
 import { AuthProvider } from '@/features/auth/AuthProvider'
+import { TestConciergeDrawer } from '@/features/testConcierge/TestConciergeDrawer'
+import { TestConciergeDrawerProvider } from '@/features/testConcierge/TestConciergeDrawerContext'
 import { buildMockSessionUser } from '@/mocks/session'
 import { SESSION_STORAGE_KEY } from '@/services/config'
 
@@ -63,7 +65,12 @@ export function renderWithProviders(
         <MemoryRouter initialEntries={[route]}>
           <ToastProvider>
             <ConfirmDialogProvider>
-              <AuthProvider>{children}</AuthProvider>
+              <AuthProvider>
+                <TestConciergeDrawerProvider>
+                  {children}
+                  <TestConciergeDrawer />
+                </TestConciergeDrawerProvider>
+              </AuthProvider>
             </ConfirmDialogProvider>
           </ToastProvider>
         </MemoryRouter>

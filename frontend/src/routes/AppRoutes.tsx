@@ -39,7 +39,13 @@ export function AppRoutes() {
       <Route element={<ProtectedRoute />}>
         <Route element={<AppShell />}>
           <Route path={paths.overview} element={<OverviewPage />} />
-          <Route path={paths.test} element={<TestPage />} />
+          {/* US-13.1 / PRD §40. use:test already existed in lib/permissions.ts
+              (owner, administrator, manager) but nothing enforced it until
+              now. IMPORTANT: this is a navigation guard only — E6 must
+              enforce the same rule server-side before a real backend ships. */}
+          <Route element={<ProtectedRoute permission="use:test" />}>
+            <Route path={paths.test} element={<TestPage />} />
+          </Route>
           <Route path={paths.help} element={<HelpPage />} />
 
           <Route element={<ProtectedRoute permission="view:conversations" />}>

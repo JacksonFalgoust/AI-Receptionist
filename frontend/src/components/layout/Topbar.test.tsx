@@ -26,12 +26,18 @@ describe('Topbar', () => {
     expect(screen.getByRole('button', { name: 'Account for Jordan Lee' })).toBeInTheDocument()
   })
 
-  it('keeps the Test Concierge link', () => {
+  it('opens the test drawer instead of navigating', async () => {
+    const user = userEvent.setup()
     renderWithProviders(<Topbar onOpenNav={vi.fn()} />)
-    expect(screen.getByRole('link', { name: /test concierge/i })).toHaveAttribute(
-      'href',
-      '/test',
-    )
+
+    await user.click(screen.getByRole('button', { name: /test concierge/i }))
+    expect(await screen.findByRole('dialog', { name: 'Test Concierge' })).toBeInTheDocument()
+  })
+
+  it('hides Test Concierge for a role without use:test', () => {
+    seedSession('agent@horizonpartners.example.com')
+    renderWithProviders(<Topbar onOpenNav={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: /test concierge/i })).not.toBeInTheDocument()
   })
 
   it('opens the mobile navigation', async () => {

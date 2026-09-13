@@ -70,6 +70,6 @@ describe('ConfirmDialogProvider / useConfirm', () => {
     )
 
     await user.click(screen.getByRole('button', { name: 'Disconnect' }))
-    expect(screen.getByRole('button', { name: 'Confirm' })).toHaveClass('bg-brand')
+    expect(screen.getByRole('button', { name: 'Confirm' })).toHaveClass('bg-brand-solid')
   })
 })

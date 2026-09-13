@@ -9,6 +9,8 @@ import { BrowserRouter } from 'react-router-dom'
 import { ConfirmDialogProvider } from '@/components/ui/ConfirmDialog'
 import { ToastProvider } from '@/components/ui/ToastProvider'
 import { AuthProvider } from '@/features/auth/AuthProvider'
+import { TestConciergeDrawer } from '@/features/testConcierge/TestConciergeDrawer'
+import { TestConciergeDrawerProvider } from '@/features/testConcierge/TestConciergeDrawerContext'
 import { notifySessionExpired } from '@/lib/sessionExpiry'
 import { AppRoutes } from '@/routes/AppRoutes'
 import { isAppError } from '@/services/errors'
@@ -49,7 +51,10 @@ export function App() {
         <ToastProvider>
           <ConfirmDialogProvider>
             <AuthProvider>
-              <AppRoutes />
+              <TestConciergeDrawerProvider>
+                <AppRoutes />
+                <TestConciergeDrawer />
+              </TestConciergeDrawerProvider>
             </AuthProvider>
           </ConfirmDialogProvider>
         </ToastProvider>

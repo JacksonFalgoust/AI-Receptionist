@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 
 import { Button } from '@/components/ui/Button'
@@ -74,6 +74,15 @@ export function RoutingRuleModal({
   const confirm = useConfirm()
   const toast = useToast()
 
+  // Tracks whether a confirm() call is in flight, so the modal's own footer
+  // can be pulled out of the accessible tree while the confirm dialog's is
+  // on top of it — otherwise both have a "Cancel" button and
+  // `getByRole('button', { name: /cancel/i })` is ambiguous. Mirrors
+  // ManageUserModal's fix for the same bug. Kept mounted rather than
+  // conditionally rendered, since unmounting a competing element breaks
+  // `useFocusTrap`.
+  const [isConfirming, setIsConfirming] = useState(false)
+
   const form = useForm<RoutingRuleFormValues>({
     resolver: zodResolver(routingRuleFormSchema),
     defaultValues: ruleToFormValues(rule, defaultPriority),
@@ -121,15 +130,20 @@ export function RoutingRuleModal({
 
   async function handleDelete() {
     if (!rule) return
-    const confirmed = await confirm({
-      title: `Delete ${rule.name}?`,
-      description:
-        'Escalations that matched this rule will fall through to the next one that applies.',
-      confirmLabel: 'Delete',
-      tone: 'danger',
-    })
-    if (!confirmed) return
-    remove.mutate()
+    setIsConfirming(true)
+    try {
+      const confirmed = await confirm({
+        title: `Delete ${rule.name}?`,
+        description:
+          'Escalations that matched this rule will fall through to the next one that applies.',
+        confirmLabel: 'Delete',
+        tone: 'danger',
+      })
+      if (!confirmed) return
+      remove.mutate()
+    } finally {
+      setIsConfirming(false)
+    }
   }
 
   return (
@@ -138,7 +152,11 @@ export function RoutingRuleModal({
       onClose={handleClose}
       title={rule ? 'Edit rule' : 'Add rule'}
       actions={
-        <>
+        <div
+          className="flex w-full justify-end gap-2"
+          aria-hidden={isConfirming}
+          tabIndex={isConfirming ? -1 : undefined}
+        >
           {rule ? (
             <Button
               variant="danger"
@@ -155,7 +173,7 @@ export function RoutingRuleModal({
           <Button onClick={handleSubmit((values) => save.mutate(values))} isLoading={save.isPending}>
             {rule ? 'Save rule' : 'Create rule'}
           </Button>
-        </>
+        </div>
       }
     >
       <Field label="Rule name" htmlFor="rule-name" error={formState.errors.name?.message}>

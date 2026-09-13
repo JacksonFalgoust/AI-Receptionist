@@ -14,7 +14,7 @@ export interface IconButtonProps
 }
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
-  primary: 'bg-brand text-ink-inverse hover:bg-brand-strong',
+  primary: 'bg-brand-solid text-ink-inverse hover:bg-brand-solid-strong',
   ghost: 'text-ink-secondary hover:bg-canvas-tint',
   danger: 'text-danger hover:bg-danger-soft',
 }
