@@ -21,7 +21,7 @@ describe('PanelHeader', () => {
     const user = userEvent.setup()
     const onClick = vi.fn()
     render(<PanelHeader title="Recent activity" action={<button onClick={onClick}>View all</button>} />)
-    expect(screen.getByRole('heading', { name: 'Recent activity' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Recent activity', level: 2 })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'View all' }))
     expect(onClick).toHaveBeenCalledOnce()
   })
