@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { resetStore } from '@/mocks/store'
+import { seedSession } from '@/test/renderWithProviders'
 
 import { userService } from './userService'
 
@@ -68,6 +69,81 @@ describe('userService', () => {
     await expect(userService.resendInvitation('user_invited_agent')).resolves.toBeUndefined()
     await expect(userService.resendInvitation('user_owner')).rejects.toMatchObject({
       kind: 'validation',
+    })
+  })
+
+  describe('lockout guards', () => {
+    it('refuses to remove the signed-in user', async () => {
+      seedSession('owner@horizonpartners.example.com')
+      await expect(userService.remove('user_owner')).rejects.toMatchObject({
+        kind: 'validation',
+        description: "You can't remove your own access.",
+      })
+      expect((await userService.list()).some((user) => user.id === 'user_owner')).toBe(true)
+    })
+
+    it('refuses to disable the signed-in user', async () => {
+      seedSession('administrator@horizonpartners.example.com')
+      await expect(
+        userService.setStatus('user_administrator', 'disabled'),
+      ).rejects.toMatchObject({ description: "You can't disable your own access." })
+    })
+
+    it('refuses to change the signed-in user own role', async () => {
+      seedSession('administrator@horizonpartners.example.com')
+      await expect(userService.updateRole('user_administrator', 'viewer')).rejects.toMatchObject({
+        description: "You can't change your own role.",
+      })
+    })
+
+    it('refuses to demote the only active owner, naming the organization', async () => {
+      seedSession('administrator@horizonpartners.example.com')
+      await expect(userService.updateRole('user_owner', 'manager')).rejects.toMatchObject({
+        kind: 'validation',
+        description: 'Horizon Partners needs at least one Owner.',
+      })
+    })
+
+    it('refuses to disable or remove the only active owner', async () => {
+      seedSession('administrator@horizonpartners.example.com')
+      await expect(userService.setStatus('user_owner', 'disabled')).rejects.toMatchObject({
+        description: 'Horizon Partners needs at least one Owner.',
+      })
+      await expect(userService.remove('user_owner')).rejects.toMatchObject({
+        description: 'Horizon Partners needs at least one Owner.',
+      })
+    })
+
+    // Setting the role it already has is a no-op, not a demotion. Guarding it
+    // would make the only owner unsaveable from a form that always submits.
+    it('allows setting the only owner role to Owner again', async () => {
+      seedSession('administrator@horizonpartners.example.com')
+      await expect(userService.updateRole('user_owner', 'owner')).resolves.toMatchObject({
+        role: 'owner',
+      })
+    })
+
+    it('allows demoting an owner once a second active owner exists', async () => {
+      seedSession('manager@horizonpartners.example.com')
+      await userService.updateRole('user_administrator', 'owner')
+      await expect(userService.updateRole('user_owner', 'manager')).resolves.toMatchObject({
+        role: 'manager',
+      })
+    })
+
+    // Restoring access grants rather than removes, so nothing guards it.
+    it('allows restoring a disabled user', async () => {
+      seedSession('owner@horizonpartners.example.com')
+      await expect(userService.setStatus('user_disabled', 'active')).resolves.toMatchObject({
+        status: 'active',
+      })
+    })
+
+    it('skips self-protection when no session is stored but still guards the owner', async () => {
+      await expect(userService.remove('user_agent')).resolves.toBeUndefined()
+      await expect(userService.remove('user_owner')).rejects.toMatchObject({
+        description: 'Your organization needs at least one Owner.',
+      })
     })
   })
 })

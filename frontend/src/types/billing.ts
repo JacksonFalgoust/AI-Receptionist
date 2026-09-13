@@ -1,6 +1,10 @@
 import type { Id, IsoDateTime, TenantScoped } from './common'
 
 /** PRD §21. Placeholder data is acceptable for the MVP (USER_STORIES US-12.1). */
+export type BillingStatus = 'active' | 'past_due' | 'trialing' | 'canceled'
+
+export type InvoiceStatus = 'paid' | 'due' | 'overdue'
+
 export interface UsageMetric {
   id: string
   label: string
@@ -15,12 +19,12 @@ export interface Invoice {
   issuedAt: IsoDateTime
   amountCents: number
   currency: string
-  status: 'paid' | 'due' | 'overdue'
+  status: InvoiceStatus
 }
 
 export interface BillingOverview extends TenantScoped {
   planName: string
-  status: 'active' | 'past_due' | 'trialing' | 'canceled'
+  status: BillingStatus
   periodStart: IsoDateTime
   periodEnd: IsoDateTime
   /** Display-safe summary only, e.g. "Visa ending 4242" (PRD §47). */

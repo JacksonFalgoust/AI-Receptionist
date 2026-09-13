@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest'
 import { ConfirmDialogProvider } from '@/components/ui/ConfirmDialog'
 import { ToastProvider } from '@/components/ui/ToastProvider'
 import { AuthProvider } from '@/features/auth/AuthProvider'
+import { TestConciergeDrawer } from '@/features/testConcierge/TestConciergeDrawer'
+import { TestConciergeDrawerProvider } from '@/features/testConcierge/TestConciergeDrawerContext'
 import { MOCK_PASSWORD } from '@/mocks/session'
 import { seedSession } from '@/test/renderWithProviders'
 
@@ -25,7 +27,10 @@ function renderApp(initialPath: string) {
         <ToastProvider>
           <ConfirmDialogProvider>
             <AuthProvider>
-              <AppRoutes />
+              <TestConciergeDrawerProvider>
+                <AppRoutes />
+                <TestConciergeDrawer />
+              </TestConciergeDrawerProvider>
             </AuthProvider>
           </ConfirmDialogProvider>
         </ToastProvider>
@@ -107,5 +112,16 @@ describe('application routing', () => {
     // rather than render the editor.
     expect(await screen.findByRole('heading', { name: 'Overview' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Add knowledge' })).not.toBeInTheDocument()
+  })
+
+  it('guards /test with the use:test permission', async () => {
+    seedSession('analyst@horizonpartners.example.com')
+
+    renderApp('/test')
+
+    // An analyst has no use:test — the guard must send them away rather than
+    // render the drawer's page destination.
+    expect(await screen.findByRole('heading', { name: 'Overview' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Test Concierge' })).not.toBeInTheDocument()
   })
 })

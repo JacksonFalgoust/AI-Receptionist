@@ -85,7 +85,8 @@ export function RoutingRulesTable({ rules, renderRowAction }: RoutingRulesTableP
   if (renderRowAction) {
     columns.push({
       id: 'actions',
-      header: '',
+      header: 'Actions',
+      visuallyHiddenHeader: true,
       render: (rule) => renderRowAction(rule),
     })
   }

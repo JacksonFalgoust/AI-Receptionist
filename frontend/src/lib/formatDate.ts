@@ -16,6 +16,12 @@ const DATE_TIME_FORMAT = new Intl.DateTimeFormat('en-US', {
   dateStyle: 'medium',
   timeStyle: 'short',
 })
+const DATE_FORMAT = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeZone: 'UTC' })
+const DATE_NO_YEAR_FORMAT = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  timeZone: 'UTC',
+})
 
 function parse(iso: IsoDateTime): Date | null {
   const date = new Date(iso)
@@ -60,4 +66,26 @@ export function formatDuration(seconds?: number): string {
   const minutes = Math.floor(total / 60)
   const remainder = total % 60
   return `${minutes}m ${String(remainder).padStart(2, '0')}s`
+}
+
+/** "Aug 30, 2026". A date with no clock time — for spans of days, not instants. */
+export function formatDate(iso: IsoDateTime): string {
+  const date = parse(iso)
+  return date ? DATE_FORMAT.format(date) : ''
+}
+
+/**
+ * "Aug 30 – Sep 29, 2026" within one year, "Dec 15, 2026 – Jan 14, 2027"
+ * across a boundary. A billing period is a span of days, so repeating the year
+ * on both ends is noise everywhere except where it actually changes.
+ */
+export function formatDateRange(from: IsoDateTime, to: IsoDateTime): string {
+  const start = parse(from)
+  const end = parse(to)
+  if (!start || !end) return ''
+
+  if (start.getUTCFullYear() === end.getUTCFullYear()) {
+    return `${DATE_NO_YEAR_FORMAT.format(start)} – ${DATE_FORMAT.format(end)}`
+  }
+  return `${DATE_FORMAT.format(start)} – ${DATE_FORMAT.format(end)}`
 }

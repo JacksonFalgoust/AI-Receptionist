@@ -1,13 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 
-import { Button, buttonClasses } from '@/components/ui/Button'
+import { Button } from '@/components/ui/Button'
 import { Panel, PanelHeader } from '@/components/ui/Panel'
 import { QueryBoundary } from '@/components/ui/QueryBoundary'
 import { StatusPill } from '@/components/ui/StatusPill'
 import { useConfirm } from '@/components/ui/useConfirm'
 import { useToast } from '@/components/ui/ToastProvider'
+import { useAuth } from '@/features/auth/useAuth'
+import { useTestConciergeDrawer } from '@/features/testConcierge/useTestConciergeDrawer'
 import { CHANNEL_LABELS } from '@/lib/channelLabels'
+import { can } from '@/lib/permissions'
 import { relativeTime } from '@/lib/formatDate'
 import { paths } from '@/routes/paths'
 import { conciergeService } from '@/services/conciergeService'
@@ -73,6 +76,8 @@ function StatusCardBody({ status }: { status: ConciergeStatus }) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const toast = useToast()
+  const { user: signedIn } = useAuth()
+  const { open: openTestDrawer } = useTestConciergeDrawer()
 
   const isPaused = status.state === 'paused'
 
@@ -158,10 +163,11 @@ function StatusCardBody({ status }: { status: ConciergeStatus }) {
       </div>
 
       <div className="flex flex-wrap gap-2 border-t border-border pt-3">
-        {/* E3 replaces this link with the global test drawer. */}
-        <Link to={paths.test} className={buttonClasses('primary', 'sm')}>
-          Test Concierge
-        </Link>
+        {signedIn && can(signedIn.role, 'use:test') ? (
+          <Button variant="primary" size="sm" onClick={openTestDrawer}>
+            Test Concierge
+          </Button>
+        ) : null}
         <Button variant="ghost" size="sm" onClick={onToggle} disabled={toggle.isPending}>
           {isPaused ? 'Resume Concierge' : 'Pause Concierge'}
         </Button>

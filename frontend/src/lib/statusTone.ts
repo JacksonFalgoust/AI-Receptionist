@@ -5,6 +5,7 @@ import type { IntegrationStatus } from '@/types/integration'
 import type { KnowledgeStatus } from '@/types/knowledge'
 import type { UserStatus } from '@/types/user'
 import type { WorkflowStatus } from '@/types/workflow'
+import type { BillingStatus, InvoiceStatus } from '@/types/billing'
 
 /**
  * Semantic UI tone, separate from `types/concierge.Tone` (the Concierge's voice/persona setting).
@@ -37,6 +38,8 @@ export type KnownStatus =
   | ChannelHealth
   | ActivityStatus
   | ConversationOutcome
+  | BillingStatus
+  | InvoiceStatus
 
 const STATUS_TONE: Record<KnownStatus, ToneInfo> = {
   enabled: { tone: 'success', label: 'Enabled' },
@@ -74,6 +77,14 @@ const STATUS_TONE: Record<KnownStatus, ToneInfo> = {
   abandoned: { tone: 'muted', label: 'Abandoned' },
   failed: { tone: 'danger', label: 'Failed' },
   follow_up_required: { tone: 'warning', label: 'Follow-up required' },
+  // BillingStatus. 'active' is shared with UserStatus/ConciergeState above.
+  past_due: { tone: 'danger', label: 'Past due' },
+  trialing: { tone: 'info', label: 'Trial' },
+  canceled: { tone: 'muted', label: 'Canceled' },
+  // InvoiceStatus.
+  paid: { tone: 'success', label: 'Paid' },
+  due: { tone: 'warning', label: 'Due' },
+  overdue: { tone: 'danger', label: 'Overdue' },
 }
 
 export function statusTone(status: KnownStatus): ToneInfo {

@@ -1,10 +1,15 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { describe, expect, it, vi } from 'vitest'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { FormProvider, useForm } from 'react-hook-form'
 import { MemoryRouter } from 'react-router-dom'
 
+import { AuthProvider } from '@/features/auth/AuthProvider'
+import { TestConciergeDrawer } from '@/features/testConcierge/TestConciergeDrawer'
+import { TestConciergeDrawerProvider } from '@/features/testConcierge/TestConciergeDrawerContext'
+import { seedSession } from '@/test/renderWithProviders'
 import type { ConciergeConfiguration } from '@/types'
 
 import {
@@ -57,16 +62,26 @@ function Harness({
     defaultValues: configurationToFormValues({ ...configuration, ...configurationOverrides }),
     resolver: zodResolver(configurationFormSchema),
   })
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
 
   return (
-    <MemoryRouter>
-      <FormProvider {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)}>
-          <IdentityFields onPreviewGreeting={onPreviewGreeting} />
-          <button type="submit">Submit</button>
-        </form>
-      </FormProvider>
-    </MemoryRouter>
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <AuthProvider>
+          <TestConciergeDrawerProvider>
+            <FormProvider {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)}>
+                <IdentityFields onPreviewGreeting={onPreviewGreeting} />
+                <button type="submit">Submit</button>
+              </form>
+            </FormProvider>
+            <TestConciergeDrawer />
+          </TestConciergeDrawerProvider>
+        </AuthProvider>
+      </MemoryRouter>
+    </QueryClientProvider>
   )
 }
 
@@ -77,6 +92,10 @@ function renderFields(props: Partial<React.ComponentProps<typeof Harness>> = {})
 }
 
 describe('IdentityFields', () => {
+  beforeEach(() => {
+    seedSession()
+  })
+
   it('renders every field US-6.1 asks for', () => {
     renderFields()
     expect(screen.getByLabelText('Concierge name')).toBeInTheDocument()
@@ -161,9 +180,12 @@ describe('IdentityFields', () => {
     expect(onPreviewGreeting).toHaveBeenCalled()
   })
 
-  it('links Test Concierge to the /test route', () => {
+  it('opens the test drawer instead of navigating', async () => {
+    const user = userEvent.setup()
     renderFields()
-    expect(screen.getByRole('link', { name: 'Test Concierge' })).toHaveAttribute('href', '/test')
+
+    await user.click(screen.getByRole('button', { name: 'Test Concierge' }))
+    expect(await screen.findByRole('dialog', { name: 'Test Concierge' })).toBeInTheDocument()
   })
 
   it('shows a validation error and does not submit when the name is blank', async () => {
