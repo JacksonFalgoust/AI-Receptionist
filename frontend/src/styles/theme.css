@@ -16,10 +16,17 @@
   --color-brand-soft: #eef8dc;
   --color-brand-ink: #3d6a0f;
 
+  /* Solid fills carrying white text (e.g. Button's primary variant) need
+   * more contrast than the raw accent gives — see docs/superpowers/specs/
+   * 2026-09-12-frontend-e5-quality-pass-design.md. --color-brand itself
+   * stays untouched for borders, icons, and the focus ring. */
+  --color-brand-solid: #538217;
+  --color-brand-solid-strong: #487013;
+
   /* Text */
   --color-ink: #152028;
   --color-ink-secondary: #4a5a68;
-  --color-ink-muted: #7a8a98;
+  --color-ink-muted: #677785;
   --color-ink-inverse: #ffffff;
 
   /* Surfaces */
@@ -33,9 +40,9 @@
   --color-border-strong: #c0cbd4;
 
   /* Status — each has a soft companion for pill/alert backgrounds */
-  --color-success: #1f8a4c;
+  --color-success: #1c7b44;
   --color-success-soft: #e6f6ed;
-  --color-warning: #b07600;
+  --color-warning: #966500;
   --color-warning-soft: #fff4e0;
   --color-danger: #c0392b;
   --color-danger-soft: #fdecea;
@@ -45,7 +52,7 @@
   /* Sidebar palette (dark rail against the light canvas) */
   --color-rail: #152028;
   --color-rail-text: #c5d0da;
-  --color-rail-text-muted: #7f90a0;
+  --color-rail-text-muted: #8394a3;
 
   /* Typography */
   --font-sans: 'Plus Jakarta Sans', 'Segoe UI', system-ui, sans-serif;

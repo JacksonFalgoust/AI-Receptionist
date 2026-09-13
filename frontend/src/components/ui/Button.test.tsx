@@ -38,4 +38,11 @@ describe('Button', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }))
     expect(onClick).not.toHaveBeenCalled()
   })
+
+  it('uses the AA-passing brand-solid tokens for its primary variant', () => {
+    render(<Button>Save</Button>)
+    const button = screen.getByRole('button', { name: 'Save' })
+    expect(button.className).toContain('bg-brand-solid')
+    expect(button.className).toContain('hover:bg-brand-solid-strong')
+  })
 })
