@@ -17,6 +17,14 @@ type OpaqueRow = Record<string, unknown>
 export interface TableColumn<T> {
   id: string
   header: string
+  /**
+   * Render `header` for assistive technology only. For a column whose
+   * purpose is carried entirely by its cell content (a trailing row-action
+   * button, say) rather than by a heading a sighted user would read, this
+   * still gives the column an accessible name without a redundant visible
+   * label.
+   */
+  visuallyHiddenHeader?: boolean
   render: (row: T) => ReactNode
   sortValue?: (row: T) => string | number
 }
@@ -120,6 +128,10 @@ export function Table<T>({ columns, rows, getRowId, frame = true }: TableProps<T
                           <ArrowUpDown className="h-3.5 w-3.5 text-ink-muted" aria-hidden />
                         )}
                       </button>
+                    ) : column?.visuallyHiddenHeader ? (
+                      <span className="sr-only">
+                        <table.FlexRender header={header} />
+                      </span>
                     ) : (
                       <table.FlexRender header={header} />
                     )}

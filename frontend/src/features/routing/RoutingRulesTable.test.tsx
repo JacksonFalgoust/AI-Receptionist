@@ -61,4 +61,9 @@ describe('RoutingRulesTable', () => {
     expect(await screen.findByText(/no longer/i)).toBeInTheDocument()
     expect(store.routingRules.find((rule) => rule.id === target.id)?.enabled).toBe(false)
   })
+
+  it('gives the actions column an accessible name even though it has no visible label', () => {
+    renderWithProviders(<RoutingRulesTable rules={rules()} renderRowAction={() => <button>Edit</button>} />)
+    expect(screen.getByRole('columnheader', { name: 'Actions' })).toBeInTheDocument()
+  })
 })

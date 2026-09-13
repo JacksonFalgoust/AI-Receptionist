@@ -77,4 +77,9 @@ describe('UsersTable', () => {
     await userEvent.click(screen.getAllByRole('button', { name: /manage/i })[1])
     expect(onManage).toHaveBeenCalledWith(USERS[1])
   })
+
+  it('gives the actions column an accessible name even though it has no visible label', () => {
+    render(<UsersTable users={USERS} currentUserId="user_owner" onManage={vi.fn()} />)
+    expect(screen.getByRole('columnheader', { name: 'Actions' })).toBeInTheDocument()
+  })
 })

@@ -71,7 +71,8 @@ export function UsersTable({ users, currentUserId, onManage }: UsersTableProps) 
     },
     {
       id: 'actions',
-      header: '',
+      header: 'Actions',
+      visuallyHiddenHeader: true,
       render: (user) => (
         <Button variant="ghost" size="sm" onClick={() => onManage(user)}>
           Manage
