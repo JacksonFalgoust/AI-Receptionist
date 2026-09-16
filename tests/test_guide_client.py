@@ -270,6 +270,43 @@ def test_stale_tool_result_recovers_with_fresh_conversation(monkeypatch):
     assert fresh_stream.closed
 
 
+def test_stale_tool_result_retries_on_a_fresh_conversation_only_once(monkeypatch):
+    # If the fresh-conversation retry is itself rejected (e.g. GuideAnts
+    # rejects every tool result), the turn must fail instead of opening
+    # fresh conversations forever.
+    monkeypatch.setattr(guide_client.config, "BOOQABLE_API_KEY", "test-booqable-key")
+
+    def tool_call_stream(conv):
+        return FakeStream([
+            SimpleNamespace(type="response.created", response=SimpleNamespace(conversation=conv)),
+            SimpleNamespace(type="response.output_item.done", item=_function_call_item("call_1")),
+            SimpleNamespace(
+                type="response.completed",
+                response=SimpleNamespace(conversation=conv, id="resp_1", output=[]),
+            ),
+        ])
+
+    create = AsyncMock(
+        side_effect=[
+            tool_call_stream("conv_abc"),
+            _bad_request_error("tool_results_not_pending"),
+            tool_call_stream("conv_new"),
+            _bad_request_error("tool_results_not_pending"),
+            tool_call_stream("conv_newer"),
+            _bad_request_error("tool_results_not_pending"),
+        ]
+    )
+    fake_client = _fake_client(create)
+    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+
+    session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
+    with pytest.raises(openai.BadRequestError):
+        asyncio.run(_collect(guide_client.stream_reply("what's my number?", session)))
+
+    assert create.call_count == 4
+    assert session.conversation_id is None
+
+
 def test_tool_output_submission_disables_sdk_retries(monkeypatch):
     # The tool-output submission (input is a list) must go out with retries
     # disabled, since re-POSTing it after a blip is what produces a stale
