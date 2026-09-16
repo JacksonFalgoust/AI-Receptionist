@@ -16,6 +16,12 @@ Responses API. As of E6 slice 1, though, the app also persists conversation
 history to a local SQLite database (`app/db.py`/`app/models.py`): a finished
 call's transcript, tool actions, and wrap-up classification are written as a
 `Conversation` record by `app/call_recording.py` at `/ws` disconnect.
+
+As of E6 slice 2 the same database also holds the admin console's knowledge
+items (`app/knowledge_store.py`, served by `app/knowledge_api.py`). These are
+**console-only**: the live guide still answers from its GuideAnts vector
+store, so editing knowledge in the console does not change what the
+concierge says on a call (see "Known gaps").
 `app/fillers.py`, `app/barge_in.py`, and `app/speaker_events.py` are the exceptions to
 "no business logic": pure, I/O-free heuristics that decide whether a
 caller's utterance warrants a spoken filler phrase (`app/fillers.py`), should
@@ -49,6 +55,8 @@ Caller ⇄ Twilio ⇄ ───────────────────�
 | [app/reservations_api.py](../app/reservations_api.py) | FastAPI router: just `/api/booqable/ping`, a manual pre-demo connectivity check. Independent of the Twilio WS path. |
 | [app/reservations.py](../app/reservations.py) | Booqable business logic (catalog lookup, availability check, create/cancel order) called directly by `app/guide_client.py`'s reservation tool handlers. See "Reservation tools" below. |
 | [app/booqable_client.py](../app/booqable_client.py) | Thin async `httpx` wrapper around Booqable's JSON:API v4 (Bearer-token auth). |
+| [app/knowledge_api.py](../app/knowledge_api.py) | FastAPI router for the admin console's Knowledge pages: `GET/POST /api/knowledge`, `GET/PATCH/DELETE /api/knowledge/{id}`, bearer-auth only. Console-only — not synced to the GuideAnts guide. |
+| [app/knowledge_store.py](../app/knowledge_store.py) | SQLAlchemy CRUD for `KnowledgeItem`: filters, search, paging, and the rule that a requested `processing` status is saved as `needs_review` (no ingestion pipeline exists). |
 
 ---
 
@@ -749,3 +757,4 @@ From SETUP.md's hardening notes — not implemented, not required for the demo t
 - If GuideAnts loses track of a conversation mid-call (restart, expiry — see "The GuideAnts endpoint this app depends on" above), the fallback starts a brand-new conversation with **no recap** of what was said earlier in the call. The guide won't remember anything from before the reset; a caller who'd already explained their situation would have to repeat it. Replaying a summary from `st.messages` into the fresh conversation's first turn would fix this but was deliberately left out — this failure mode is mostly a dev-environment concern (a live GuideAnts restart mid-call), not something expected in normal operation.
 - Against an older GuideAnts build whose streamed events don't carry `conversation` yet: the very first turn of a call streams with no way to capture a continuation handle, so that turn's server-side conversation is orphaned (the client has no id for it). `stream_missing_conversation` catches this after the fact, and the *next* turn falls back to one non-streaming call, which starts (and captures the id of) yet another fresh conversation — so the first turn's context is lost, same as the lost-conversation case above. Every turn after that streams and continues normally. This only happens once per call, on the first turn, against a build old enough to lack the field — see `app/guide_client.py` above.
 - See "Interruption notes" above for the known rough edges of the barge-in note-folding feature specifically.
+- **Console knowledge is not synced to the guide.** Knowledge items created or edited in the admin console (`app/knowledge_api.py`) live only in SQLite; the published guide answers from its own GuideAnts vector store (`guide-demo/Twillio demo agent/VectorStores/`). Documents and URLs are stored as a filename/address only — no file content is uploaded or fetched. The two routes to close this (push into the vector store, or a `search_knowledge` client tool) are written up in `docs/superpowers/specs/2026-09-16-e6-knowledge-design.md`, "Future: syncing to the published guide".
