@@ -742,6 +742,66 @@ def test_execute_tool_missing_required_argument_returns_error(monkeypatch):
     assert "error" in json.loads(result)
 
 
+def test_execute_tool_list_catalog_logs_action(monkeypatch):
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(guide_client.reservations, "list_catalog", AsyncMock(return_value=[]))
+    session = GuideSession()
+
+    asyncio.run(guide_client._execute_tool("listCatalog", "{}", session))
+
+    assert session.actions == [
+        {
+            "action": "List catalog",
+            "system": "Booqable",
+            "result": "Completed successfully",
+            "status": "success",
+            "details": {},
+        }
+    ]
+
+
+def test_execute_tool_reservation_error_logs_action_as_error(monkeypatch):
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    session = GuideSession()
+
+    asyncio.run(
+        guide_client._execute_tool(
+            "createReservation",
+            json.dumps(
+                {
+                    "customer_name": "Jane Doe",
+                    "starts_at": "2026-08-01T09:00:00",
+                    "stops_at": "2026-08-02T17:00:00",
+                    "items": [{"product_id": "prod_1", "quantity": 1}],
+                }
+            ),
+            session,
+        )
+    )
+
+    assert session.actions[0]["status"] == "error"
+    assert session.actions[0]["action"] == "Create reservation"
+
+
+def test_execute_tool_malformed_arguments_logs_action_as_error(monkeypatch):
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    session = GuideSession()
+
+    result = asyncio.run(guide_client._execute_tool("createReservation", "{not json", session))
+
+    assert "error" in json.loads(result)
+    assert session.actions[0]["status"] == "error"
+    assert session.actions[0]["details"] == {}
+
+
+def test_execute_tool_get_caller_phone_number_does_not_log_an_action():
+    session = GuideSession(caller_phone="+15551234567")
+
+    asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
+
+    assert session.actions == []
+
+
 def test_streamed_tool_call_round_trip_yields_tool_call_started_then_text(monkeypatch):
     tool_call_events = [
         SimpleNamespace(type="response.created", response=SimpleNamespace(conversation="conv_abc")),
@@ -931,3 +991,73 @@ def test_build_input_truncates_long_partial():
     result = build_input("go on", partial)
     assert "x" * 500 not in result
     assert "x" * 150 in result
+
+
+def test_classify_conversation_parses_structured_reply(monkeypatch):
+    session = GuideSession(conversation_id="conv_123")
+    fake_response = SimpleNamespace(
+        output_text=json.dumps(
+            {
+                "intent": "Book a rental",
+                "outcome": "completed",
+                "escalated": False,
+                "summary": "Booked an e-bike for Saturday.",
+            }
+        )
+    )
+    fake_client = SimpleNamespace(
+        responses=SimpleNamespace(create=AsyncMock(return_value=fake_response))
+    )
+    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+
+    result = asyncio.run(guide_client.classify_conversation(session))
+
+    assert result["intent"] == "Book a rental"
+    assert result["outcome"] == "completed"
+    assert result["escalated"] is False
+    fake_client.responses.create.assert_awaited_once_with(
+        conversation="conv_123", input=guide_client._CLASSIFICATION_PROMPT, stream=False
+    )
+
+
+def test_classify_conversation_raises_when_no_conversation_id():
+    with pytest.raises(ValueError):
+        asyncio.run(guide_client.classify_conversation(GuideSession(conversation_id=None)))
+
+
+def test_classify_conversation_raises_on_malformed_json(monkeypatch):
+    session = GuideSession(conversation_id="conv_123")
+    fake_client = SimpleNamespace(
+        responses=SimpleNamespace(
+            create=AsyncMock(return_value=SimpleNamespace(output_text="not json"))
+        )
+    )
+    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+
+    with pytest.raises(ValueError):
+        asyncio.run(guide_client.classify_conversation(session))
+
+
+def test_classify_conversation_raises_on_invalid_outcome(monkeypatch):
+    session = GuideSession(conversation_id="conv_123")
+    fake_response = SimpleNamespace(
+        output_text=json.dumps({"outcome": "not-a-real-outcome", "escalated": False})
+    )
+    fake_client = SimpleNamespace(
+        responses=SimpleNamespace(create=AsyncMock(return_value=fake_response))
+    )
+    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+
+    with pytest.raises(ValueError):
+        asyncio.run(guide_client.classify_conversation(session))
+
+
+def test_classify_conversation_raises_when_request_fails(monkeypatch):
+    session = GuideSession(conversation_id="conv_123")
+    fake_client = SimpleNamespace(
+        responses=SimpleNamespace(create=AsyncMock(side_effect=RuntimeError("network down")))
+    )
+    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+
+    with pytest.raises(ValueError):
+        asyncio.run(guide_client.classify_conversation(session))

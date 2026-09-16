@@ -56,6 +56,17 @@ _STALE_TOOL_RESULT_CODE = "tool_results_not_pending"
 # calling tools without ever producing a text answer.
 _MAX_TOOL_ITERATIONS = 5
 
+_VALID_OUTCOMES = {"completed", "escalated", "abandoned", "failed", "follow_up_required"}
+
+_CLASSIFICATION_PROMPT = (
+    "The call has ended. Reply with ONLY a JSON object, no other text, with "
+    'these exact keys: "intent" (a short business-language description of '
+    'what the caller wanted, e.g. "Book a rental"), "outcome" (one of: '
+    "completed, escalated, abandoned, failed, follow_up_required), "
+    '"escalated" (true or false), and "summary" (one or two sentences in '
+    "business language, no internal jargon)."
+)
+
 
 def _get_client() -> AsyncOpenAI:
     global _client
@@ -118,6 +129,13 @@ class GuideSession:
     # The matched Booqable customer record from that lookup, or None if not
     # yet checked, no match was found, or the lookup failed/timed out.
     known_customer: dict | None = None
+    # Business-language log of every reservation tool this call actually
+    # ran, in call order -- persisted as ConversationAction rows by
+    # app/call_recording.py at call end. Not sent to GuideAnts; purely an
+    # observation of what _execute_tool did. get_caller_phone_number is
+    # deliberately not logged here -- it's internal bookkeeping, not a
+    # business action an admin needs to see in a call's action timeline.
+    actions: list[dict] = field(default_factory=list)
 
 
 def build_input(user_text: str, interrupted_partial: str | None) -> str:
@@ -176,6 +194,21 @@ _RESERVATION_TOOLS = {
     "findReservations",
     "cancelReservation",
     "sendPaymentLink",
+}
+
+# Business-language (action, system) label for each reservation tool's
+# ConversationAction row -- mirrors the frontend's routingLabels.ts/
+# knowledgeLabels.ts pattern of keeping raw identifiers out of admin-facing
+# copy.
+_TOOL_ACTION_LABELS: dict[str, tuple[str, str]] = {
+    "listCatalog": ("List catalog", "Booqable"),
+    "checkAvailability": ("Check availability", "Booqable"),
+    "listCustomers": ("Look up customer", "Booqable"),
+    "createCustomer": ("Create customer", "Booqable"),
+    "createReservation": ("Create reservation", "Booqable"),
+    "findReservations": ("Find reservation", "Booqable"),
+    "cancelReservation": ("Cancel reservation", "Booqable"),
+    "sendPaymentLink": ("Send payment link", "Messaging"),
 }
 
 
@@ -270,14 +303,26 @@ async def _execute_tool(name: str, arguments: str, session: GuideSession) -> str
             args = json.loads(arguments) if arguments else {}
         except json.JSONDecodeError:
             logger.warning("Guide sent malformed arguments for %r: %r", name, arguments)
-            return json.dumps({"error": "malformed arguments"})
-        try:
-            result = await _run_reservation_tool(name, args)
-        except (BooqableError, TwilioSmsError, PostmarkError) as exc:
-            logger.warning("Reservation tool %r failed: %s", name, exc)
-            return json.dumps({"error": str(exc)})
-        except KeyError as exc:
-            return json.dumps({"error": f"missing required argument: {exc}"})
+            args = {}
+            result: dict[str, Any] = {"error": "malformed arguments"}
+        else:
+            try:
+                result = await _run_reservation_tool(name, args)
+            except (BooqableError, TwilioSmsError, PostmarkError) as exc:
+                logger.warning("Reservation tool %r failed: %s", name, exc)
+                result = {"error": str(exc)}
+            except KeyError as exc:
+                result = {"error": f"missing required argument: {exc}"}
+        action_label, system_label = _TOOL_ACTION_LABELS.get(name, (name, "Booqable"))
+        session.actions.append(
+            {
+                "action": action_label,
+                "system": system_label,
+                "result": result.get("error", "Completed successfully"),
+                "status": "error" if "error" in result else "success",
+                "details": args,
+            }
+        )
         return json.dumps(result)
     logger.warning("Guide requested unknown tool %r; returning error result", name)
     return json.dumps({"error": f"unknown tool: {name}"})
@@ -745,3 +790,35 @@ async def stream_reply(user_text: str, session: GuideSession) -> AsyncIterator[R
         async with contextlib.aclosing(stream_reply(user_text, session)) as retry_gen:
             async for event in retry_gen:
                 yield event
+
+
+async def classify_conversation(session: GuideSession) -> dict[str, Any]:
+    """Ask the guide to classify the just-ended call as structured JSON, for
+    app/call_recording.py to persist. Raises ValueError on any failure
+    (missing conversation, network/API error, non-JSON or invalid reply) --
+    callers must supply their own safe defaults; see the design spec's
+    section 3."""
+    if not session.conversation_id:
+        raise ValueError("no conversation id to classify")
+
+    client = _get_client()
+    try:
+        response = await client.responses.create(
+            conversation=session.conversation_id, input=_CLASSIFICATION_PROMPT, stream=False
+        )
+    except Exception as exc:  # noqa: BLE001 -- any transport/API failure is equally "couldn't classify"
+        raise ValueError(f"classification request failed: {exc}") from exc
+
+    text = getattr(response, "output_text", None)
+    if not text:
+        raise ValueError("empty classification response")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"non-JSON classification response: {text!r}") from exc
+
+    if data.get("outcome") not in _VALID_OUTCOMES:
+        raise ValueError(f"invalid outcome: {data.get('outcome')!r}")
+    if not isinstance(data.get("escalated"), bool):
+        raise ValueError(f"invalid escalated flag: {data.get('escalated')!r}")
+    return data
