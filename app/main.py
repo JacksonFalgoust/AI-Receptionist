@@ -77,15 +77,30 @@ from fastapi.responses import Response
 from twilio.twiml.voice_response import Connect, VoiceResponse
 
 from . import barge_in, config, fillers, reservations, speaker_events, speech_timing, twilio_auth
+from .auth_api import router as auth_router
 from .booqable_client import BooqableClient, BooqableError
+from .db import init_db
 from .guide_client import Delta, GuideSession, ToolCallStarted, build_input, stream_reply
 from .reservations_api import router as reservations_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("voice_receptionist")
 
-app = FastAPI()
+
+@contextlib.asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # E6 slice 1: creates the SQLite tables (conversations, auth_sessions,
+    # ...) on startup if they don't already exist -- see app/db.py's
+    # init_db(). FastAPI's docs recommend a lifespan context manager over
+    # the deprecated @app.on_event("startup") handler for fastapi>=0.115
+    # (confirmed via find-docs against the pinned version).
+    init_db()
+    yield
+
+
+app = FastAPI(lifespan=_lifespan)
 app.include_router(reservations_router)
+app.include_router(auth_router)
 
 # Ceiling on holding a buffered turn while the caller is (per clientSpeaking
 # events) still audibly speaking. Normally the commit timer is re-armed by
