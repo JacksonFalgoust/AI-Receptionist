@@ -720,7 +720,9 @@ async def _stream_reply_with_tools(
         next_input = await _tool_outputs(outcome, session)
 
 
-async def stream_reply(user_text: str, session: GuideSession) -> AsyncIterator[ReplyEvent]:
+async def stream_reply(
+    user_text: str, session: GuideSession, *, _is_retry: bool = False
+) -> AsyncIterator[ReplyEvent]:
     """Yield events for the guide's reply to a single caller utterance: text
     to speak (`Delta`) and, when a client-side tool call is about to run
     (declared on the guide in GuideAnts, see
@@ -732,6 +734,11 @@ async def stream_reply(user_text: str, session: GuideSession) -> AsyncIterator[R
     `user_text` should already include any interruption note (see
     build_input); this function only handles GuideAnts continuation, not
     prompt shaping.
+
+    A lost conversation or stale tool result is retried on a fresh
+    conversation at most once per turn (`_is_retry` marks that retry): if
+    GuideAnts rejects the retry the same way, the error propagates rather
+    than opening fresh conversations forever.
     """
     client = _get_client()
 
@@ -791,11 +798,16 @@ async def stream_reply(user_text: str, session: GuideSession) -> AsyncIterator[R
                     "not retrying, since a retry would re-speak it"
                 )
                 raise
+            if _is_retry:
+                logger.warning(
+                    "Fresh conversation was rejected the same way; not retrying again"
+                )
+                raise
             logger.warning("Starting a fresh conversation for this call -- prior context is lost")
             lost_conversation = True
 
     if lost_conversation:
-        async with contextlib.aclosing(stream_reply(user_text, session)) as retry_gen:
+        async with contextlib.aclosing(stream_reply(user_text, session, _is_retry=True)) as retry_gen:
             async for event in retry_gen:
                 yield event
 
