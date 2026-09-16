@@ -10,7 +10,7 @@ import type {
   Paginated,
 } from '@/types'
 
-import { delay, USE_MOCKS } from './config'
+import { delay, isLive } from './config'
 import { AppError } from './errors'
 import { http } from './http'
 import { toQueryString } from './queryString'
@@ -138,6 +138,6 @@ const httpKnowledgeService: KnowledgeService = {
   remove: (id) => http.delete<void>(`/knowledge/${id}`),
 }
 
-export const knowledgeService: KnowledgeService = USE_MOCKS
-  ? mockKnowledgeService
-  : httpKnowledgeService
+export const knowledgeService: KnowledgeService = isLive('knowledge')
+  ? httpKnowledgeService
+  : mockKnowledgeService
