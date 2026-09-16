@@ -22,6 +22,7 @@ items (`app/knowledge_store.py`, served by `app/knowledge_api.py`). These are
 **console-only**: the live guide still answers from its GuideAnts vector
 store, so editing knowledge in the console does not change what the
 concierge says on a call (see "Known gaps").
+
 `app/fillers.py`, `app/barge_in.py`, and `app/speaker_events.py` are the exceptions to
 "no business logic": pure, I/O-free heuristics that decide whether a
 caller's utterance warrants a spoken filler phrase (`app/fillers.py`), should

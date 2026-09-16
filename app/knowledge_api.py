@@ -73,6 +73,7 @@ class KnowledgePatchIn(BaseModel):
     title: NonBlankStr | None = None
     type: KnowledgeType | None = None
     status: KnowledgeStatus | None = None
+    source: str | None = None
     category: str | None = None
     content: str | None = None
     tags: list[str] | None = None
@@ -83,7 +84,7 @@ class KnowledgePatchIn(BaseModel):
     def _required_columns_cannot_be_null(self) -> "KnowledgePatchIn":
         # Absent means "leave alone"; an explicit null would violate a
         # NOT NULL column, so reject it here rather than 500 at commit.
-        for name in ("title", "type", "status", "tags"):
+        for name in ("title", "type", "status", "tags", "source"):
             if name in self.model_fields_set and getattr(self, name) is None:
                 raise ValueError(f"{name} cannot be null")
         return self
