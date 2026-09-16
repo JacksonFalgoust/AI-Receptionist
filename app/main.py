@@ -79,6 +79,7 @@ from twilio.twiml.voice_response import Connect, VoiceResponse
 from . import barge_in, config, fillers, reservations, speaker_events, speech_timing, twilio_auth
 from .auth_api import router as auth_router
 from .booqable_client import BooqableClient, BooqableError
+from .conversations_api import router as conversations_router
 from .db import init_db
 from .guide_client import Delta, GuideSession, ToolCallStarted, build_input, stream_reply
 from .reservations_api import router as reservations_router
@@ -101,6 +102,7 @@ async def _lifespan(app: FastAPI):
 app = FastAPI(lifespan=_lifespan)
 app.include_router(reservations_router)
 app.include_router(auth_router)
+app.include_router(conversations_router)
 
 # Ceiling on holding a buffered turn while the caller is (per clientSpeaking
 # events) still audibly speaking. Normally the commit timer is re-armed by
