@@ -93,7 +93,7 @@ Replace mock implementations with live calls behind `VITE_USE_MOCKS=false`.
 - **Slice 1 shipped:** conversation history and login/logout are real,
   behind `VITE_LIVE_SERVICES=auth,conversations` (see
   docs/superpowers/specs/2026-09-14-e6-conversation-history-design.md).
-  The other 11 services, and full permission enforcement, remain.
+  Slice 2 (knowledge, console-only) shipped too. The other 10 services, and full permission enforcement, remain.
 
 #### Services to bring live
 Each service below still picks its implementation with `USE_MOCKS`. To bring
@@ -113,7 +113,8 @@ organization.
 - [ ] **testConcierge** (`testConciergeService`): `POST /concierge/test`. This should call the GuideAnts guide without reaching production transactions (for example Booqable orders or payment links). See the drawer-reset decision above.
 - [ ] **features** (`featureService`): `GET /features`, `PATCH /features/{id}`
 - [ ] **integrations** (`integrationService`): `GET /integrations`, `POST /integrations/{id}/connect`, `POST /integrations/{id}/repair`, `POST /integrations/{id}/disconnect`. This also needs a real credential contract, which replaces `src/lib/integrationAuthFields.ts`. Secrets must never come back in a response.
-- [ ] **knowledge** (`knowledgeService`): `GET /knowledge`, `GET /knowledge/{id}`, `POST /knowledge`, `PATCH /knowledge/{id}`, `DELETE /knowledge/{id}`
+- [x] **knowledge** (`knowledgeService`): `GET /knowledge`, `GET /knowledge/{id}`, `POST /knowledge`, `PATCH /knowledge/{id}`, `DELETE /knowledge/{id}`
+  - Console-only — not yet synced to the published guide, and documents/URLs are stored as a filename/address with no ingestion (a requested `processing` status is saved as `needs_review`). See docs/superpowers/specs/2026-09-16-e6-knowledge-design.md §Future.
 - [ ] **workflows** (`workflowService`): `GET /workflows`, `GET /workflows/{id}`, `POST /workflows`, `PATCH /workflows/{id}`, `POST /workflows/{id}/publish`, `DELETE /workflows/{id}`
 - [ ] **routing** (`routingService`): `GET /routing/rules`, `POST /routing/rules`, `PATCH /routing/rules/{id}`, `DELETE /routing/rules/{id}`
 - [ ] **billing** (`billingService`): `GET /billing/overview`
