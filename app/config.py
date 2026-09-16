@@ -38,6 +38,24 @@ WS_TOKEN_TTL_SECONDS = int(os.environ.get("WS_TOKEN_TTL_SECONDS", "120"))
 
 PORT = int(os.environ.get("PORT", "8080"))
 
+# E6 slice 1: this app's first durable state (everything else here is
+# stateless apart from a GuideAnts-side conversation id per call). SQLite
+# file, created on first run -- see app/db.py.
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./data/concierge.db")
+
+# Every record this app creates belongs to an organization; there is no
+# multi-organization support yet (see frontend/TODO.md's Phase F), so every
+# row gets this one hardcoded id.
+DEFAULT_ORGANIZATION_ID = os.environ.get("DEFAULT_ORGANIZATION_ID", "org_default")
+
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@example.com")
+# A salted PBKDF2 hash ("<salt_hex>:<hash_hex>"), never a plaintext password
+# -- see app/auth.py's hash_password() to generate one. No default: an
+# unset value means no one can log in, the safe failure mode for a fresh
+# checkout.
+ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH", "")
+AUTH_TOKEN_TTL_SECONDS = int(os.environ.get("AUTH_TOKEN_TTL_SECONDS", str(60 * 60 * 8)))
+
 # How long to wait for GuideAnts' reply before speaking a filler phrase to
 # mask the lookup latency. If the reply arrives before this elapses, no
 # filler is spoken at all.
