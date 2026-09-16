@@ -84,3 +84,26 @@ def test_persistence_failure_does_not_crash_teardown(monkeypatch):
         )
         websocket.send_json({"type": "prompt", "voicePrompt": "hi", "last": True})
         _drain_until_last(websocket, timeout=2.0)
+
+
+def test_unauthenticated_connection_does_not_persist_a_call(monkeypatch):
+    # A connection whose `setup` frame never carries a valid token must never
+    # reach call_recording.record_call() -- otherwise anyone who can reach the
+    # public /ws endpoint could write unbounded rows with zero credentials.
+    monkeypatch.setattr(config, "TWILIO_AUTH_TOKEN", "test-ws-secret")
+
+    record_call = AsyncMock()
+    monkeypatch.setattr(main.call_recording, "record_call", record_call)
+
+    call_sid = "CA_unauthenticated"
+
+    with client.websocket_connect("/ws?token=not-a-valid-token") as websocket:
+        websocket.send_json({"type": "setup", "callSid": call_sid, "from": "+15551234567"})
+        # The server closes the socket (policy violation) in response; give it
+        # a moment to run its disconnect teardown before asserting.
+        try:
+            websocket.receive_text()
+        except Exception:
+            pass
+
+    record_call.assert_not_awaited()

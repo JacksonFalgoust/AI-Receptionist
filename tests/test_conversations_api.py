@@ -141,3 +141,8 @@ def test_filter_options_returns_distinct_intents(db_session_factory):
 def test_list_requires_auth():
     response = client.get("/api/conversations")
     assert response.status_code == 401
+
+
+def test_list_rejects_malformed_from_date_with_422(db_session_factory):
+    response = client.get("/api/conversations", params={"from": "not-a-date"})
+    assert response.status_code == 422

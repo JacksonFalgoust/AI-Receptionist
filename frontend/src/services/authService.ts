@@ -8,8 +8,8 @@ import { http } from './http'
 /**
  * Reference implementation of the service pattern every other service follows:
  * one interface, a mock implementation, an HTTP implementation, and a single
- * export chosen by `USE_MOCKS`. Components import only `authService` and never
- * learn which one they got.
+ * export chosen by `isLive('auth')` (see `VITE_LIVE_SERVICES`, ./config).
+ * Components import only `authService` and never learn which one they got.
  */
 
 export interface SignInInput {

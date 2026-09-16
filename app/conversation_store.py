@@ -113,6 +113,7 @@ def list_conversations(
             | (models.Conversation.customer_phone.ilike(like))
             | (models.Conversation.intent.ilike(like))
             | (models.Conversation.summary.ilike(like))
+            | (models.Conversation.id.ilike(like))
         )
 
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
