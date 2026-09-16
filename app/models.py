@@ -1,7 +1,8 @@
-"""SQLAlchemy models backing conversation history (E6 slice 1). Field names
-are snake_case; app/conversations_api.py translates to the frontend's exact
-camelCase JSON shape (frontend/src/types/conversation.ts) -- these models
-don't know about that shape themselves.
+"""SQLAlchemy models backing conversation history (E6 slice 1) and console
+knowledge items (E6 slice 2). Field names are snake_case; app/conversations_api.py
+translates to the frontend's exact camelCase JSON shape
+(frontend/src/types/conversation.ts) -- these models don't know about that
+shape themselves.
 """
 
 from __future__ import annotations
@@ -79,6 +80,29 @@ class ConversationAction(Base):
     details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="actions")
+
+
+class KnowledgeItem(Base):
+    """A console-managed knowledge item (frontend/src/types/knowledge.ts).
+    Console-only: the live guide answers from its own GuideAnts vector
+    store, not this table -- see
+    docs/superpowers/specs/2026-09-16-e6-knowledge-design.md, "Future"."""
+
+    __tablename__ = "knowledge_items"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    organization_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    type: Mapped[str] = mapped_column(String, nullable=False)  # KnowledgeType
+    status: Mapped[str] = mapped_column(String, nullable=False)  # KnowledgeStatus
+    # "Manual entry", an uploaded document's filename, or a URL.
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    category: Mapped[str | None] = mapped_column(String, nullable=True)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    effective_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expiration_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 class AuthSession(Base):
