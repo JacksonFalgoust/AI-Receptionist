@@ -95,6 +95,30 @@ Replace mock implementations with live calls behind `VITE_USE_MOCKS=false`.
   docs/superpowers/specs/2026-09-14-e6-conversation-history-design.md).
   The other 11 services, and full permission enforcement, remain.
 
+#### Services to bring live
+Each service below still picks its implementation with `USE_MOCKS`. To bring
+one live: switch that export to `isLive('<name>')`, build the FastAPI endpoints
+its HTTP implementation already calls (paths below are relative to
+`API_BASE_URL`, `/api` by default), and scope every endpoint to the caller's
+organization.
+
+- [x] **auth** (`authService`): `POST /auth/login`, `POST /auth/logout`, `POST /auth/password-reset` (this last one is a no-op stub in `app/auth_api.py`; there is no real reset flow yet)
+- [x] **conversations** (`conversationService`): `GET /conversations`, `GET /conversations/{id}`, `GET /conversations/filter-options`
+- [ ] **organizations** (`organizationService`): `GET /organizations`, `GET /organizations/current`
+- [ ] **users** (`userService`): `GET /users`, `POST /users/invite`, `PATCH /users/{id}/role`, `PATCH /users/{id}/status`, `DELETE /users/{id}`, `POST /users/{id}/resend-invitation`. The two `userGuards.ts` lockout rules must be enforced here on the server.
+- [ ] **dashboard** (`dashboardService`): `GET /dashboard/overview`, `GET /dashboard/activity`, `GET /dashboard/escalations`, `GET /dashboard/escalations/count`. All four take `preset`/`from`/`to`, and the two feeds also take `limit`. These can probably be derived from conversation data.
+- [ ] **analytics** (`analyticsService`): `GET /analytics/summary` (`preset`/`from`/`to`)
+- [ ] **notifications** (`notificationService`): `GET /notifications`, `POST /notifications/{id}/read`, `POST /notifications/read-all`
+- [ ] **concierge** (`conciergeService`): `GET /concierge/status`, `POST /concierge/pause`, `POST /concierge/resume`, `GET`/`PATCH /concierge/configuration`, `POST /concierge/configuration/publish`. Pausing has to change how the live call path in `app/main.py` behaves.
+- [ ] **testConcierge** (`testConciergeService`): `POST /concierge/test`. This should call the GuideAnts guide without reaching production transactions (for example Booqable orders or payment links). See the drawer-reset decision above.
+- [ ] **features** (`featureService`): `GET /features`, `PATCH /features/{id}`
+- [ ] **integrations** (`integrationService`): `GET /integrations`, `POST /integrations/{id}/connect`, `POST /integrations/{id}/repair`, `POST /integrations/{id}/disconnect`. This also needs a real credential contract, which replaces `src/lib/integrationAuthFields.ts`. Secrets must never come back in a response.
+- [ ] **knowledge** (`knowledgeService`): `GET /knowledge`, `GET /knowledge/{id}`, `POST /knowledge`, `PATCH /knowledge/{id}`, `DELETE /knowledge/{id}`
+- [ ] **workflows** (`workflowService`): `GET /workflows`, `GET /workflows/{id}`, `POST /workflows`, `PATCH /workflows/{id}`, `POST /workflows/{id}/publish`, `DELETE /workflows/{id}`
+- [ ] **routing** (`routingService`): `GET /routing/rules`, `POST /routing/rules`, `PATCH /routing/rules/{id}`, `DELETE /routing/rules/{id}`
+- [ ] **billing** (`billingService`): `GET /billing/overview`
+- [ ] **Retire the switches**: once all thirteen services are live, remove `USE_MOCKS`, `VITE_LIVE_SERVICES`, and `isLive()` from `src/services/config.ts`
+
 ---
 
 ## Phase F — Post-MVP (PRD requirements cut from the MVP)
