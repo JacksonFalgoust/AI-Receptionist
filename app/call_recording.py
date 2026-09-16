@@ -54,7 +54,8 @@ async def record_call(st: "CallState") -> None:
 
     try:
         classification = await guide_client.classify_conversation(st.guide)
-    except Exception:
+    except Exception:  # noqa: BLE001 -- any failure (bad conversation id, network error,
+        # invalid JSON) just means "can't classify"; fall back to safe defaults instead.
         logger.warning("Wrap-up classification failed; saving with defaults", exc_info=True)
         classification = dict(_DEFAULT_CLASSIFICATION)
 
