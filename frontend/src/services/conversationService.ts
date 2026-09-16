@@ -10,7 +10,7 @@ import type {
   Paginated,
 } from '@/types'
 
-import { delay, USE_MOCKS } from './config'
+import { delay, isLive } from './config'
 import { AppError } from './errors'
 import { http } from './http'
 import { toQueryString } from './queryString'
@@ -136,6 +136,6 @@ const httpConversationService: ConversationService = {
   listFilterOptions: () => http.get<ConversationFilterOptions>('/conversations/filter-options'),
 }
 
-export const conversationService: ConversationService = USE_MOCKS
-  ? mockConversationService
-  : httpConversationService
+export const conversationService: ConversationService = isLive('conversations')
+  ? httpConversationService
+  : mockConversationService
