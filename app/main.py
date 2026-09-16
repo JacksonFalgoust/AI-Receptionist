@@ -724,7 +724,8 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         timer, st.pending_commit = st.pending_commit, None
         await _cancel_and_await(timer)
         await cancel_task()
-        try:
-            await call_recording.record_call(st)
-        except Exception:
-            logger.exception("Failed to persist conversation record")
+        if authenticated:
+            try:
+                await call_recording.record_call(st)
+            except Exception:
+                logger.exception("Failed to persist conversation record")

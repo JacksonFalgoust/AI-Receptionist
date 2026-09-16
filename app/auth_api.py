@@ -20,6 +20,10 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class PasswordResetRequest(BaseModel):
+    email: str
+
+
 class SessionUser(BaseModel):
     id: str
     name: str
@@ -63,3 +67,14 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> SessionRespon
 def logout(auth_session=Depends(auth.require_auth), db: Session = Depends(get_db)) -> None:
     auth.logout(db, auth_session.token)
     db.commit()
+
+
+@router.post("/api/auth/password-reset", status_code=status.HTTP_204_NO_CONTENT)
+def request_password_reset(payload: PasswordResetRequest) -> None:
+    # This is a demo app with one hardcoded admin credential and no actual
+    # password-reset flow -- always succeed with no side effect, regardless
+    # of whether `payload.email` matches anything, so this endpoint preserves
+    # frontend/src/services/authService.ts's mock behavior of never revealing
+    # whether an account exists (see its mockAuthService.requestPasswordReset
+    # comment).
+    return None

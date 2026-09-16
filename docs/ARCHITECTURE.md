@@ -6,12 +6,16 @@ config). It explains what each file
 does, the exact wire protocol on every endpoint, and how a call flows through
 the system end to end.
 
-There is no database — the one piece of durable state is server-side, inside
-GuideAnts: a `conversation` id captured on each call's first turn and echoed
-back on every later turn (see "The GuideAnts endpoint this app depends on"
-below). This app itself holds nothing but that id and a local debug log —
-it's purely a **protocol bridge** between Twilio Conversation Relay's
-WebSocket protocol and GuideAnts' OpenAI-compatible Responses API.
+The one piece of durable state that matters for the call itself is
+server-side, inside GuideAnts: a `conversation` id captured on each call's
+first turn and echoed back on every later turn (see "The GuideAnts endpoint
+this app depends on" below). This app itself holds nothing but that id and a
+local debug log during the call — it's purely a **protocol bridge** between
+Twilio Conversation Relay's WebSocket protocol and GuideAnts' OpenAI-compatible
+Responses API. As of E6 slice 1, though, the app also persists conversation
+history to a local SQLite database (`app/db.py`/`app/models.py`): a finished
+call's transcript, tool actions, and wrap-up classification are written as a
+`Conversation` record by `app/call_recording.py` at `/ws` disconnect.
 `app/fillers.py`, `app/barge_in.py`, and `app/speaker_events.py` are the exceptions to
 "no business logic": pure, I/O-free heuristics that decide whether a
 caller's utterance warrants a spoken filler phrase (`app/fillers.py`), should
@@ -329,7 +333,7 @@ Twilio opens exactly one WebSocket connection here per call, immediately after `
 
 **Per-connection state** (`CallState`, one instance per call — all local to the WS handler closure; nothing is shared across calls, nothing persists after disconnect):
 - `guide: GuideSession` — the one piece of state that actually matters for memory: holds the `conversation_id` GuideAnts assigned on this call's first turn, echoed back on every later turn. See `app/guide_client.py` above.
-- `messages: list[dict]` — a local log of what was actually said, for debugging only; never sent to GuideAnts.
+- `messages: list[dict]` — a local log of what was actually said; never sent to GuideAnts (continuation is by conversation id). It's also, as of E6 slice 1, the source `app/call_recording.py` turns into the persisted transcript `GET /api/conversations/{id}` serves once the call ends.
 - `interrupted_reply: str | None` — the text of a reply the caller was cut off mid-way through by a barge-in, if any; consumed and cleared by the next `start_reply()` call via `build_input()`. See "Interruption notes" below.
 - `task` — the `asyncio.Task` currently generating/speaking a reply, if any; also doubles as the "is a reply active right now" flag (`st.task and not st.task.done()`). On turns 2+, deltas arrive continuously over SSE, but Twilio still plays TTS far slower than the deltas stream in — `respond_to()` doesn't let this task finish once generation ends; it holds the task open until Twilio's agent-stopped speaker event reports that playback actually finished (with the word-count estimate — `speech_timing.estimate_seconds`, paced by `config.TTS_WORDS_PER_SECOND` — as a ×1.5 + 2s ceiling on that wait), or, until the first such event has been recognized on the call, just sleeps out whatever's left of that same estimate. Either way the task stays "not done," and mid-reply speech still gets evaluated as mid-reply, for roughly as long as Twilio is actually still speaking.
 - `playback_done: asyncio.Event` — set by the WS loop whenever an agent-stopped speaker event arrives; awaited by `respond_to()`'s playback hold. Cleared by `respond_to()` only at the start of the hold, so stale sets (the welcome greeting ending, or a filler finishing while GuideAnts was still generating) can't release a later hold early.

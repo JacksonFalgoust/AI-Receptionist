@@ -110,6 +110,17 @@ def test_list_conversations_search_matches_customer_name():
     assert rows[0].customer_name == "Jane Doe"
 
 
+def test_list_conversations_search_matches_conversation_id():
+    db = _session()
+    target_id = _create(db, customer_name="Jane Doe")
+    _create(db, customer_name="John Smith")
+
+    rows, total = conversation_store.list_conversations(db, search=target_id[:8])
+
+    assert total == 1
+    assert rows[0].id == target_id
+
+
 def test_list_conversations_paginates():
     db = _session()
     for i in range(3):

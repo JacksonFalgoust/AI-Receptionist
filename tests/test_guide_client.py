@@ -749,15 +749,14 @@ def test_execute_tool_list_catalog_logs_action(monkeypatch):
 
     asyncio.run(guide_client._execute_tool("listCatalog", "{}", session))
 
-    assert session.actions == [
-        {
-            "action": "List catalog",
-            "system": "Booqable",
-            "result": "Completed successfully",
-            "status": "success",
-            "details": {},
-        }
-    ]
+    assert len(session.actions) == 1
+    action = session.actions[0]
+    assert action["action"] == "List catalog"
+    assert action["system"] == "Booqable"
+    assert action["result"] == "Completed successfully"
+    assert action["status"] == "success"
+    assert action["details"] == {}
+    assert isinstance(action["at"], guide_client.datetime)
 
 
 def test_execute_tool_reservation_error_logs_action_as_error(monkeypatch):
@@ -781,6 +780,41 @@ def test_execute_tool_reservation_error_logs_action_as_error(monkeypatch):
 
     assert session.actions[0]["status"] == "error"
     assert session.actions[0]["action"] == "Create reservation"
+
+
+def test_execute_tool_flattens_nested_details_to_strings(monkeypatch):
+    # createReservation's `items` argument is a list of dicts -- details is
+    # persisted and rendered by the frontend as Record<str, str>, so any
+    # non-string value must be flattened (via json.dumps) rather than stored
+    # as a nested object/array. See finding #2 of the E6 final review.
+    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    fake_result = {"order_id": "order_1", "status": "reserved", "reserved": True}
+    monkeypatch.setattr(
+        guide_client.reservations, "create_reservation", AsyncMock(return_value=fake_result)
+    )
+    session = GuideSession()
+
+    asyncio.run(
+        guide_client._execute_tool(
+            "createReservation",
+            json.dumps(
+                {
+                    "customer_name": "Jane Doe",
+                    "customer_phone": "+15551234567",
+                    "starts_at": "2026-08-01T09:00:00",
+                    "stops_at": "2026-08-02T17:00:00",
+                    "items": [{"product_id": "prod_1", "quantity": 1}],
+                }
+            ),
+            session,
+        )
+    )
+
+    details = session.actions[0]["details"]
+    for value in details.values():
+        assert isinstance(value, str)
+    assert details["items"] == json.dumps([{"product_id": "prod_1", "quantity": 1}])
+    assert details["customer_name"] == "Jane Doe"  # already a string -- left as-is
 
 
 def test_execute_tool_malformed_arguments_logs_action_as_error(monkeypatch):

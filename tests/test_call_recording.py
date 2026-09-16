@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app import call_recording, models
+from app import db as db_module
 from app.db import Base
 from app.guide_client import GuideSession
 
@@ -28,7 +29,10 @@ def _memory_session_factory():
 
 def test_record_call_persists_transcript_and_classification(monkeypatch):
     session_local = _memory_session_factory()
-    monkeypatch.setattr(call_recording, "SessionLocal", session_local)
+    # record_call now goes through app/db.py's session_scope(), which reads
+    # the module-level SessionLocal in app/db.py itself -- not one imported
+    # into app/call_recording.py -- so that's what needs patching here.
+    monkeypatch.setattr(db_module, "SessionLocal", session_local)
 
     async def fake_classify(session):
         return {
@@ -63,7 +67,10 @@ def test_record_call_persists_transcript_and_classification(monkeypatch):
 
 def test_record_call_falls_back_to_defaults_when_classification_fails(monkeypatch):
     session_local = _memory_session_factory()
-    monkeypatch.setattr(call_recording, "SessionLocal", session_local)
+    # record_call now goes through app/db.py's session_scope(), which reads
+    # the module-level SessionLocal in app/db.py itself -- not one imported
+    # into app/call_recording.py -- so that's what needs patching here.
+    monkeypatch.setattr(db_module, "SessionLocal", session_local)
 
     async def failing_classify(session):
         raise ValueError("no conversation id")
@@ -84,7 +91,10 @@ def test_record_call_falls_back_to_defaults_when_classification_fails(monkeypatc
 
 def test_record_call_includes_tool_actions(monkeypatch):
     session_local = _memory_session_factory()
-    monkeypatch.setattr(call_recording, "SessionLocal", session_local)
+    # record_call now goes through app/db.py's session_scope(), which reads
+    # the module-level SessionLocal in app/db.py itself -- not one imported
+    # into app/call_recording.py -- so that's what needs patching here.
+    monkeypatch.setattr(db_module, "SessionLocal", session_local)
 
     async def fake_classify(session):
         return {"intent": None, "outcome": "completed", "escalated": False, "summary": None}
@@ -113,7 +123,10 @@ def test_record_call_includes_tool_actions(monkeypatch):
 
 def test_record_call_customer_name_from_known_customer(monkeypatch):
     session_local = _memory_session_factory()
-    monkeypatch.setattr(call_recording, "SessionLocal", session_local)
+    # record_call now goes through app/db.py's session_scope(), which reads
+    # the module-level SessionLocal in app/db.py itself -- not one imported
+    # into app/call_recording.py -- so that's what needs patching here.
+    monkeypatch.setattr(db_module, "SessionLocal", session_local)
 
     async def fake_classify(session):
         return {"intent": None, "outcome": "completed", "escalated": False, "summary": None}

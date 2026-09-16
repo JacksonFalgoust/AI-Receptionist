@@ -58,7 +58,7 @@ class ActionOut(BaseModel):
     at: str
     result: str
     status: str
-    details: dict | None = None
+    details: dict[str, str] | None = None
 
 
 class ConversationDetailOut(BaseModel):
@@ -82,6 +82,17 @@ class FilterOptionsOut(BaseModel):
 
 def _to_iso(value: datetime | None) -> str | None:
     return value.isoformat() + "Z" if value else None
+
+
+def _parse_dt(value: str | None, param_name: str) -> datetime | None:
+    """Parse a `from`/`to` query param, raising a 422 (not FastAPI's default
+    unhandled-500) on a malformed value."""
+    if value is None:
+        return None
+    try:
+        return datetime.fromisoformat(value.rstrip("Z"))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"invalid {param_name}: {value!r}") from exc
 
 
 def _conversation_out(conversation: models.Conversation) -> ConversationOut:
@@ -131,8 +142,8 @@ def list_conversations(
         escalated=escalated,
         location_id=locationId,
         assigned_employee=assignedEmployee,
-        date_from=datetime.fromisoformat(from_) if from_ else None,
-        date_to=datetime.fromisoformat(to) if to else None,
+        date_from=_parse_dt(from_, "from"),
+        date_to=_parse_dt(to, "to"),
         page=page,
         page_size=pageSize,
     )

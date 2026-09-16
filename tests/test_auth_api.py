@@ -81,3 +81,14 @@ def test_logout_invalidates_the_token(monkeypatch, db_session_factory):
 def test_protected_route_without_token_is_401():
     response = client.post("/api/auth/logout")
     assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "email", ["admin@example.com", "definitely-not-a-real-account@example.com"]
+)
+def test_password_reset_always_returns_204(email):
+    # Must always succeed, regardless of whether the email matches a real
+    # account -- revealing that would leak account existence (mirrors
+    # frontend/src/services/authService.ts's mock behavior).
+    response = client.post("/api/auth/password-reset", json={"email": email})
+    assert response.status_code == 204

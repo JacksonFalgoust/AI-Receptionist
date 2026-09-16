@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from . import conversation_store, guide_client
 from .booqable_client import BooqableClient
-from .db import SessionLocal
+from .db import session_scope
 
 if TYPE_CHECKING:
     from .main import CallState
@@ -69,7 +69,7 @@ async def record_call(st: "CallState") -> None:
         for message, at in zip(st.messages, timestamps)
     ]
 
-    with SessionLocal() as db:
+    with session_scope() as db:
         conversation_store.create_conversation(
             db,
             customer_name=_customer_name(st.guide),
@@ -83,4 +83,3 @@ async def record_call(st: "CallState") -> None:
             messages=messages,
             actions=st.guide.actions,
         )
-        db.commit()

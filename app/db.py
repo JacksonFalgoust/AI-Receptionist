@@ -3,10 +3,15 @@ previously stateless apart from a GuideAnts-side conversation id per call
 (see CLAUDE.md); this module is its first durable store.
 
 `init_db()` (called at startup, see app/main.py) creates every table via
-`Base.metadata.create_all()` so a fresh checkout works with zero setup, the
-same as every other part of this demo. alembic/ tracks the same schema as a
-real migration history for anyone deploying this past a single developer
-machine -- see alembic/versions/0001_initial.py.
+`Base.metadata.create_all()` -- this, not Alembic, is the actual runtime
+schema-creation path, so a fresh checkout works with zero setup, the same as
+every other part of this demo. `create_all()` never stamps `alembic_version`,
+so a database created by the running app cannot be cleanly upgraded later via
+`alembic upgrade head` (it will fail with "table already exists"). alembic/
+(see alembic/versions/0001_initial.py) exists only to give *future* schema
+changes a real migration history to build on -- it does not currently
+describe a working create_all-to-alembic upgrade path, and nothing in this
+app stamps the version table to bridge the two.
 """
 
 from __future__ import annotations

@@ -24,6 +24,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, AsyncIterator
 
 import openai
@@ -314,13 +315,20 @@ async def _execute_tool(name: str, arguments: str, session: GuideSession) -> str
             except KeyError as exc:
                 result = {"error": f"missing required argument: {exc}"}
         action_label, system_label = _TOOL_ACTION_LABELS.get(name, (name, "Booqable"))
+        # Args can contain nested objects/arrays (e.g. createReservation's
+        # `items` list of dicts), but ConversationAction.details is persisted
+        # and rendered by the frontend as Record<str, str> -- flatten any
+        # non-string value to its JSON representation so it's always
+        # frontend-safe while staying informative.
+        details = {k: v if isinstance(v, str) else json.dumps(v) for k, v in args.items()}
         session.actions.append(
             {
                 "action": action_label,
                 "system": system_label,
                 "result": result.get("error", "Completed successfully"),
                 "status": "error" if "error" in result else "success",
-                "details": args,
+                "details": details,
+                "at": datetime.utcnow(),
             }
         )
         return json.dumps(result)
