@@ -43,6 +43,7 @@ export type KnowledgePatch = Partial<
     | 'title'
     | 'type'
     | 'status'
+    | 'source'
     | 'category'
     | 'content'
     | 'tags'
@@ -129,12 +130,39 @@ const mockKnowledgeService: KnowledgeService = {
   },
 }
 
+/**
+ * Fields the editor can legitimately blank out. `knowledgeFormValuesToOutput`
+ * emits `undefined` for a cleared optional field (e.g. `category: '' ->
+ * undefined`), and `JSON.stringify` drops `undefined` keys entirely — so
+ * without this, a blanked field never reaches the server, and the API's
+ * `exclude_unset=True` PATCH semantics (correctly) read the missing key as
+ * "leave alone" rather than "clear it".
+ */
+const CLEARABLE_PATCH_FIELDS = ['category', 'content', 'effectiveDate', 'expirationDate'] as const
+
+/**
+ * Turns "key present but undefined" (the editor's "I cleared this") into an
+ * explicit `null` on the wire, for exactly the clearable fields above. A key
+ * the caller never mentioned at all is left untouched — it still means
+ * "leave alone" — and non-clearable fields (title/type/status/source/tags)
+ * are never coerced, since a patch legitimately blanking those isn't a thing.
+ */
+function normalizePatchForWire(patch: KnowledgePatch): Record<string, unknown> {
+  const normalized: Record<string, unknown> = { ...patch }
+  for (const field of CLEARABLE_PATCH_FIELDS) {
+    if (field in patch && normalized[field] === undefined) {
+      normalized[field] = null
+    }
+  }
+  return normalized
+}
+
 const httpKnowledgeService: KnowledgeService = {
   list: (params = {}) =>
     http.get<Paginated<KnowledgeItem>>(`/knowledge${toQueryString({ ...params })}`),
   get: (id) => http.get<KnowledgeItem>(`/knowledge/${id}`),
   create: (input) => http.post<KnowledgeItem>('/knowledge', input),
-  update: (id, patch) => http.patch<KnowledgeItem>(`/knowledge/${id}`, patch),
+  update: (id, patch) => http.patch<KnowledgeItem>(`/knowledge/${id}`, normalizePatchForWire(patch)),
   remove: (id) => http.delete<void>(`/knowledge/${id}`),
 }
 

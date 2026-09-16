@@ -143,6 +143,23 @@ def test_patch_changes_only_sent_fields(db_session_factory):
     assert body["content"] == "Minor scratches are free."
 
 
+def test_patch_source_persists(db_session_factory):
+    item_id = _seed(
+        db_session_factory, type="url", source="https://example.com/original"
+    )
+
+    response = client.patch(
+        f"/api/knowledge/{item_id}",
+        json={"source": "https://example.com/updated"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["source"] == "https://example.com/updated"
+
+    refetched = client.get(f"/api/knowledge/{item_id}")
+    assert refetched.json()["source"] == "https://example.com/updated"
+
+
 def test_patch_explicit_null_clears_optional_field(db_session_factory):
     item_id = _seed(db_session_factory, category="Policies")
 
@@ -156,7 +173,14 @@ def test_patch_explicit_null_clears_optional_field(db_session_factory):
 
 @pytest.mark.parametrize(
     "payload",
-    [{"title": None}, {"title": ""}, {"type": None}, {"status": "archived"}, {"tags": None}],
+    [
+        {"title": None},
+        {"title": ""},
+        {"type": None},
+        {"status": "archived"},
+        {"tags": None},
+        {"source": None},
+    ],
 )
 def test_patch_rejects_invalid_values_with_422(db_session_factory, payload):
     item_id = _seed(db_session_factory)

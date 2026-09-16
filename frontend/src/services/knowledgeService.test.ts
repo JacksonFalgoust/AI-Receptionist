@@ -162,4 +162,30 @@ describe('httpKnowledgeService (VITE_LIVE_SERVICES=knowledge)', () => {
 
     await expect(service.get('missing')).rejects.toMatchObject({ kind: 'not_found' })
   })
+
+  it('sends an explicit null for a clearable field the caller set to undefined', async () => {
+    const { service, fetchMock } = await loadLive({
+      status: 200,
+      ok: true,
+      json: async () => ({ id: 'kn_1' }),
+    })
+
+    await service.update('kn_1', { category: undefined })
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body).toHaveProperty('category', null)
+  })
+
+  it('leaves a field the caller never mentioned fully absent from the body', async () => {
+    const { service, fetchMock } = await loadLive({
+      status: 200,
+      ok: true,
+      json: async () => ({ id: 'kn_1' }),
+    })
+
+    await service.update('kn_1', { title: 'x' })
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body).not.toHaveProperty('category')
+  })
 })
