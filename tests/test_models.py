@@ -75,3 +75,46 @@ def test_init_db_is_idempotent(monkeypatch, tmp_path):
 
     db.init_db()
     db.init_db()  # must not raise on already-existing tables
+
+
+def test_knowledge_item_round_trips_with_tags_and_dates():
+    db = _memory_session()
+    item = models.KnowledgeItem(
+        organization_id="org_default",
+        title="Damage policy",
+        type="policy",
+        status="active",
+        source="Manual entry",
+        category="Policies",
+        content="Minor scratches are free.",
+        tags=["damage", "policy"],
+        effective_date=datetime(2026, 1, 15),
+        expiration_date=None,
+    )
+    db.add(item)
+    db.commit()
+    db.expire_all()
+
+    fetched = db.get(models.KnowledgeItem, item.id)
+
+    assert fetched is not None
+    assert len(fetched.id) == 36  # uuid4 default
+    assert fetched.tags == ["damage", "policy"]
+    assert fetched.effective_date == datetime(2026, 1, 15)
+    assert fetched.expiration_date is None
+    assert fetched.updated_at is not None  # default applied
+
+
+def test_knowledge_item_tags_default_to_empty_list():
+    db = _memory_session()
+    item = models.KnowledgeItem(
+        organization_id="org_default",
+        title="Hours",
+        type="faq",
+        status="active",
+        source="Manual entry",
+    )
+    db.add(item)
+    db.commit()
+
+    assert db.get(models.KnowledgeItem, item.id).tags == []
