@@ -88,6 +88,7 @@ from .db import init_db
 from .guide_client import Delta, GuideSession, ToolCallStarted, build_input, stream_reply
 from .knowledge_api import router as knowledge_router
 from .reservations_api import router as reservations_router
+from .workflow_api import router as workflow_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("voice_receptionist")
@@ -109,6 +110,7 @@ app.include_router(reservations_router)
 app.include_router(auth_router)
 app.include_router(conversations_router)
 app.include_router(knowledge_router)
+app.include_router(workflow_router)
 
 # Ceiling on holding a buffered turn while the caller is (per clientSpeaking
 # events) still audibly speaking. Normally the commit timer is re-armed by
