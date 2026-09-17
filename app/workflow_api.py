@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
 from sqlalchemy.orm import Session
 
 from . import auth, models, workflow_store
@@ -33,6 +33,8 @@ NonBlankStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length
 
 
 class WorkflowStepModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: NonBlankStr
     name: NonBlankStr
     description: str | None = None
@@ -64,6 +66,15 @@ class WorkflowPatchIn(BaseModel):
     name: NonBlankStr | None = None
     description: str | None = None
     steps: list[WorkflowStepModel] | None = None
+
+    @model_validator(mode="after")
+    def _required_columns_cannot_be_null(self) -> "WorkflowPatchIn":
+        # Absent means "leave alone"; an explicit null would either violate a
+        # NOT NULL column (name) or silently wipe the array (steps).
+        for field in ("name", "steps"):
+            if field in self.model_fields_set and getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+        return self
 
 
 def _to_iso(value: datetime | None) -> str | None:
