@@ -118,3 +118,55 @@ def test_knowledge_item_tags_default_to_empty_list():
     db.commit()
 
     assert db.get(models.KnowledgeItem, item.id).tags == []
+
+
+def test_workflow_round_trips_with_steps():
+    db = _memory_session()
+    workflow = models.Workflow(
+        organization_id="org_default",
+        name="New rental intake",
+        description="Handles a first-time rental request.",
+        status="draft",
+        version=1,
+        steps=[
+            {"id": "step-1", "name": "Ask for ID", "type": "ask_customer"},
+            {
+                "id": "step-2",
+                "name": "Check availability",
+                "type": "look_up",
+                "requiredIntegrationId": "int_booqable",
+                "configuration": {"category": "bikes"},
+            },
+        ],
+        execution_count=0,
+    )
+    db.add(workflow)
+    db.commit()
+    db.expire_all()
+
+    fetched = db.get(models.Workflow, workflow.id)
+
+    assert fetched is not None
+    assert len(fetched.id) == 36  # uuid4 default
+    assert fetched.status == "draft"
+    assert fetched.version == 1
+    assert fetched.execution_count == 0
+    assert len(fetched.steps) == 2
+    assert fetched.steps[1]["requiredIntegrationId"] == "int_booqable"
+    assert fetched.steps[1]["configuration"] == {"category": "bikes"}
+    assert fetched.last_updated_at is not None
+
+
+def test_workflow_steps_default_to_empty_list():
+    db = _memory_session()
+    workflow = models.Workflow(
+        organization_id="org_default",
+        name="Blank workflow",
+        status="draft",
+        version=1,
+        execution_count=0,
+    )
+    db.add(workflow)
+    db.commit()
+
+    assert db.get(models.Workflow, workflow.id).steps == []

@@ -1,8 +1,8 @@
-"""SQLAlchemy models backing conversation history (E6 slice 1) and console
-knowledge items (E6 slice 2). Field names are snake_case; app/conversations_api.py
-translates to the frontend's exact camelCase JSON shape
-(frontend/src/types/conversation.ts) -- these models don't know about that
-shape themselves.
+"""SQLAlchemy models backing conversation history (E6 slice 1), console
+knowledge items (E6 slice 2), and console workflows (E6 slice 3). Field names
+are snake_case; app/conversations_api.py translates to the frontend's exact
+camelCase JSON shape (frontend/src/types/conversation.ts) -- these models don't
+know about that shape themselves.
 """
 
 from __future__ import annotations
@@ -103,6 +103,30 @@ class KnowledgeItem(Base):
     effective_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     expiration_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class Workflow(Base):
+    """A console-managed workflow (frontend/src/types/workflow.ts).
+    Console-only: publishing has no effect on live calls -- nothing in
+    app/ reads this table today. See
+    docs/superpowers/specs/2026-09-17-e6-workflows-design.md, "Future"."""
+
+    __tablename__ = "workflows"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    organization_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False)  # WorkflowStatus
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # The whole WorkflowStep[] array, replaced wholesale on every save --
+    # never merged field-by-field. See app/workflow_store.py.
+    steps: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    # Always 0 in this slice -- no execution engine exists yet.
+    execution_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
 
 
 class AuthSession(Base):
