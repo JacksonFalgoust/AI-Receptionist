@@ -3,7 +3,7 @@ import { MOCK_ORGANIZATION_ID } from '@/mocks/session'
 import { store } from '@/mocks/store'
 import type { Id, Workflow } from '@/types'
 
-import { delay, USE_MOCKS } from './config'
+import { delay, isLive } from './config'
 import { AppError } from './errors'
 import { http } from './http'
 
@@ -100,15 +100,36 @@ const mockWorkflowService: WorkflowService = {
   },
 }
 
+/**
+ * The only field `saveDraft` can legitimately be asked to blank is
+ * `description` -- `name` is required and `steps` is always either the
+ * complete array or fully absent, never a value meaning "clear it". No
+ * current caller sends `description` through saveDraft (WorkflowDetailPage
+ * only ever patches `steps`), but the WorkflowPatch type declares
+ * `description` as patchable and clearable, so the contract must hold if
+ * something does call it -- see frontend/src/services/knowledgeService.ts's
+ * identical `normalizePatchForWire` for why this matters: JSON.stringify
+ * drops `undefined` keys entirely, and the API's exclude_unset=True PATCH
+ * semantics (correctly) read a missing key as "leave alone" rather than
+ * "clear it".
+ */
+function normalizePatchForWire(patch: WorkflowPatch): Record<string, unknown> {
+  const normalized: Record<string, unknown> = { ...patch }
+  if ('description' in patch && normalized.description === undefined) {
+    normalized.description = null
+  }
+  return normalized
+}
+
 const httpWorkflowService: WorkflowService = {
   list: () => http.get<Workflow[]>('/workflows'),
   get: (id) => http.get<Workflow>(`/workflows/${id}`),
   create: (input) => http.post<Workflow>('/workflows', input),
-  saveDraft: (id, patch) => http.patch<Workflow>(`/workflows/${id}`, patch),
+  saveDraft: (id, patch) => http.patch<Workflow>(`/workflows/${id}`, normalizePatchForWire(patch)),
   publish: (id) => http.post<Workflow>(`/workflows/${id}/publish`),
   remove: (id) => http.delete<void>(`/workflows/${id}`),
 }
 
-export const workflowService: WorkflowService = USE_MOCKS
-  ? mockWorkflowService
-  : httpWorkflowService
+export const workflowService: WorkflowService = isLive('workflows')
+  ? httpWorkflowService
+  : mockWorkflowService
