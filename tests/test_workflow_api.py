@@ -146,6 +146,29 @@ def test_patch_ignores_status_and_version_fields(db_session_factory):
     assert body["version"] == 1
 
 
+def test_patch_rejects_explicit_null_name_with_422(db_session_factory):
+    """name is a NOT NULL column -- an explicit null must be rejected before
+    it ever reaches the ORM, not surface as a 500 from a commit-time
+    IntegrityError."""
+    workflow_id = _seed(db_session_factory)
+
+    response = client.patch(f"/api/workflows/{workflow_id}", json={"name": None})
+
+    assert response.status_code == 422
+
+
+def test_patch_rejects_explicit_null_steps_and_leaves_steps_intact(db_session_factory):
+    """steps is a NOT NULL column -- an explicit null must be rejected, not
+    silently accepted and stored as a JSON null that wipes every step."""
+    workflow_id = _seed_with_steps(db_session_factory, ONE_STEP)
+
+    response = client.patch(f"/api/workflows/{workflow_id}", json={"steps": None})
+    assert response.status_code == 422
+
+    follow_up = client.get(f"/api/workflows/{workflow_id}")
+    assert [step["id"] for step in follow_up.json()["steps"]] == ["s1"]
+
+
 def test_patch_replaces_steps_wholesale(db_session_factory):
     workflow_id = _seed_with_steps(db_session_factory, ONE_STEP)
 
@@ -165,6 +188,26 @@ def test_patch_rejects_step_with_unknown_type(db_session_factory):
     response = client.patch(
         f"/api/workflows/{workflow_id}",
         json={"steps": [{"id": "s1", "name": "Bad step", "type": "not_a_real_type"}]},
+    )
+
+    assert response.status_code == 422
+
+
+def test_patch_rejects_step_with_unrecognized_field(db_session_factory):
+    workflow_id = _seed(db_session_factory)
+
+    response = client.patch(
+        f"/api/workflows/{workflow_id}",
+        json={
+            "steps": [
+                {
+                    "id": "s1",
+                    "name": "x",
+                    "type": "ask_customer",
+                    "bogusField": "should not be accepted",
+                }
+            ]
+        },
     )
 
     assert response.status_code == 422
