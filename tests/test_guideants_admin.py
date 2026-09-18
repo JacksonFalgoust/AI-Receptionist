@@ -136,3 +136,35 @@ def test_unconfigured_import_raises_not_configured(monkeypatch):
     monkeypatch.setattr(config, "GUIDEANTS_ADMIN_PASSWORD", "")
     with pytest.raises(guideants_admin.GuideAntsNotConfigured):
         asyncio.run(guideants_admin.import_bundle(b"PK\x03\x04"))
+
+
+@pytest.mark.parametrize("body", ["Guide import failed.", ["manifest.json not found"]])
+def test_a_non_dict_error_body_still_raises_a_recorded_admin_error(body):
+    """publisher.publish() catches only GuideAntsAdminError. An
+    AttributeError from .get() on a bare string or list body would escape
+    uncaught, roll back the GuidePublication's failure row, and return an
+    unrecorded 500 -- defeating "every failure is recorded"."""
+    FakeAsyncClient.responses = [
+        FakeResponse(200, {}, cookies={"auth": "jwt"}),
+        FakeResponse(400, body),
+    ]
+    with pytest.raises(guideants_admin.GuideAntsAdminError) as excinfo:
+        asyncio.run(guideants_admin.import_bundle(b"PK\x03\x04"))
+
+    assert not isinstance(excinfo.value, AttributeError)
+    assert "HTTP 400" in str(excinfo.value)
+    # The body is still surfaced rather than swallowed.
+    assert str(body) in str(excinfo.value) or body in str(excinfo.value)
+
+
+def test_an_unparseable_error_body_falls_back_to_the_raw_text():
+    class NotJson(FakeResponse):
+        def json(self):
+            raise ValueError("no JSON")
+
+    FakeAsyncClient.responses = [
+        FakeResponse(200, {}, cookies={"auth": "jwt"}),
+        NotJson(500, "<html>502 Bad Gateway</html>"),
+    ]
+    with pytest.raises(guideants_admin.GuideAntsAdminError, match="Bad Gateway"):
+        asyncio.run(guideants_admin.import_bundle(b"PK\x03\x04"))

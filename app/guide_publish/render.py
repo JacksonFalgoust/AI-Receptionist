@@ -42,6 +42,17 @@ def _tone_prose(identity: dict) -> str:
     return _clean(_TONE_PROSE.get(tone, _TONE_PROSE["professional"]), "identity.tone_prose")
 
 
+def _hours_prose(profile: dict, field: str) -> str:
+    """hours.py raises its own ValueError (e.g. "business hours must cover
+    all seven days") before _clean ever sees a value, so re-raise with the
+    field name attached -- every other slot failure names its field, and a
+    422 is only useful if it says which one to go fix."""
+    try:
+        return hours_module.hours_prose(profile.get("hours", []))
+    except ValueError as exc:
+        raise ValueError(f"{field}: {exc}") from exc
+
+
 def build_slots(configuration: models.ConciergeConfiguration) -> dict[str, str]:
     """The complete slot set. Adding one here requires adding it to
     instructions.template.md too -- template.render_instructions() rejects
@@ -54,7 +65,7 @@ def build_slots(configuration: models.ConciergeConfiguration) -> dict[str, str]:
         ),
         "business.address": _clean(profile.get("address", ""), "business.address"),
         "business.hours_prose": _clean(
-            hours_module.hours_prose(profile.get("hours", [])), "business.hours_prose"
+            _hours_prose(profile, "business.hours_prose"), "business.hours_prose"
         ),
         "identity.tone_prose": _tone_prose(configuration.identity),
     }

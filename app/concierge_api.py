@@ -180,6 +180,12 @@ async def rollback(
         select(models.GuidePublication).where(
             models.GuidePublication.id == publication_id,
             models.GuidePublication.organization_id == config.DEFAULT_ORGANIZATION_ID,
+            # Only a SUCCEEDED publication is a valid rollback target. A
+            # failed row still has bundle_bytes (written before the push was
+            # attempted) so replaying it would "succeed" -- but its
+            # published_config is {}, and republish() copies that forward,
+            # which would silently revert the live greeting to the default.
+            models.GuidePublication.status == "succeeded",
         )
     )
     if publication is None:

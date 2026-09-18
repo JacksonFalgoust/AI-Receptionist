@@ -49,6 +49,15 @@ def push_ok(monkeypatch):
     monkeypatch.setattr(guideants_admin, "is_configured", lambda: True)
 
 
+@pytest.fixture
+def push_fails(monkeypatch):
+    async def fake_import(zip_bytes):
+        raise guideants_admin.GuideAntsAdminError("GuideAnts unreachable on import")
+
+    monkeypatch.setattr(guideants_admin, "import_bundle", fake_import)
+    monkeypatch.setattr(guideants_admin, "is_configured", lambda: True)
+
+
 def test_get_configuration_seeds_and_returns_camel_case(db_session_factory):
     response = client.get("/api/concierge/configuration")
     assert response.status_code == 200
@@ -182,3 +191,44 @@ def test_publications_list_is_newest_first(db_session_factory, push_ok):
 def test_requires_auth(db_session_factory):
     app.dependency_overrides.pop(auth.require_auth, None)
     assert client.get("/api/concierge/configuration").status_code == 401
+
+
+def test_rollback_of_a_failed_publication_is_404(db_session_factory, push_fails):
+    """A failed row still carries bundle_bytes, so replaying it would
+    "succeed" at the network layer -- but its published_config is {}, and
+    republish() copies that forward, silently reverting the live greeting.
+    A failed publication is not a rollback target."""
+    client.post("/api/concierge/configuration/publish")
+    publications = client.get("/api/concierge/publications").json()
+    assert [p["status"] for p in publications] == ["failed"]
+
+    response = client.post(
+        f"/api/concierge/publications/{publications[0]['id']}/rollback"
+    )
+
+    assert response.status_code == 404
+    # Nothing new was recorded, and nothing was pushed.
+    assert len(client.get("/api/concierge/publications").json()) == 1
+
+
+def test_rollback_of_a_pending_publication_is_404(db_session_factory, push_ok):
+    session = db_session_factory()
+    session.add(
+        models.GuidePublication(
+            id="pending-1",
+            organization_id="org_default",
+            published_by="admin@example.com",
+            content_hash="abc",
+            instructions_text="...",
+            published_config={},
+            knowledge_item_count=0,
+            bundle_bytes=b"PK\x03\x04",
+            status="pending",
+        )
+    )
+    session.commit()
+    session.close()
+
+    assert (
+        client.post("/api/concierge/publications/pending-1/rollback").status_code == 404
+    )

@@ -121,3 +121,36 @@ def test_instructions_missing_the_sentinel_are_refused():
 def test_unfilled_slot_in_instructions_is_refused():
     with pytest.raises(bundle.BundleError, match="unfilled"):
         bundle.build_bundle(GOOD_INSTRUCTIONS + " {{business.name}}", {}, _static())
+
+
+# --- The stale-schema landmine, pinned shut ------------------------------
+# guide-demo/tools/*.json is the canonical location operators edit (CLAUDE.md
+# says so); guide-demo/template/OpenAPI/*.json is what actually gets
+# published. They are two independent file copies, and bundle.py's
+# EXPECTED_OPERATION_IDS check only catches a missing or extra operationId --
+# never a changed parameter, enum or description. This repo already lived
+# through exactly that drift once: the original exported folder's
+# voice-receptionist.json had lost `findReservations` entirely.
+#
+# These two tests are the pin. Edit one copy without the other and CI fails
+# immediately, instead of the divergence reaching a live guide.
+
+_SCHEMA_PAIRS = (
+    ("OpenAPI/voice-receptionist.json", "reservations-client-tool.json"),
+    ("OpenAPI/caller-phone.json", "caller-phone-client-tool.json"),
+)
+
+
+@pytest.mark.parametrize("published, canonical", _SCHEMA_PAIRS)
+def test_published_tool_schema_matches_the_canonical_copy(published, canonical):
+    published_bytes = (template.TEMPLATE_DIR / published).read_bytes()
+    canonical_bytes = (
+        template.TEMPLATE_DIR.parent / "tools" / canonical
+    ).read_bytes()
+
+    assert published_bytes == canonical_bytes, (
+        f"guide-demo/template/{published} has drifted from the canonical "
+        f"guide-demo/tools/{canonical}. Copy the canonical file over the "
+        "template one -- the template copy is what a publish actually sends, "
+        "and GuideAnts' import replaces the guide's tools wholesale."
+    )

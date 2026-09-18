@@ -107,11 +107,17 @@ async def import_bundle(zip_bytes: bytes) -> dict:
                 "GuideAnts rejected the import with 401 after re-authenticating"
             )
         if response.status_code >= 400:
-            detail = ""
+            # Every remote failure must end up as a GuideAntsAdminError, which
+            # is the only exception publisher.publish() catches -- anything
+            # else escapes uncaught and the GuidePublication's failure state
+            # is rolled back unrecorded. So a JSON body that is not a dict
+            # (a bare string or list) must not raise on .get() here.
             try:
-                detail = response.json().get("error", "")
+                body = response.json()
             except ValueError:
                 detail = response.text
+            else:
+                detail = body.get("error", "") if isinstance(body, dict) else str(body)
             raise GuideAntsAdminError(
                 f"GuideAnts rejected the import (HTTP {response.status_code}): {detail}"
             )

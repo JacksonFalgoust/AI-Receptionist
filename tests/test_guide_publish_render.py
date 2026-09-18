@@ -168,3 +168,28 @@ def test_static_files_include_both_tool_schemas_and_the_manifest():
     assert "OpenAPI/voice-receptionist.json" in files
     assert "OpenAPI/caller-phone.json" in files
     assert "HostExtensions/UI/contextOptions.json" in files
+
+
+def test_incomplete_hours_name_the_field_like_every_other_slot_failure():
+    """hours.py raises before _clean() runs, so without help the message
+    would say only "business hours must cover all seven days" -- true, but
+    it never names business.hours_prose the way every other 422 does."""
+    profile = dict(config.DEFAULT_BUSINESS_PROFILE)
+    profile["hours"] = profile["hours"][:3]
+
+    with pytest.raises(ValueError) as excinfo:
+        render.build_slots(_configuration(business_profile=profile))
+
+    message = str(excinfo.value)
+    assert message.startswith("business.hours_prose: ")
+    assert "all seven days" in message
+
+
+def test_a_day_missing_its_times_also_names_the_field():
+    profile = dict(config.DEFAULT_BUSINESS_PROFILE)
+    hours = [dict(entry) for entry in profile["hours"]]
+    hours[2] = {"day": 2, "closed": False}
+    profile["hours"] = hours
+
+    with pytest.raises(ValueError, match=r"^business\.hours_prose: Tuesday is open"):
+        render.build_slots(_configuration(business_profile=profile))
