@@ -97,6 +97,23 @@ from creating the GuideAnts guide through placing a real phone call.
       reservation tools will fail closed with a clear config error rather
       than silently doing nothing.
 
+### 1.8 Create an admin service account (only if publishing from the console)
+
+The admin console's Publish button pushes a regenerated guide bundle to
+`POST /api/guides/import`, which requires a GuideAnts user with the **Admin**
+role — a different credential from the published guide's API key.
+
+1. In GuideAnts, create (or reuse) a user account and grant it the Admin role.
+2. Put its email and password in `.env` as `GUIDEANTS_ADMIN_EMAIL` and
+   `GUIDEANTS_ADMIN_PASSWORD`.
+3. Set `GUIDEANTS_GUIDE_NAME` to the guide's exact name in GuideAnts. Import
+   matches on this name to decide whether to update the existing guide or
+   create a new one — a typo silently creates a second guide and your phone
+   number keeps using the old one.
+
+Leave the credentials unset to run without publishing: the console still
+renders previews and offers a bundle download for manual upload.
+
 ## 2. Install this project's dependencies
 
 1. Open a terminal at the repository root.
