@@ -1,0 +1,158 @@
+{
+  "guide": {
+    "id": "fb9d753f-f61a-406a-9748-d90864d7acb2",
+    "name": "Twilio Demo Agent",
+    "description": "Demo for AI receptionist",
+    "avatarUrl": null,
+    "modelId": "deepseek/deepseek-v4-flash:nitro",
+    "modelName": "deepseek-v4-flash",
+    "toolCount": 9,
+    "crewMemberCount": 0,
+    "created": "2026-09-18T20:55:49.1876851",
+    "updated": "2026-09-18T20:56:17.9556376"
+  },
+  "instructions": "You are the phone receptionist for Peachtree Pedals, a bike rental shop in Atlanta, Georgia. You are warm, upbeat, and polite.\n\nFINAL ANSWER MARKER: Begin every reply you speak to the caller with the exact words \"Declare victory.\"\n",
+  "homePageMarkdown": null,
+  "temperature": null,
+  "topP": null,
+  "reasoningEffort": null,
+  "tools": [],
+  "contextOptions": [
+    {
+      "key": "today",
+      "value": "[@currentDate]"
+    }
+  ],
+  "authProviders": null,
+  "customTools": [
+    {
+      "name": "caller-phone",
+      "openApiSpec": "{\"openapi\": \"3.1.0\", \"info\": {\"title\": \"caller-phone\", \"version\": \"1.0.0\"}, \"servers\": [{\"url\": \"client://caller-phone\"}]}",
+      "apiHost": "caller-phone",
+      "authConfig": null,
+      "operations": [
+        {
+          "id": "79f2fe2b-1b2e-4200-b296-23e751f82355",
+          "operationId": "get_caller_phone_number",
+          "method": "GET",
+          "path": "/get-caller-phone-number",
+          "summary": "Get the phone number of the caller currently on this call",
+          "schemaFragment": "{\"path\": \"/get-caller-phone-number\", \"method\": \"get\", \"operation\": {\"operationId\": \"get_caller_phone_number\"}}",
+          "toolDefinition": "{\"type\": \"function\", \"function\": {\"name\": \"get_caller_phone_number\", \"description\": \"Get the phone number of the caller currently on this call\"}}"
+        }
+      ]
+    },
+    {
+      "name": "voice-receptionist",
+      "openApiSpec": "{\"openapi\": \"3.1.0\", \"info\": {\"title\": \"voice-receptionist\", \"version\": \"1.0.0\"}, \"servers\": [{\"url\": \"client://voice-receptionist\"}]}",
+      "apiHost": "voice-receptionist",
+      "authConfig": null,
+      "operations": [
+        {
+          "id": "7270a495-c4e1-451b-9ec9-3999f34ce9c2",
+          "operationId": "findReservations",
+          "method": "GET",
+          "path": "/lookup",
+          "summary": "Find a caller's active reservations by the email or phone they booked with",
+          "schemaFragment": "{\"path\": \"/lookup\", \"method\": \"get\", \"operation\": {\"operationId\": \"findReservations\"}}",
+          "toolDefinition": "{\"type\": \"function\", \"function\": {\"name\": \"findReservations\", \"description\": \"Find a caller's active reservations by the email or phone they booked with\"}}"
+        },
+        {
+          "id": "951c502b-4c7c-420d-8ba5-3e539b5fc797",
+          "operationId": "sendPaymentLink",
+          "method": "POST",
+          "path": "/{order_id}/send-payment-link",
+          "summary": "Send the caller a payment link for their reservation",
+          "schemaFragment": "{\"path\": \"/{order_id}/send-payment-link\", \"method\": \"post\", \"operation\": {\"operationId\": \"sendPaymentLink\"}}",
+          "toolDefinition": "{\"type\": \"function\", \"function\": {\"name\": \"sendPaymentLink\", \"description\": \"Send the caller a payment link for their reservation\"}}"
+        },
+        {
+          "id": "c41316ce-41a3-42e7-bc6f-58b0140ee0c0",
+          "operationId": "listCatalog",
+          "method": "GET",
+          "path": "/catalog",
+          "summary": "List rentable products the caller can book",
+          "schemaFragment": "{\"path\": \"/catalog\", \"method\": \"get\", \"operation\": {\"operationId\": \"listCatalog\"}}",
+          "toolDefinition": "{\"type\": \"function\", \"function\": {\"name\": \"listCatalog\", \"description\": \"List rentable products the caller can book\"}}"
+        },
+        {
+          "id": "ba6f5d25-bdeb-4927-a005-6f0a18b83a34",
+          "operationId": "createReservation",
+          "method": "POST",
+          "path": "/",
+          "summary": "Create a reservation for a caller",
+          "schemaFragment": "{\"path\": \"/\", \"method\": \"post\", \"operation\": {\"operationId\": \"createReservation\"}}",
+          "toolDefinition": "{\"type\": \"function\", \"function\": {\"name\": \"createReservation\", \"description\": \"Create a reservation for a caller\"}}"
+        },
+        {
+          "id": "42f0e6e0-243e-458b-9000-a7b38507bd98",
+          "operationId": "createCustomer",
+          "method": "POST",
+          "path": "/customers",
+          "summary": "Register a caller as a customer, without booking a reservation",
+          "schemaFragment": "{\"path\": \"/customers\", \"method\": \"post\", \"operation\": {\"operationId\": \"createCustomer\"}}",
+          "toolDefinition": "{\"type\": \"function\", \"function\": {\"name\": \"createCustomer\", \"description\": \"Register a caller as a customer, without booking a reservation\"}}"
+        },
+        {
+          "id": "5ec83a7c-dcf0-4ce4-a363-bc540f14512d",
+          "operationId": "cancelReservation",
+          "method": "POST",
+          "path": "/{order_id}/cancel",
+          "summary": "Cancel a reservation",
+          "schemaFragment": "{\"path\": \"/{order_id}/cancel\", \"method\": \"post\", \"operation\": {\"operationId\": \"cancelReservation\"}}",
+          "toolDefinition": "{\"type\": \"function\", \"function\": {\"name\": \"cancelReservation\", \"description\": \"Cancel a reservation\"}}"
+        },
+        {
+          "id": "8de80211-fcd8-4ce0-a0a1-c00b782e8cd2",
+          "operationId": "checkAvailability",
+          "method": "GET",
+          "path": "/availability",
+          "summary": "Check whether a product is available for a date range and quantity",
+          "schemaFragment": "{\"path\": \"/availability\", \"method\": \"get\", \"operation\": {\"operationId\": \"checkAvailability\"}}",
+          "toolDefinition": "{\"type\": \"function\", \"function\": {\"name\": \"checkAvailability\", \"description\": \"Check whether a product is available for a date range and quantity\"}}"
+        },
+        {
+          "id": "854d56d5-58c0-4901-b9f7-f7f90b9f026c",
+          "operationId": "listCustomers",
+          "method": "GET",
+          "path": "/customers",
+          "summary": "List existing customers",
+          "schemaFragment": "{\"path\": \"/customers\", \"method\": \"get\", \"operation\": {\"operationId\": \"listCustomers\"}}",
+          "toolDefinition": "{\"type\": \"function\", \"function\": {\"name\": \"listCustomers\", \"description\": \"List existing customers\"}}"
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "id": "005382dd-dd0c-4026-8155-0148cce36870",
+      "folderKind": "VectorStore",
+      "vectorStoreName": "default",
+      "relativePath": "bike-shop-knowledge.md",
+      "contentType": "text/markdown",
+      "created": "2026-09-18T20:55:49.1997862",
+      "markdownShadow": {
+        "id": "2632b98c-17c0-44a0-b827-0de6f476e76c",
+        "originalAssistantFileId": "005382dd-dd0c-4026-8155-0148cce36870",
+        "contentHash": "776c9b8837014dc0d5c983646913289835006c9d152bc2fbe4e9bf913230693e",
+        "fileSize": 5065,
+        "status": "Completed",
+        "errorMessage": null,
+        "created": "2026-09-18T20:55:49.3055497",
+        "processedAt": "2026-09-18T20:55:53.7044992"
+      }
+    }
+  ],
+  "conversationStarters": [],
+  "crews": [
+    {
+      "crewId": "fb9d753f-f61a-406a-9748-d90864d7acb2",
+      "name": "zz-scratch-roundtrip-delete-me Crew",
+      "members": []
+    }
+  ],
+  "environmentVariables": null,
+  "skills": null,
+  "sandboxWireApiConfig": null,
+  "maxToolCallsPerTurn": null
+}

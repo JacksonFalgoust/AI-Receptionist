@@ -3,8 +3,9 @@
 the live backing for frontend/src/services/configurationService.ts.
 
 Unlike app/knowledge_api.py and app/workflow_api.py, these records are NOT
-console-only: a successful publish rewrites the live GuideAnts guide and
-changes what the next caller hears.
+console-only: a successful publish rewrites the live GuideAnts guide's
+INSTRUCTIONS and changes what the next caller hears. Knowledge items are
+not synced -- see app/guide_publish/guideants_admin.py for why.
 
 Wire shape is camelCase; the models are snake_case. The translation happens
 here, the same split app/conversations_api.py uses.
@@ -166,8 +167,9 @@ async def rollback(
     db: Annotated[Session, Depends(get_db)],
     session: Annotated[models.AuthSession, Depends(auth.require_auth)],
 ) -> dict:
-    """Re-push a stored bundle byte for byte. Because every publish replaces
-    the guide wholesale, this is the only real undo."""
+    """Re-push a previously published set of instructions. Publish only ever
+    changes the guide's instructions, so putting the old ones back is a
+    complete undo."""
     if not guideants_admin.is_configured():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -181,8 +183,8 @@ async def rollback(
             models.GuidePublication.id == publication_id,
             models.GuidePublication.organization_id == config.DEFAULT_ORGANIZATION_ID,
             # Only a SUCCEEDED publication is a valid rollback target. A
-            # failed row still has bundle_bytes (written before the push was
-            # attempted) so replaying it would "succeed" -- but its
+            # failed row still has instructions_text (written before the push
+            # was attempted) so replaying it would "succeed" -- but its
             # published_config is {}, and republish() copies that forward,
             # which would silently revert the live greeting to the default.
             models.GuidePublication.status == "succeeded",
@@ -215,9 +217,13 @@ def download_bundle(
     db: Annotated[Session, Depends(get_db)],
     _: Annotated[models.AuthSession, Depends(auth.require_auth)],
 ) -> Response:
-    """The escape hatch: when GuideAnts is unreachable or credentials are
-    unset, an admin can still download the exact zip and import it by hand
-    in the GuideAnts UI."""
+    """An inspection and archive hatch: the exact rendered guide bundle,
+    instructions and knowledge markdown included.
+
+    Note it is NOT a substitute for Publish: importing this zip by hand in
+    the GuideAnts UI hits the same destructive import bug that Publish
+    avoids (see app/guide_publish/guideants_admin.py), on any guide that has
+    indexed knowledge files."""
     try:
         zip_bytes, _hash, _instructions, _count = publisher.build_zip(db)
     except (ValueError, bundle_module.BundleError, template.SlotError) as exc:

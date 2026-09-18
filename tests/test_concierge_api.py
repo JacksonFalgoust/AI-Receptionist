@@ -42,19 +42,19 @@ def db_session_factory():
 
 @pytest.fixture
 def push_ok(monkeypatch):
-    async def fake_import(zip_bytes):
+    async def fake_update(instructions):
         return {"guideId": "abc", "warnings": []}
 
-    monkeypatch.setattr(guideants_admin, "import_bundle", fake_import)
+    monkeypatch.setattr(guideants_admin, "update_guide_instructions", fake_update)
     monkeypatch.setattr(guideants_admin, "is_configured", lambda: True)
 
 
 @pytest.fixture
 def push_fails(monkeypatch):
-    async def fake_import(zip_bytes):
-        raise guideants_admin.GuideAntsAdminError("GuideAnts unreachable on import")
+    async def fake_update(instructions):
+        raise guideants_admin.GuideAntsAdminError("GuideAnts unreachable on GET /api/guides")
 
-    monkeypatch.setattr(guideants_admin, "import_bundle", fake_import)
+    monkeypatch.setattr(guideants_admin, "update_guide_instructions", fake_update)
     monkeypatch.setattr(guideants_admin, "is_configured", lambda: True)
 
 
@@ -108,10 +108,10 @@ def test_publish_succeeds_and_clears_the_draft_flag(db_session_factory, push_ok)
 
 
 def test_publish_failure_reports_error_and_stays_dirty(db_session_factory, monkeypatch):
-    async def fake_import(zip_bytes):
-        raise guideants_admin.GuideAntsAdminError("GuideAnts unreachable on import")
+    async def fake_update(instructions):
+        raise guideants_admin.GuideAntsAdminError("GuideAnts unreachable on GET /api/guides")
 
-    monkeypatch.setattr(guideants_admin, "import_bundle", fake_import)
+    monkeypatch.setattr(guideants_admin, "update_guide_instructions", fake_update)
     monkeypatch.setattr(guideants_admin, "is_configured", lambda: True)
 
     client.patch("/api/concierge/configuration", json={"terminology": {"customer": "Rider"}})
@@ -194,7 +194,7 @@ def test_requires_auth(db_session_factory):
 
 
 def test_rollback_of_a_failed_publication_is_404(db_session_factory, push_fails):
-    """A failed row still carries bundle_bytes, so replaying it would
+    """A failed row still carries instructions_text, so replaying it would
     "succeed" at the network layer -- but its published_config is {}, and
     republish() copies that forward, silently reverting the live greeting.
     A failed publication is not a rollback target."""

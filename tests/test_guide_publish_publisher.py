@@ -30,23 +30,24 @@ def db():
 
 @pytest.fixture
 def push_ok(monkeypatch):
+    """Records the INSTRUCTIONS pushed -- a publish sends nothing else."""
     calls = []
 
-    async def fake_import(zip_bytes):
-        calls.append(zip_bytes)
+    async def fake_update(instructions):
+        calls.append(instructions)
         return {"guideId": "abc", "warnings": ["model alias not resolved"]}
 
-    monkeypatch.setattr(guideants_admin, "import_bundle", fake_import)
+    monkeypatch.setattr(guideants_admin, "update_guide_instructions", fake_update)
     monkeypatch.setattr(guideants_admin, "is_configured", lambda: True)
     return calls
 
 
 @pytest.fixture
 def push_fails(monkeypatch):
-    async def fake_import(zip_bytes):
-        raise guideants_admin.GuideAntsAdminError("GuideAnts unreachable on import")
+    async def fake_update(instructions):
+        raise guideants_admin.GuideAntsAdminError("GuideAnts unreachable on GET /api/guides")
 
-    monkeypatch.setattr(guideants_admin, "import_bundle", fake_import)
+    monkeypatch.setattr(guideants_admin, "update_guide_instructions", fake_update)
     monkeypatch.setattr(guideants_admin, "is_configured", lambda: True)
 
 
@@ -65,10 +66,13 @@ def test_successful_publish_records_and_clears_the_draft_flag(db, push_ok):
     publication = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
 
     assert publication.status == "succeeded"
-    assert publication.warnings == ["model alias not resolved"]
+    assert publication.warnings[0] == "model alias not resolved"
+    assert publisher.KNOWLEDGE_NOT_SYNCED_WARNING in publication.warnings
     assert publication.published_config["identity"]["greeting"] == "Hi there"
     assert publication.bundle_bytes
-    assert len(push_ok) == 1
+    assert push_ok == [publication.instructions_text], (
+        "a publish sends the rendered instructions and nothing else"
+    )
     assert configuration_store.get_configuration(db).has_unpublished_changes is False
 
 
@@ -122,7 +126,7 @@ def test_configuration_only_change_publishes_without_a_push(db, push_ok):
     assert second.bundle_bytes == first.bundle_bytes
     assert second.instructions_text == first.instructions_text
     assert second.knowledge_item_count == first.knowledge_item_count
-    assert len(push_ok) == 1, "an unchanged bundle must not be sent to GuideAnts again"
+    assert len(push_ok) == 1, "unchanged instructions must not be sent again"
 
     # (b) the draft flag clears
     assert configuration_store.get_configuration(db).has_unpublished_changes is False
@@ -188,7 +192,7 @@ def test_publishable_knowledge_is_counted(db, push_ok):
     assert publication.knowledge_item_count == 1
 
 
-def test_republish_pushes_a_stored_bundle_again(db, push_ok):
+def test_republish_pushes_the_stored_instructions_again(db, push_ok):
     first = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
     row = configuration_store.get_configuration(db)
     configuration_store.save_draft(
@@ -203,18 +207,107 @@ def test_republish_pushes_a_stored_bundle_again(db, push_ok):
 
     assert rolled_back.status == "succeeded"
     assert rolled_back.content_hash == first.content_hash
+    assert rolled_back.instructions_text == first.instructions_text
     assert rolled_back.id != first.id, "a rollback is recorded as its own publication"
     assert len(push_ok) == 3
+    assert push_ok[-1] == first.instructions_text, (
+        "a rollback re-sends the STORED instructions, not a re-render"
+    )
 
 
-def test_republish_without_stored_bytes_fails_cleanly(db, push_ok):
+def test_republish_without_stored_instructions_fails_cleanly(db, push_ok):
     publication = models.GuidePublication(
         organization_id=config.DEFAULT_ORGANIZATION_ID,
-        published_by="admin@example.com", content_hash="old", instructions_text="...",
+        published_by="admin@example.com", content_hash="old", instructions_text="",
         published_config={}, knowledge_item_count=0, bundle_bytes=None,
         status="succeeded",
     )
     db.add(publication)
     db.commit()
-    with pytest.raises(ValueError, match="no stored bundle"):
+    with pytest.raises(ValueError, match="no stored instructions"):
         asyncio.run(publisher.republish(db, publication, published_by="a@example.com"))
+    assert push_ok == []
+
+
+def test_republish_needs_no_stored_bundle(db, push_ok):
+    """The bundle is no longer what a rollback replays, so an old row that
+    predates bundle storage is still a valid rollback target."""
+    publication = models.GuidePublication(
+        organization_id=config.DEFAULT_ORGANIZATION_ID,
+        published_by="admin@example.com", content_hash="old",
+        instructions_text="the instructions as published",
+        published_config={"identity": {"greeting": "Old greeting"}},
+        knowledge_item_count=0, bundle_bytes=None, status="succeeded",
+    )
+    db.add(publication)
+    db.commit()
+
+    replay = asyncio.run(
+        publisher.republish(db, publication, published_by="a@example.com")
+    )
+    assert replay.status == "succeeded"
+    assert push_ok == ["the instructions as published"]
+    assert replay.published_config == {"identity": {"greeting": "Old greeting"}}
+
+
+def test_knowledge_only_change_records_without_a_push(db, push_ok):
+    """Publish does not sync knowledge -- GuideAnts' import endpoint is
+    unsafe for a guide with indexed files. A knowledge edit therefore moves
+    the content hash but leaves the instructions alone, so nothing is sent;
+    the publication is still recorded so the console stops looking dirty."""
+    from datetime import datetime
+
+    first = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+    assert len(push_ok) == 1
+
+    db.add(
+        models.KnowledgeItem(
+            id="k-new",
+            organization_id=config.DEFAULT_ORGANIZATION_ID,
+            title="Winter hours",
+            type="policy", status="active", source="Manual entry",
+            content="We close an hour early in January.", tags=[],
+            updated_at=datetime.utcnow(),
+        )
+    )
+    db.commit()
+
+    second = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+
+    assert second.id != first.id
+    assert second.status == "succeeded"
+    assert second.content_hash != first.content_hash, "the bundle really did change"
+    assert second.instructions_text == first.instructions_text
+    assert second.knowledge_item_count == first.knowledge_item_count + 1
+    assert len(push_ok) == 1, "a knowledge edit changes no instructions to send"
+    assert publisher.KNOWLEDGE_NOT_SYNCED_WARNING in second.warnings
+
+
+def test_the_knowledge_warning_says_publish_did_not_sync_it(db, push_ok):
+    publication = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+    assert publication.knowledge_item_count > 0
+    warning = publisher.KNOWLEDGE_NOT_SYNCED_WARNING
+    assert warning in publication.warnings
+    assert "not synced" in warning and "GuideAnts editor" in warning
+
+
+def test_no_knowledge_warning_when_there_is_no_knowledge(db, push_ok, monkeypatch):
+    monkeypatch.setattr(publisher, "_knowledge_items", lambda db: [])
+    publication = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+    assert publication.knowledge_item_count == 0
+    assert publisher.KNOWLEDGE_NOT_SYNCED_WARNING not in (publication.warnings or [])
+
+
+def test_an_instructions_change_pushes_exactly_the_new_instructions(db, push_ok):
+    asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+    row = configuration_store.get_configuration(db)
+    configuration_store.save_draft(
+        db, row, {"business_profile": {**row.business_profile, "name": "Dogwood Cycles"}}
+    )
+    db.commit()
+
+    second = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+
+    assert len(push_ok) == 2
+    assert push_ok[-1] == second.instructions_text
+    assert "Dogwood Cycles" in push_ok[-1]
