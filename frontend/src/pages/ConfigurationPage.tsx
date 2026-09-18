@@ -82,15 +82,15 @@ function ConfigurationForm({ configuration }: { configuration: ConciergeConfigur
     }: {
       values: ConfigurationFormValues
       thenPublish: boolean
-    }): Promise<ConciergeConfiguration> => {
+    }): Promise<{ configuration: ConciergeConfiguration; warnings: string[] }> => {
       // Publish always saves what's on screen first — nobody wants an edit
       // to look published when it was actually last session's stale draft.
       const saved = await configurationService.saveDraft(formValuesToPatch(values))
-      if (!thenPublish) return saved
+      if (!thenPublish) return { configuration: saved, warnings: [] }
 
       // A publish can fail after the HTTP call itself succeeds (e.g. GuideAnts
-      // unreachable on import) — `published: false` must surface as a failure,
-      // never as a success toast over an unpublished draft.
+      // unreachable) — `published: false` must surface as a failure, never as
+      // a success toast over an unpublished draft.
       const result = await configurationService.publish()
       if (!result.published) {
         throw new AppError({
@@ -100,9 +100,9 @@ function ConfigurationForm({ configuration }: { configuration: ConciergeConfigur
           actions: [{ label: 'Retry', retry: true }],
         })
       }
-      return result.configuration
+      return { configuration: result.configuration, warnings: result.warnings }
     },
-    onSuccess: (updated, variables) => {
+    onSuccess: ({ configuration: updated, warnings }, variables) => {
       queryClient.setQueryData(CONFIGURATION_KEY, updated)
       form.reset(configurationToFormValues(updated))
       if (variables.thenPublish) {
@@ -110,6 +110,14 @@ function ConfigurationForm({ configuration }: { configuration: ConciergeConfigur
         // saveDraft() alone has nothing for the header badge to refetch.
         queryClient.invalidateQueries({ queryKey: ['concierge', 'status'] })
         toast.show('Configuration published.', { tone: 'success' })
+        // A publish updates the guide's INSTRUCTIONS only. Anything it
+        // deliberately did not do — syncing knowledge, most of all — comes
+        // back as a warning, and is shown on a tone that does not
+        // auto-dismiss. A success toast alone would imply more happened
+        // than did.
+        for (const warning of warnings) {
+          toast.show(warning, { tone: 'warning' })
+        }
       } else {
         toast.show('Draft saved.', { tone: 'success' })
       }
