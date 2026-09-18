@@ -59,7 +59,7 @@ Caller ⇄ Twilio ⇄ ───────────────────�
 | [app/reservations.py](../app/reservations.py) | Booqable business logic (catalog lookup, availability check, create/cancel order) called directly by `app/guide_client.py`'s reservation tool handlers. See "Reservation tools" below. |
 | [app/booqable_client.py](../app/booqable_client.py) | Thin async `httpx` wrapper around Booqable's JSON:API v4 (Bearer-token auth). |
 | [app/knowledge_api.py](../app/knowledge_api.py) | FastAPI router for the admin console's Knowledge pages: `GET/POST /api/knowledge`, `GET/PATCH/DELETE /api/knowledge/{id}`, bearer-auth only. Edits here reach the live guide only via Publish (see "Publishing console configuration to the guide" below) — indexing is asynchronous after a successful push. |
-| [app/knowledge_store.py](../app/knowledge_store.py) | SQLAlchemy CRUD for `KnowledgeItem`: filters, search, paging, and the rule that a requested `processing` status is saved as `needs_review` (no ingestion pipeline exists). |
+| [app/knowledge_store.py](../app/knowledge_store.py) | SQLAlchemy CRUD for `KnowledgeItem`: filters, search, paging, the rule that a requested `processing` status is saved as `needs_review` (no ingestion pipeline exists), and `seed_default_items()`, which fills an empty table from `config.DEFAULT_KNOWLEDGE_ITEMS` so a publish can never wipe the guide's knowledge. |
 | [app/workflow_api.py](../app/workflow_api.py) | FastAPI router for the admin console's Workflows pages: `GET/POST /api/workflows`, `GET/PATCH/DELETE /api/workflows/{id}`, `POST /api/workflows/{id}/publish`, bearer-auth only. Console-only — publishing has no effect on live calls. |
 | [app/workflow_store.py](../app/workflow_store.py) | SQLAlchemy CRUD for `Workflow`: `steps` is a JSON column replaced wholesale on every save, and `publish_workflow` refuses to activate a workflow with no steps. |
 | [app/guide_publish/hours.py](../app/guide_publish/hours.py) | Pure functions turning `BusinessHours[]` into spoken prose (`hours_prose`) and a single time into TTS-safe words (`time_prose`) — e.g. "nine A M", never "9:00 AM". No I/O. |
@@ -278,7 +278,7 @@ leaks the model's raw reasoning as plain content (see
 `docs/THINKING_LEAK_FIXES.md`) — either would get spoken and then cut off if
 forwarded live.
 
-The guide is instructed (see `guide-demo/Twillio demo agent/instructions.md`'s
+The guide is instructed (see `guide-demo/template/instructions.template.md`'s
 "FINAL ANSWER MARKER" paragraph) to begin its actual final answer with a
 fixed phrase, `config.FINAL_ANSWER_SENTINEL` ("declare victory" by default).
 `_stream_reply_with_tools` runs every round's deltas through a per-round
@@ -746,13 +746,31 @@ of the phone number or the Conversation Relay config needed
 `app/guide_publish/publisher.py`'s `publish()` is the orchestrator: it loads
 the configuration and knowledge rows, renders and bundles them (everything
 that can fail locally — an empty required field, a missing template slot, a
-bundle invariant — happens here, before the first network call), skips the
-push entirely if the content hash matches the last succeeded publish (a
-no-op costs nothing and leaves no new history row), and otherwise pushes and
-records a `GuidePublication` row with the outcome. The draft flag
+bundle invariant — happens here, before the first network call), decides
+whether there is anything to send, and records a `GuidePublication` row with
+the outcome. The draft flag
 (`has_unpublished_changes` on `ConciergeConfiguration`) is cleared only
 after a *confirmed* success — a failed publish must never leave the console
 claiming to be live when it isn't.
+
+The "is there anything to send" decision is two-tier, and the second tier is
+easy to miss. Most configuration fields are *not* template slots:
+`identity.greeting`/`closing`, `terminology.*`, and the business profile's
+`phone`/`website`/`timezone`/`locations` appear nowhere in
+`instructions.template.md`, so editing them leaves the bundle byte-identical
+and its content hash unchanged. But the greeting reaches callers only
+through `published_config` (see "The draft boundary" below), which is
+written when a publication row is created. So:
+
+- **Same hash *and* same configuration snapshot** — a true no-op. No push,
+  no new row, the previous publication is returned as-is.
+- **Same hash, different snapshot** — nothing to send GuideAnts (the bundle
+  really is unchanged), but a new `succeeded` `GuidePublication` is still
+  recorded carrying the new snapshot, and `mark_published()` still runs.
+  Without this a greeting-only publish would be swallowed: the draft flag
+  would never clear and `_published_greeting()` would keep speaking the old
+  greeting forever.
+- **Different hash** — the full render, push and record path.
 
 ### Import is a full declarative replacement — omission deletes
 
@@ -781,6 +799,22 @@ manifest name match above, and that the rendered instructions are non-empty
 and still carry `config.FINAL_ANSWER_SENTINEL` (empty or sentinel-less
 instructions would mean this app never speaks anything the guide says —
 see `_SentinelGate` above).
+
+### An empty knowledge table is seeded, never published
+
+Because the import replaces the vector store wholesale, a publish from an
+empty `knowledge_items` table would *delete* the guide's entire policy
+knowledge — while `instructions.template.md` keeps telling the guide to
+"search the knowledge base" for rental terms, ID requirements, the damage
+policy, tours and the rest. So `app/knowledge_store.py`'s
+`seed_default_items()` populates an empty table from
+`config.DEFAULT_KNOWLEDGE_ITEMS` (the shop's original vector-store
+document, one item per section) on first read. It runs on the publish path
+as well as on `GET /api/knowledge`, because an admin can reach Publish
+without ever opening the console's Knowledge page. Same seed-on-first-read
+discipline as `configuration_store.get_configuration()`, and for the same
+reason: `create_all()` is the real runtime schema path, so a migration's
+data step would never run for most checkouts.
 
 ### Knowledge indexing is asynchronous
 
@@ -825,7 +859,10 @@ sent it, so nothing about a caller's turn ever reads the draft directly.
   are still recorded as their own `GuidePublication` rows either way, so
   the history isn't lost — `POST /api/concierge/publications/{id}/rollback`
   (`app/guide_publish/publisher.py`'s `republish()`, re-pushing a stored
-  bundle byte-for-byte) is the recovery path if the wrong one wins.
+  bundle byte-for-byte) is the recovery path if the wrong one wins. Only a
+  `succeeded` publication is a valid rollback target — a failed row still
+  has `bundle_bytes` (written before the push was attempted) but an empty
+  `published_config`, so replaying it would quietly revert the greeting.
 
 ---
 

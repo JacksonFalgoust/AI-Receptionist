@@ -10,13 +10,14 @@ publish must never leave the console looking published.
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import config, configuration_store, models
+from .. import config, configuration_store, knowledge_store, models
 from . import bundle as bundle_module
 from . import guideants_admin, render, template
 
@@ -33,6 +34,11 @@ class PreviewResult:
 
 
 def _knowledge_items(db: Session) -> list[models.KnowledgeItem]:
+    # Seeds an empty table first. An import replaces the live guide's vector
+    # store wholesale, so publishing from an empty table would delete the
+    # shop's policy knowledge -- and an admin can reach Publish without ever
+    # opening the console's Knowledge page.
+    knowledge_store.seed_default_items(db)
     return list(
         db.scalars(
             select(models.KnowledgeItem).where(
@@ -87,17 +93,51 @@ async def publish(db: Session, published_by: str) -> models.GuidePublication:
     nothing was attempted and there is nothing to record."""
     zip_bytes, content_hash, instructions, knowledge_count = build_zip(db)
 
+    configuration = configuration_store.get_configuration(db)
+    # Deep-copied so the stored snapshot is a frozen record of what was
+    # published, not a live alias of the configuration row's JSON columns.
+    snapshot = deepcopy(
+        {
+            "business_profile": configuration.business_profile,
+            "identity": configuration.identity,
+            "terminology": configuration.terminology,
+        }
+    )
+
     previous = latest_succeeded(db)
     if previous is not None and previous.content_hash == content_hash:
-        logger.info("publish skipped: content unchanged since %s", previous.created_at)
-        return previous
-
-    configuration = configuration_store.get_configuration(db)
-    snapshot = {
-        "business_profile": configuration.business_profile,
-        "identity": configuration.identity,
-        "terminology": configuration.terminology,
-    }
+        if previous.published_config == snapshot:
+            # Nothing changed anywhere: no push, no new row.
+            logger.info(
+                "publish skipped: content unchanged since %s", previous.created_at
+            )
+            return previous
+        # The bundle is byte-identical but the configuration moved. Only
+        # non-slot fields can do that -- identity.greeting/closing,
+        # terminology.*, business phone/website/timezone/locations -- and
+        # the greeting in particular reaches callers ONLY through
+        # published_config (app/main.py's _published_greeting reads the
+        # latest succeeded row). So there is nothing to send GuideAnts, but
+        # a new succeeded publication must still be recorded, or the new
+        # greeting never goes live and the draft flag never clears.
+        logger.info(
+            "publish: bundle unchanged but configuration moved; "
+            "recording a configuration-only publication"
+        )
+        publication = models.GuidePublication(
+            organization_id=config.DEFAULT_ORGANIZATION_ID,
+            published_by=published_by,
+            content_hash=content_hash,
+            instructions_text=previous.instructions_text,
+            published_config=snapshot,
+            knowledge_item_count=previous.knowledge_item_count,
+            bundle_bytes=previous.bundle_bytes,
+            status="succeeded",
+        )
+        db.add(publication)
+        configuration_store.mark_published(db, configuration, datetime.utcnow())
+        db.commit()
+        return publication
 
     publication = models.GuidePublication(
         organization_id=config.DEFAULT_ORGANIZATION_ID,
@@ -174,7 +214,7 @@ async def republish(
 
     replay.status = "succeeded"
     replay.warnings = result.get("warnings") or None
-    replay.published_config = publication.published_config
+    replay.published_config = deepcopy(publication.published_config or {})
     # The live guide now matches this bundle, so the console is clean again
     # even though the configuration row may differ from what was restored.
     configuration = configuration_store.get_configuration(db)

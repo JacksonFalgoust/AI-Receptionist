@@ -88,11 +88,63 @@ def test_failed_publish_leaves_the_console_unpublished(db, push_fails):
 
 
 def test_republishing_unchanged_content_is_a_no_op(db, push_ok):
-    asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+    first = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
     second = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
 
     assert second.status == "succeeded"
     assert len(push_ok) == 1, "unchanged content must not be pushed twice"
+    # A TRUE no-op -- same bundle AND same configuration -- records nothing.
+    assert second.id == first.id
+    assert db.query(models.GuidePublication).count() == 1
+
+
+def test_configuration_only_change_publishes_without_a_push(db, push_ok):
+    """A greeting edit changes no template slot, so the bundle's hash is
+    unchanged -- but identity.greeting reaches callers only through
+    published_config, so the publish must still be recorded."""
+    first = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+    assert len(push_ok) == 1
+
+    row = configuration_store.get_configuration(db)
+    configuration_store.save_draft(
+        db, row, {"identity": {**row.identity, "greeting": "Peachtree Pedals, howdy!"}}
+    )
+    db.commit()
+    assert configuration_store.get_configuration(db).has_unpublished_changes is True
+
+    second = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+
+    # (a) a NEW succeeded publication carrying the new snapshot, no push
+    assert second.id != first.id
+    assert second.status == "succeeded"
+    assert second.published_config["identity"]["greeting"] == "Peachtree Pedals, howdy!"
+    assert second.content_hash == first.content_hash
+    assert second.bundle_bytes == first.bundle_bytes
+    assert second.instructions_text == first.instructions_text
+    assert second.knowledge_item_count == first.knowledge_item_count
+    assert len(push_ok) == 1, "an unchanged bundle must not be sent to GuideAnts again"
+
+    # (b) the draft flag clears
+    assert configuration_store.get_configuration(db).has_unpublished_changes is False
+
+    # (c) the greeting app/main.py reads is the new one
+    latest = publisher.latest_succeeded(db)
+    assert latest.id == second.id
+    assert latest.published_config["identity"]["greeting"] == "Peachtree Pedals, howdy!"
+
+
+def test_configuration_only_change_does_not_mutate_the_earlier_snapshot(db, push_ok):
+    """published_config is a frozen record: editing the draft afterwards
+    must not rewrite what an earlier publication says was published."""
+    first = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+    original = first.published_config["identity"]["greeting"]
+
+    row = configuration_store.get_configuration(db)
+    row.identity["greeting"] = "mutated in place"
+    configuration_store.save_draft(db, row, {"identity": row.identity})
+    db.commit()
+
+    assert first.published_config["identity"]["greeting"] == original
 
 
 def test_changed_content_publishes_again(db, push_ok):

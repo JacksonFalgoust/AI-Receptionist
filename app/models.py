@@ -86,9 +86,10 @@ class ConversationAction(Base):
 
 class KnowledgeItem(Base):
     """A console-managed knowledge item (frontend/src/types/knowledge.ts).
-    Console-only: the live guide answers from its own GuideAnts vector
-    store, not this table -- see
-    docs/superpowers/specs/2026-09-16-e6-knowledge-design.md, "Future"."""
+    Published: app/guide_publish/render.py renders every publishable row
+    into the guide bundle, and GuideAnts' import replaces the live vector
+    store wholesale -- see
+    docs/superpowers/specs/2026-09-18-guide-publish-pipeline-design.md."""
 
     __tablename__ = "knowledge_items"
 

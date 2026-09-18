@@ -6,8 +6,15 @@ from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app import knowledge_store, models
+from app import config, knowledge_store, models
 from app.db import Base
+
+# frontend/src/types/knowledge.ts's KnowledgeType, mirrored in
+# app/knowledge_api.py -- the seed may only use values the console accepts.
+_KNOWLEDGE_TYPES = {
+    "faq", "policy", "procedure", "product", "service",
+    "pricing", "location", "instruction", "document", "url",
+}
 
 
 def _session():
@@ -104,7 +111,11 @@ def test_other_organizations_rows_are_invisible():
 
     rows, total = knowledge_store.list_items(db)
 
-    assert (rows, total) == ([], 0)
+    # The default organization's own table is empty, so the first read seeds
+    # it -- but the other organization's row is never visible here.
+    assert foreign.id not in {row.id for row in rows}
+    assert all(row.organization_id == config.DEFAULT_ORGANIZATION_ID for row in rows)
+    assert total == len(config.DEFAULT_KNOWLEDGE_ITEMS)
     assert knowledge_store.get_item(db, foreign.id) is None
 
 
@@ -163,3 +174,52 @@ def test_delete_removes_the_row():
     db.commit()
 
     assert knowledge_store.get_item(db, item.id) is None
+
+
+def test_first_read_seeds_the_shops_knowledge_and_renders_to_files():
+    """The regression guard for the publish path: an import replaces the
+    live guide's vector store wholesale, so an empty knowledge_items table
+    would strip the receptionist's entire policy knowledge on first
+    publish."""
+    from datetime import date
+
+    from app.guide_publish import render
+
+    db = _session()
+
+    rows, total = knowledge_store.list_items(db, page_size=100)
+
+    assert total == len(config.DEFAULT_KNOWLEDGE_ITEMS)
+    titles = {row.title for row in rows}
+    assert "Cancellations and Changes" in titles
+    assert "Frequently Asked Questions" in titles
+    assert all(row.status == "active" for row in rows)
+    assert all(row.type in _KNOWLEDGE_TYPES for row in rows)
+
+    files = render.knowledge_files(rows, date.today())
+    assert len(files) == len(config.DEFAULT_KNOWLEDGE_ITEMS)
+    assert b"police report" in b"".join(files.values())
+
+
+def test_seeding_is_idempotent():
+    db = _session()
+    knowledge_store.seed_default_items(db)
+    db.commit()
+    first, total = knowledge_store.list_items(db, page_size=100)
+
+    knowledge_store.seed_default_items(db)
+    db.commit()
+    second, total_again = knowledge_store.list_items(db, page_size=100)
+
+    assert total_again == total == len(config.DEFAULT_KNOWLEDGE_ITEMS)
+    assert {row.id for row in second} == {row.id for row in first}
+
+
+def test_seeding_does_not_run_once_an_item_exists():
+    db = _session()
+    _create(db, title="Only item")
+
+    rows, total = knowledge_store.list_items(db, page_size=100)
+
+    assert total == 1
+    assert [row.title for row in rows] == ["Only item"]

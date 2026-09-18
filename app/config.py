@@ -39,7 +39,12 @@ WELCOME_BACK_GREETING_TEMPLATE = os.environ.get(
 DEFAULT_BUSINESS_PROFILE = {
     "name": "Peachtree Pedals",
     "description": "a bike rental shop in Atlanta, Georgia",
-    "phone": "",
+    # Obviously-fake placeholders (555 is the reserved fiction exchange), not
+    # blanks: the Configuration console's businessProfileFormSchema requires a
+    # non-empty phone, so an empty seed would greet the very first admin with
+    # a validation error on a field they never touched. Neither phone nor
+    # website is a template slot, so their values cannot reach the guide.
+    "phone": "(404) 555-0142",
     "website": "",
     "timezone": "America/New_York",
     "address": "1234 Road Pkwy, Atlanta, GA",
@@ -54,7 +59,10 @@ DEFAULT_IDENTITY = {
     "name": "Peachtree Pedals Receptionist",
     "greeting": WELCOME_GREETING,
     "closing": "Thanks for calling. Have a great ride!",
-    "voice": "",
+    # One of frontend/src/lib/voices.ts's VOICE_OPTIONS, for the same reason
+    # as `phone` above -- identityFormSchema requires a non-empty voice. Not a
+    # template slot either; today nothing outside the console reads it.
+    "voice": "Avery — Warm",
     "tone": "custom",
     "customTone": "warm, upbeat, and polite",
     "primaryLanguage": "en-US",
@@ -67,6 +75,186 @@ DEFAULT_TERMINOLOGY = {
     "location": "Location",
     "employee": "Team member",
 }
+
+# --- Console knowledge seed -----------------------------------------------
+# The shop's policy knowledge, seeded on first read (app/knowledge_store.py's
+# seed_default_items) exactly as the configuration row above is.
+#
+# This is not decoration. A publish replaces the live guide's vector store
+# wholesale (anything absent from the bundle is DELETED -- see
+# app/guide_publish/bundle.py), and instructions.template.md tells the guide
+# to "search the knowledge base" for precisely these topics. With an empty
+# knowledge_items table the first publish would strip the receptionist's
+# entire policy knowledge while leaving it talking fluently about nothing.
+#
+# The text is the original guide-demo vector-store document, one item per
+# section. Live stock and prices deliberately are NOT here: those come from
+# Booqable through the reservation tools.
+DEFAULT_KNOWLEDGE_ITEMS = [
+    {
+        "id": "seed-location-contact-hours",
+        "title": "Location, Contact, and Hours",
+        "type": "location",
+        "content": (
+            "Peachtree Pedals is located at 1234 Road Pkwy, Atlanta, GA, with a lot "
+            "behind the shop and a gate that opens directly onto the Atlanta BeltLine "
+            "trail. Open every day, 9:00 AM to 6:00 PM, including weekends and "
+            "holidays except Thanksgiving Day and Christmas Day, when the shop is "
+            "closed."
+        ),
+    },
+    {
+        "id": "seed-how-rentals-work",
+        "title": "How Rentals Work",
+        "type": "procedure",
+        "content": (
+            "Bikes rent by the day: pick up any time after opening and return by close "
+            "the same day. Multi-day rentals are available on request at a discounted "
+            "daily rate — ask a team member for current multi-day pricing. Walk-ins "
+            "are welcome if a bike is in stock, but calling ahead to reserve is "
+            "recommended, especially on weekends and holidays when popular bikes sell "
+            "out."
+        ),
+    },
+    {
+        "id": "seed-what-you-need-to-rent",
+        "title": "What You Need to Rent",
+        "type": "policy",
+        "content": (
+            "A valid photo ID and a credit card are required at pickup. The card is "
+            "used to place a security hold, not a charge, unless the bike is returned "
+            "damaged or isn't returned at all. Riders must be at least 16 to rent in "
+            "their own name; younger riders can ride if a parent or guardian rents the "
+            "bike and stays with them. Helmet rental is available for an additional "
+            "daily fee — current pricing is in the booking system. We recommend a "
+            "helmet for every rider and require one for riders under 18, though riders "
+            "are welcome to bring their own at no charge instead of renting one."
+        ),
+    },
+    {
+        "id": "seed-bike-types",
+        "title": "Bike Types",
+        "type": "product",
+        "content": (
+            "Cruisers: comfortable upright riding position, best for casual BeltLine "
+            "rides.\n"
+            "Road bikes: lightweight with drop handlebars, best for longer or faster "
+            "rides.\n"
+            "Mountain bikes: rugged tires, good for trails and rougher pavement.\n"
+            "Electric bikes: pedal-assist, popular for hills and longer distances; "
+            "riders must be at least 18.\n"
+            "Kids bikes: a range of smaller frame sizes.\n"
+            "Tandem bikes: two riders on one bike; limited stock, best reserved ahead "
+            "of time.\n"
+            "\n"
+            "Exact prices change with season and demand, so always check the live "
+            "booking system rather than quoting a remembered price."
+        ),
+    },
+    {
+        "id": "seed-accessories",
+        "title": "Accessories",
+        "type": "product",
+        "content": (
+            "A cable lock is included with every rental at no extra charge. Helmet "
+            "rental, baskets, phone mounts, child seats, and trailers are all "
+            "available for an additional daily fee, subject to availability — check "
+            "the booking system for what's currently in stock and its price."
+        ),
+    },
+    {
+        "id": "seed-guided-tours",
+        "title": "Guided Tours",
+        "type": "service",
+        "content": (
+            "A guided two-hour BeltLine tour runs daily at 10 AM and 2 PM, and "
+            "includes the bike, helmet, and a guide. Tours should be booked at least a "
+            "day ahead. Groups larger than six people should call ahead so the shop "
+            "can make sure enough guides and bikes are available."
+        ),
+    },
+    {
+        "id": "seed-damage-loss-theft",
+        "title": "Damage, Loss, and Theft",
+        "type": "policy",
+        "content": (
+            "The renter is responsible for the cost of repair or replacement, up to "
+            "the bike's value, for damage beyond normal wear or for a bike that's lost "
+            "or stolen during the rental period. The card on file covers this. If a "
+            "bike is stolen during a rental, the renter should notify the shop and "
+            "file a police report as soon as possible."
+        ),
+    },
+    {
+        "id": "seed-cancellations-and-changes",
+        "title": "Cancellations and Changes",
+        "type": "policy",
+        "content": (
+            "Reservations can be canceled or rescheduled at no charge if done more "
+            "than 24 hours before pickup. Cancellations inside 24 hours may be charged "
+            "a partial fee. To reschedule instead of canceling outright, let the "
+            "caller know a team member can help once they call back, since "
+            "rescheduling isn't done automatically."
+        ),
+    },
+    {
+        "id": "seed-groups-and-kids",
+        "title": "Groups and Kids",
+        "type": "policy",
+        "content": (
+            "Groups of up to 10 can usually be accommodated without advance notice; "
+            "larger groups should call ahead. Kids bikes are available in a range of "
+            "sizes, and riders under 12 must ride with an accompanying adult."
+        ),
+    },
+    {
+        "id": "seed-directions-and-parking",
+        "title": "Directions and Parking",
+        "type": "location",
+        "content": (
+            "Free parking is available in the lot behind the shop. The shop also has a "
+            "gate directly onto the Atlanta BeltLine, so riders coming from the trail "
+            "don't need to deal with street parking at all."
+        ),
+    },
+    {
+        "id": "seed-weather-policy",
+        "title": "Weather Policy",
+        "type": "policy",
+        "content": (
+            "Rentals go out rain or shine. In severe weather (thunderstorms, extreme "
+            "heat advisories), the shop will offer a same-day reschedule at no charge "
+            "if a caller asks."
+        ),
+    },
+    {
+        "id": "seed-employment",
+        "title": "Employment",
+        "type": "faq",
+        "content": (
+            "The shop hires bike mechanics and rental associates, part-time and "
+            "full-time, ages 18 and up. Apply in person at the shop or ask to speak "
+            "with the manager for hiring questions."
+        ),
+    },
+    {
+        "id": "seed-frequently-asked-questions",
+        "title": "Frequently Asked Questions",
+        "type": "faq",
+        "content": (
+            "- Do I need a reservation? Not required, but recommended, especially on "
+            "weekends and holidays.\n"
+            "- Can I rent for more than one day? Yes — ask a team member for the "
+            "current multi-day rate.\n"
+            "- Do you deliver bikes or offer drop-off? Not currently — all rentals are "
+            "picked up and returned at the shop.\n"
+            "- What happens if a bike breaks during my rental? Call the shop right "
+            "away and they'll swap it out or adjust the charge.\n"
+            "- Is there an age minimum? Riders must be 16 to rent in their own name, "
+            "or younger with a parent or guardian renting for them."
+        ),
+    },
+]
 
 # Ceiling on the Booqable customer lookup done before answering the call --
 # this runs in the call-answering path (POST /twiml must respond promptly),
