@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resetStore, store } from '@/mocks/store'
 
@@ -156,5 +156,55 @@ describe('conversation action details', () => {
         expect(value, `value on ${action.id}`).not.toMatch(FORBIDDEN)
       }
     }
+  })
+})
+
+/**
+ * vi.stubGlobal (not a direct `global.fetch = ...` assignment) -- see the
+ * same note in authService.test.ts.
+ */
+describe('httpConversationService', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+    vi.resetModules()
+  })
+
+  it('lists conversations with filters serialised as a query string', async () => {
+    vi.stubEnv('VITE_USE_MOCKS', 'false')
+    vi.resetModules()
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: async () => ({ items: [], page: 1, pageSize: 20, total: 0 }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { conversationService } = await import('./conversationService')
+    await conversationService.list({ outcome: 'completed', page: 1, pageSize: 20 })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/conversations?outcome=completed&page=1&pageSize=20'),
+      expect.anything(),
+    )
+  })
+
+  it('maps a 404 detail fetch to a not_found AppError', async () => {
+    vi.stubEnv('VITE_USE_MOCKS', 'false')
+    vi.resetModules()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        status: 404,
+        ok: false,
+        json: async () => ({ detail: 'Conversation not found' }),
+      }),
+    )
+
+    const { conversationService } = await import('./conversationService')
+
+    await expect(conversationService.get('missing-id')).rejects.toMatchObject({
+      kind: 'not_found',
+    })
   })
 })

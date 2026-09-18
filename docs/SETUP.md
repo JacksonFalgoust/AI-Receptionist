@@ -192,6 +192,11 @@ The `sendPaymentLink` tool emails a payment link by default — SMS
 
 ## 5. Run the app and expose it publicly
 
+On first run, `uvicorn app.main:app` creates `data/concierge.db` (SQLite) --
+this holds conversation history and login sessions. It's gitignored;
+nothing about it needs manual setup, but back it up before moving to a new
+machine if you want to keep call history.
+
 Conversation Relay requires a public `wss://` URL — it will not connect to
 `localhost`.
 

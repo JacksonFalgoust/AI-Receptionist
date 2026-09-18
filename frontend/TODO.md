@@ -56,6 +56,9 @@ one only depends on things above it.
 - [x] **Routing rule editor** (D4, US-10.1) — `RoutingRuleModal` wired into `RoutingPage` at every entry point: the page header's Add rule button, the empty state's CTA, and a per-row Edit action. `RoutingRulesTable` gained an optional `renderRowAction` slot for that last one — omitted, the table stays exactly as read-only as D3 left it. One modal handles both create and edit; six fields with no sub-collections don't justify a route, and the prototype has no routing-detail screen. Two fields follow a sibling's value: the detail field appears only for the conditions that mean nothing without one, relabelled per condition, and the destination value's label follows the destination type chosen. Priority is a plain, non-unique number with no reordering UI — unlike C7's step list, where sequence *is* the model, here rules may legitimately share a priority. Delete is the only confirmed action on this screen; the Status toggle is already undone with one click. A new rule's `defaultPriority` is set once, at the moment Add rule is clicked, rather than continuously derived from the live rules query — otherwise a background refetch while the modal was still open would re-fire the form's reset effect and silently wipe whatever the user had already typed
 - [x] **Users & Roles** (E1, US-11.1) — `UsersPage` at `/admin/users`: PRD §19.1's five columns (Name, Email, Role, Status, Last login) plus a Manage action. Invite user is a three-field modal that defaults role to Viewer, the least-privileged option, and surfaces a duplicate email as a field-level error via `AppError.fieldErrors` rather than a toast. One Manage modal per row, not a kebab dropdown — `Table`'s `overflow-x-auto` wrapper clips an absolutely-positioned dropdown panel — handling role change, resend invitation (pending invites only), disable/restore access, and remove; Disable and Remove go through `useConfirm()`, Restore and role-save don't. New `src/lib/userGuards.ts` lockout guards, read by `userService`'s mock off the actor persisted in the session rather than a new parameter: nobody can act on their own row, and the organization's last *active* Owner can't be demoted, disabled, or removed — an invited or disabled owner doesn't count toward or against that rule — rendered in the UI as disabled controls with the reason stated as visible text, never left as an unexplained disabled control. A real UI bug surfaced during implementation: opening a confirmation dialog on top of the Manage modal left both dialogs' Cancel buttons visible at once; fixed by hiding (`aria-hidden`/`tabIndex`, never unmounting — the same pattern D2's focus-trap fix established) the outer modal's footer while a confirmation is pending, changing no button's text anywhere
 - [x] **Billing** (E2, US-12.1) — `BillingPage` at `/admin/billing`, read-only: `billingService.getOverview()` is its only method, so the page header carries no actions. A summary strip states plan, status, billing period, and payment method, with "No payment method on file" standing in for the absence rather than a blank cell. A meter per usage metric shifts tone to warning at 80% of plan and danger at 100%, always stated in words as well as by colour; the percentage is floored rather than rounded so the printed number and the tone can never disagree — rounding would let 99.6% render a "100% — over your plan limit" sentence that isn't true yet. An invoices table carries no Download action — invoice documents have no source in this application — and its own local empty state, since an empty invoice list is a normal success state rather than the page's own boundary case. New shared formatters (`formatMoney`, `formatDate`, `formatDateRange`) and two new status types (`BillingStatus`, `InvoiceStatus`) joined the shared `statusTone` registry. `vite.config.ts` now pins the test runner's timezone to UTC, fixing a latent flakiness class where a date-only assertion (e.g. "Aug 30, 2026") passed in CI's UTC and could fail on a non-UTC developer machine for the same instant
+- [x] **Test Concierge drawer** (E3, US-13.1) — Global right-side drawer opened from the Topbar, `ConciergeStatusCard`, and the Configuration Identity fields/Preview, all gated by `use:test` and all opening the drawer in place rather than navigating away. `TestConciergeDrawerContext` is mounted in `App.tsx` above `AppRoutes` — the same reason `ToastProvider`/`ConfirmDialogProvider` sit there — so the transcript survives closing the drawer and switching pages; `/test` stays a real, identically-gated route (`TestPage`) rendering the same `TestConciergePanel` in a page shell instead of drawer chrome, keeping the PRD §22 route valid. Clearly labelled **TEST MODE**; each reply's "What the Concierge used" disclosure renders only the fields it actually populated (workflow/knowledge/integrations/actions), never an empty row. `testConciergeService.simulate()` is fully mocked, so test traffic can't reach a production transaction. Known gap, documented in code rather than fixed: the provider's state is never reset on sign-out/session expiry, unreachable today only because the mock `send()` never rejects with a 401 — E6 should decide whether to reset on auth change or accept the current behavior once a real backend can 401 mid-send
+- [x] **Help** (E4, US-14.1) — `HelpPage` at the ungated `/help` route: client-side search (case-insensitive substring over title/description — static copy from the prototype, no service or mock seed) over four `HelpResourceCard`s (Getting started, Configuration guides, Integration guides, Contact support), each with a real, permission-gated navigable action (`/configuration`, `/integrations`) or a working `mailto:support@guideants.example` link rather than a button that does nothing, matching the no-dead-CTA rule C6/D2 already established
+- [x] **Cross-cutting quality pass** (E5, US-14.2) — WCAG 2.1 AA sweep: darkened `--color-ink-muted` and moved `IconButton`'s primary variant onto the same `--color-brand-solid` tokens `Button` already used, so both pass 4.5:1 against every background they render on (`colorContrast.ts` + tests added to pin it going forward); fixed `PanelHeader`'s h3→h2 heading-order violation; gave actions-only table columns an accessible name; added a `--color-scroll-shadow` affordance so horizontally-scrolling tables signal overflow on mobile. Fixed `RoutingRuleModal`'s stacked-dialog Cancel/Cancel label collision in its delete confirmation with the same aria-hidden/tabIndex-on-the-outer-footer pattern E1 used for `ManageUserModal`. `formatDate`'s range/no-year formatters switched to UTC-safe `Date` methods (`vite.config.ts` already pinned the test runner to UTC for E2), fixing a real off-by-one-day bug for anyone viewing billing dates west of UTC
 
 ---
 
@@ -77,28 +80,7 @@ one only depends on things above it.
 
 ## Phase E — Administration & polish
 
-**E1 and E2 complete;** see the Done list above. E3–E6 remain.
-
-### E3. Test Concierge drawer (US-13.1)
-Global right-side drawer opened from the header, replacing the current link to
-`/test`. Clearly labelled **TEST MODE**. Text simulation: send a message, see
-the reply. Show actions executed / workflow / knowledge / integrations used
-(may be mocked). Escape closes. Test traffic must not create production
-transactions.
-- Keep `/test` as a route rendering the same panel, so the PRD §22 route stays valid.
-
-### E4. Help (US-14.1)
-Search stub, getting started, links to Configuration and Integrations, contact
-support CTA.
-
-### E5. Cross-cutting quality pass (US-14.2)
-- Every primary page has intentional empty + loading states.
-- Toasts on every save/publish/invite/connect; error toasts state a next step.
-- Confirmation on every destructive action listed in PRD §28.
-- `RoutingRuleModal`'s delete confirmation had the same Cancel/Cancel label-collision `ManageUserModal` fixed in E1 — fixed with the same pattern (aria-hidden/tabIndex on the outer footer while a confirmation is pending).
-- Responsive check: Overview, Conversations, and escalations usable on mobile.
-- Accessibility sweep against WCAG 2.1 AA — labels, focus order, contrast, status never by colour alone.
-- No console errors during normal interaction (PRD §52).
+**E1–E5 complete;** see the Done list above. E6 remains.
 
 ### E6. Backend integration
 Replace mock implementations with live calls behind `VITE_USE_MOCKS=false`.
@@ -107,6 +89,37 @@ Replace mock implementations with live calls behind `VITE_USE_MOCKS=false`.
 - Conversation history is the natural first real feed — Conversation Relay
   calls already flow through `app/main.py`.
 - **Enforce every permission in `src/lib/permissions.ts` server-side** (PRD §40). This includes `src/lib/userGuards.ts`'s two lockout rules (self-protection, last active Owner) — both are currently enforced only in the mock `userService`, documented there and in `userGuards.ts` as client-side-only.
+- `TestConciergeDrawerContext` (E3) is mounted above `AppRoutes` and never resets on sign-out/session expiry — decide whether a real backend's 401-mid-`send()` path should clear it on auth transitions or leave the transcript to a full reload, same as every other client-only state in this app.
+- **Slice 1 shipped:** conversation history and login/logout are real,
+  behind `VITE_LIVE_SERVICES=auth,conversations` (see
+  docs/superpowers/specs/2026-09-14-e6-conversation-history-design.md).
+  Slice 2 (knowledge) and slice 3 (workflows) shipped too, both console-only. The other 9 services, and full permission enforcement, remain.
+
+#### Services to bring live
+Each service below still picks its implementation with `USE_MOCKS`. To bring
+one live: switch that export to `isLive('<name>')`, build the FastAPI endpoints
+its HTTP implementation already calls (paths below are relative to
+`API_BASE_URL`, `/api` by default), and scope every endpoint to the caller's
+organization.
+
+- [x] **auth** (`authService`): `POST /auth/login`, `POST /auth/logout`, `POST /auth/password-reset` (this last one is a no-op stub in `app/auth_api.py`; there is no real reset flow yet)
+- [x] **conversations** (`conversationService`): `GET /conversations`, `GET /conversations/{id}`, `GET /conversations/filter-options`
+- [ ] **organizations** (`organizationService`): `GET /organizations`, `GET /organizations/current`
+- [ ] **users** (`userService`): `GET /users`, `POST /users/invite`, `PATCH /users/{id}/role`, `PATCH /users/{id}/status`, `DELETE /users/{id}`, `POST /users/{id}/resend-invitation`. The two `userGuards.ts` lockout rules must be enforced here on the server.
+- [ ] **dashboard** (`dashboardService`): `GET /dashboard/overview`, `GET /dashboard/activity`, `GET /dashboard/escalations`, `GET /dashboard/escalations/count`. All four take `preset`/`from`/`to`, and the two feeds also take `limit`. These can probably be derived from conversation data.
+- [ ] **analytics** (`analyticsService`): `GET /analytics/summary` (`preset`/`from`/`to`)
+- [ ] **notifications** (`notificationService`): `GET /notifications`, `POST /notifications/{id}/read`, `POST /notifications/read-all`
+- [ ] **concierge** (`conciergeService`): `GET /concierge/status`, `POST /concierge/pause`, `POST /concierge/resume`, `GET`/`PATCH /concierge/configuration`, `POST /concierge/configuration/publish`. Pausing has to change how the live call path in `app/main.py` behaves.
+- [ ] **testConcierge** (`testConciergeService`): `POST /concierge/test`. This should call the GuideAnts guide without reaching production transactions (for example Booqable orders or payment links). See the drawer-reset decision above.
+- [ ] **features** (`featureService`): `GET /features`, `PATCH /features/{id}`
+- [ ] **integrations** (`integrationService`): `GET /integrations`, `POST /integrations/{id}/connect`, `POST /integrations/{id}/repair`, `POST /integrations/{id}/disconnect`. This also needs a real credential contract, which replaces `src/lib/integrationAuthFields.ts`. Secrets must never come back in a response.
+- [x] **knowledge** (`knowledgeService`): `GET /knowledge`, `GET /knowledge/{id}`, `POST /knowledge`, `PATCH /knowledge/{id}`, `DELETE /knowledge/{id}`
+  - Console-only — not yet synced to the published guide, and documents/URLs are stored as a filename/address with no ingestion (a requested `processing` status is saved as `needs_review`). See docs/superpowers/specs/2026-09-16-e6-knowledge-design.md §Future.
+- [x] **workflows** (`workflowService`): `GET /workflows`, `GET /workflows/{id}`, `POST /workflows`, `PATCH /workflows/{id}`, `POST /workflows/{id}/publish`, `DELETE /workflows/{id}`
+  - Console-only — publishing has no effect on live calls (no execution engine exists). See docs/superpowers/specs/2026-09-17-e6-workflows-design.md §Future.
+- [ ] **routing** (`routingService`): `GET /routing/rules`, `POST /routing/rules`, `PATCH /routing/rules/{id}`, `DELETE /routing/rules/{id}`
+- [ ] **billing** (`billingService`): `GET /billing/overview`
+- [ ] **Retire the switches**: once all thirteen services are live, remove `USE_MOCKS`, `VITE_LIVE_SERVICES`, and `isLive()` from `src/services/config.ts`
 
 ---
 
