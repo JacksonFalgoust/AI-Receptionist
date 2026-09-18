@@ -99,20 +99,24 @@ from creating the GuideAnts guide through placing a real phone call.
 
 ### 1.8 Create an admin service account (only if publishing from the console)
 
-The admin console's Publish button pushes a regenerated guide bundle to
-`POST /api/guides/import`, which requires a GuideAnts user with the **Admin**
-role — a different credential from the published guide's API key.
+The admin console's Publish button updates **only the guide's instructions**
+(`PUT /api/guides/{id}`, verified by reading the guide back afterwards). It
+does not touch the guide's tools, context options or knowledge base — the
+knowledge base is edited in the GuideAnts editor. Publishing requires a
+GuideAnts user with the **Admin** role, a different credential from the
+published guide's API key.
 
 1. In GuideAnts, create (or reuse) a user account and grant it the Admin role.
 2. Put its email and password in `.env` as `GUIDEANTS_ADMIN_EMAIL` and
    `GUIDEANTS_ADMIN_PASSWORD`.
-3. Set `GUIDEANTS_GUIDE_NAME` to the guide's exact name in GuideAnts. Import
-   matches on this name to decide whether to update the existing guide or
-   create a new one — a typo silently creates a second guide and your phone
-   number keeps using the old one.
+3. Set `GUIDEANTS_GUIDE_NAME` to the guide's exact name in GuideAnts. Publish
+   looks the guide up by this name; if no guide matches, or more than one
+   does, it refuses rather than guessing — it never creates a guide.
 
 Leave the credentials unset to run without publishing: the console still
-renders previews and offers a bundle download for manual upload.
+renders previews and offers a bundle download (for inspection and archiving
+— importing that zip by hand in GuideAnts is **not** a safe substitute, see
+`docs/ARCHITECTURE.md`'s "Why the import endpoint is not used").
 
 ## 2. Install this project's dependencies
 
