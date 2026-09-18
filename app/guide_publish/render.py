@@ -1,0 +1,95 @@
+"""Console rows -> slot values and knowledge files. Pure: no network, no
+database session, no filesystem writes -- it takes ORM rows and returns
+strings and bytes, which is what makes it directly unit-testable in the
+same way app/fillers.py is.
+"""
+
+from __future__ import annotations
+
+import re
+from datetime import date
+
+from .. import models
+from . import hours as hours_module
+
+# Spoken aloud by TTS. instructions.md forbids markup in the guide's own
+# replies for the same reason: a caller would hear the symbols.
+_FORBIDDEN = re.compile(r"[*_#`•\[\]<>]|(?:^|\s)-\s")
+
+_TONE_PROSE = {
+    "professional": "professional and courteous",
+    "friendly": "warm and friendly",
+    "casual": "relaxed and casual",
+    "formal": "formal and precise",
+}
+
+
+def _clean(value: str, field: str) -> str:
+    value = (value or "").strip()
+    if not value:
+        raise ValueError(f"{field} must not be empty")
+    if _FORBIDDEN.search(value):
+        raise ValueError(
+            f"{field} contains markup or symbols that a caller would hear read aloud"
+        )
+    return value
+
+
+def _tone_prose(identity: dict) -> str:
+    tone = identity.get("tone", "professional")
+    if tone == "custom":
+        return _clean(identity.get("customTone", ""), "identity.customTone")
+    return _TONE_PROSE.get(tone, _TONE_PROSE["professional"])
+
+
+def build_slots(configuration: models.ConciergeConfiguration) -> dict[str, str]:
+    """The complete slot set. Adding one here requires adding it to
+    instructions.template.md too -- template.render_instructions() rejects
+    any mismatch in either direction."""
+    profile = configuration.business_profile
+    return {
+        "business.name": _clean(profile.get("name", ""), "business.name"),
+        "business.description": _clean(
+            profile.get("description", ""), "business.description"
+        ),
+        "business.address": _clean(profile.get("address", ""), "business.address"),
+        "business.hours_prose": hours_module.hours_prose(profile.get("hours", [])),
+        "identity.tone_prose": _tone_prose(configuration.identity),
+    }
+
+
+def is_publishable(item: models.KnowledgeItem, today: date) -> bool:
+    """Active, and today falls within its effective window (either bound
+    optional). Anything else is absent from the bundle -- and because
+    GuideAnts' import replaces the vector store wholesale, absent means
+    removed from the live guide, which is what an expired policy wants."""
+    if item.status != "active":
+        return False
+    if item.effective_date and item.effective_date.date() > today:
+        return False
+    if item.expiration_date and item.expiration_date.date() < today:
+        return False
+    return True
+
+
+def _item_markdown(item: models.KnowledgeItem) -> str:
+    lines = [f"# {item.title}", ""]
+    if item.category:
+        lines += [f"Category: {item.category}", ""]
+    if item.tags:
+        lines += [f"Tags: {', '.join(item.tags)}", ""]
+    lines.append(item.content or "")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def knowledge_files(
+    items: list[models.KnowledgeItem], today: date
+) -> dict[str, bytes]:
+    """One file per publishable item, named by id so bundles hash stably
+    across runs (a title-derived name would change the content hash on a
+    rename and trigger a spurious republish)."""
+    return {
+        f"VectorStores/default/{item.id}.md": _item_markdown(item).encode("utf-8")
+        for item in sorted(items, key=lambda i: i.id)
+        if is_publishable(item, today)
+    }
