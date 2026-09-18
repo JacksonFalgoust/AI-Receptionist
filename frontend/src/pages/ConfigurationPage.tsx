@@ -21,8 +21,8 @@ import {
 import type { ConfigurationFormValues } from '@/features/configuration/configurationFormSchema'
 import { IdentityFields } from '@/features/configuration/IdentityFields'
 import { TerminologyFields } from '@/features/configuration/TerminologyFields'
-import { conciergeService } from '@/services/conciergeService'
-import { toAppError } from '@/services/errors'
+import { configurationService } from '@/services/configurationService'
+import { AppError, toAppError } from '@/services/errors'
 import type { ConciergeConfiguration } from '@/types'
 
 const CONFIGURATION_KEY = ['concierge', 'configuration']
@@ -47,7 +47,7 @@ const TAB_ORDER: ConfigurationTab[] = ['businessProfile', 'identity', 'terminolo
 export function ConfigurationPage() {
   const query = useQuery({
     queryKey: CONFIGURATION_KEY,
-    queryFn: () => conciergeService.getConfiguration(),
+    queryFn: () => configurationService.getConfiguration(),
   })
 
   return (
@@ -82,11 +82,25 @@ function ConfigurationForm({ configuration }: { configuration: ConciergeConfigur
     }: {
       values: ConfigurationFormValues
       thenPublish: boolean
-    }) => {
+    }): Promise<ConciergeConfiguration> => {
       // Publish always saves what's on screen first — nobody wants an edit
       // to look published when it was actually last session's stale draft.
-      const saved = await conciergeService.saveDraft(formValuesToPatch(values))
-      return thenPublish ? conciergeService.publish() : saved
+      const saved = await configurationService.saveDraft(formValuesToPatch(values))
+      if (!thenPublish) return saved
+
+      // A publish can fail after the HTTP call itself succeeds (e.g. GuideAnts
+      // unreachable on import) — `published: false` must surface as a failure,
+      // never as a success toast over an unpublished draft.
+      const result = await configurationService.publish()
+      if (!result.published) {
+        throw new AppError({
+          kind: 'server',
+          title: 'Publish failed',
+          description: result.error ?? 'The guide could not be updated. Try again.',
+          actions: [{ label: 'Retry', retry: true }],
+        })
+      }
+      return result.configuration
     },
     onSuccess: (updated, variables) => {
       queryClient.setQueryData(CONFIGURATION_KEY, updated)
