@@ -18,10 +18,12 @@ call's transcript, tool actions, and wrap-up classification are written as a
 `Conversation` record by `app/call_recording.py` at `/ws` disconnect.
 
 As of E6 slice 2 the same database also holds the admin console's knowledge
-items (`app/knowledge_store.py`, served by `app/knowledge_api.py`). These are
-**console-only**: the live guide still answers from its GuideAnts vector
-store, so editing knowledge in the console does not change what the
-concierge says on a call (see "Known gaps").
+items (`app/knowledge_store.py`, served by `app/knowledge_api.py`). Editing
+one no longer stops at the console: an admin's Publish action renders every
+publishable item into the guide's vector store alongside the rendered
+instructions (see "Publishing console configuration to the guide" below) —
+the only caveat is that GuideAnts indexes what it received asynchronously,
+so a successful publish is not the same moment as "searchable on a call."
 
 `app/fillers.py`, `app/barge_in.py`, and `app/speaker_events.py` are the exceptions to
 "no business logic": pure, I/O-free heuristics that decide whether a
@@ -56,10 +58,18 @@ Caller ⇄ Twilio ⇄ ───────────────────�
 | [app/reservations_api.py](../app/reservations_api.py) | FastAPI router: just `/api/booqable/ping`, a manual pre-demo connectivity check. Independent of the Twilio WS path. |
 | [app/reservations.py](../app/reservations.py) | Booqable business logic (catalog lookup, availability check, create/cancel order) called directly by `app/guide_client.py`'s reservation tool handlers. See "Reservation tools" below. |
 | [app/booqable_client.py](../app/booqable_client.py) | Thin async `httpx` wrapper around Booqable's JSON:API v4 (Bearer-token auth). |
-| [app/knowledge_api.py](../app/knowledge_api.py) | FastAPI router for the admin console's Knowledge pages: `GET/POST /api/knowledge`, `GET/PATCH/DELETE /api/knowledge/{id}`, bearer-auth only. Console-only — not synced to the GuideAnts guide. |
+| [app/knowledge_api.py](../app/knowledge_api.py) | FastAPI router for the admin console's Knowledge pages: `GET/POST /api/knowledge`, `GET/PATCH/DELETE /api/knowledge/{id}`, bearer-auth only. Edits here reach the live guide only via Publish (see "Publishing console configuration to the guide" below) — indexing is asynchronous after a successful push. |
 | [app/knowledge_store.py](../app/knowledge_store.py) | SQLAlchemy CRUD for `KnowledgeItem`: filters, search, paging, and the rule that a requested `processing` status is saved as `needs_review` (no ingestion pipeline exists). |
 | [app/workflow_api.py](../app/workflow_api.py) | FastAPI router for the admin console's Workflows pages: `GET/POST /api/workflows`, `GET/PATCH/DELETE /api/workflows/{id}`, `POST /api/workflows/{id}/publish`, bearer-auth only. Console-only — publishing has no effect on live calls. |
 | [app/workflow_store.py](../app/workflow_store.py) | SQLAlchemy CRUD for `Workflow`: `steps` is a JSON column replaced wholesale on every save, and `publish_workflow` refuses to activate a workflow with no steps. |
+| [app/guide_publish/hours.py](../app/guide_publish/hours.py) | Pure functions turning `BusinessHours[]` into spoken prose (`hours_prose`) and a single time into TTS-safe words (`time_prose`) — e.g. "nine A M", never "9:00 AM". No I/O. |
+| [app/guide_publish/render.py](../app/guide_publish/render.py) | Pure: `ConciergeConfiguration` row + `KnowledgeItem` rows -> the template's slot values (`build_slots`) and one Markdown file per publishable knowledge item (`knowledge_files`, `is_publishable`). Rejects any field containing markup a caller would hear read aloud. |
+| [app/guide_publish/template.py](../app/guide_publish/template.py) | Loads `guide-demo/template/instructions.template.md` and fills its `{{slot}}` placeholders (`render_instructions`); errors in both directions — an unfilled slot or a value with no matching slot. `load_static_files()` reads the template's other files (manifest, OpenAPI schemas, context options) verbatim. |
+| [app/guide_publish/bundle.py](../app/guide_publish/bundle.py) | Assembles the deterministic bundle zip and refuses to build an unsafe one: checks the tool schemas carry the exact expected operation set, the manifest name matches `config.GUIDEANTS_GUIDE_NAME`, and the instructions are non-empty and sentinel-bearing — all before any network call. See "Publishing console configuration to the guide" below. |
+| [app/guide_publish/guideants_admin.py](../app/guide_publish/guideants_admin.py) | The only module that calls GuideAnts' *authoring* API (`POST /api/auth/login`, `POST /api/guides/import`), using `GUIDEANTS_ADMIN_EMAIL`/`GUIDEANTS_ADMIN_PASSWORD` (a GuideAnts Admin-role user) — a different credential from the published guide's `GUIDEANTS_API_KEY` used on calls. Holds the login cookie, re-authenticating once on a 401. |
+| [app/guide_publish/publisher.py](../app/guide_publish/publisher.py) | Orchestrates a publish: render -> bundle -> push -> record. `latest_succeeded()` is what `app/main.py`'s greeting reads; `republish()` re-sends a stored bundle byte-for-byte as the rollback path. |
+| [app/configuration_store.py](../app/configuration_store.py) | SQLAlchemy access to the single-row `ConciergeConfiguration` (business profile, identity, terminology), seeded from `app/config.py` defaults on first read. `save_draft`/`mark_published` manage `has_unpublished_changes`. |
+| [app/concierge_api.py](../app/concierge_api.py) | FastAPI router backing `configurationService.ts`: `GET`/`PATCH /api/concierge/configuration`, `POST .../preview`, `POST .../publish`, `GET /api/concierge/publications`, `POST /api/concierge/publications/{id}/rollback`, `GET /api/concierge/bundle` (a manual-import escape hatch when GuideAnts is unreachable). Not console-only — a successful publish changes what the next caller hears. |
 
 ---
 
@@ -704,6 +714,121 @@ call path, and stays in that project.
 
 ---
 
+## Publishing console configuration to the guide (app/guide_publish/, app/configuration_store.py, app/concierge_api.py)
+
+Everything above this section describes a call once the guide's instructions
+already say what they say. This section is how they get that way: the path
+from an admin editing business hours or a greeting in the console to those
+words actually being read by GuideAnts on the next call.
+
+```
+console PATCH businessProfile/identity/terminology
+        │
+        ▼
+ConciergeConfiguration draft row (app/configuration_store.py, has_unpublished_changes=true)
+        │  POST /api/concierge/configuration/publish
+        ▼
+render (app/guide_publish/render.py + hours.py) -> slots filled into
+guide-demo/template/instructions.template.md (app/guide_publish/template.py)
+        │  + knowledge_files() for every publishable KnowledgeItem
+        ▼
+bundle (app/guide_publish/bundle.py) -- invariants checked here, before
+anything is sent
+        │
+        ▼
+POST {GUIDEANTS_BASE_URL}/api/guides/import  (app/guide_publish/guideants_admin.py)
+        │
+        ▼
+live guide updated in place -- GUIDEANTS_PUB_ID unchanged, no re-publish
+of the phone number or the Conversation Relay config needed
+```
+
+`app/guide_publish/publisher.py`'s `publish()` is the orchestrator: it loads
+the configuration and knowledge rows, renders and bundles them (everything
+that can fail locally — an empty required field, a missing template slot, a
+bundle invariant — happens here, before the first network call), skips the
+push entirely if the content hash matches the last succeeded publish (a
+no-op costs nothing and leaves no new history row), and otherwise pushes and
+records a `GuidePublication` row with the outcome. The draft flag
+(`has_unpublished_changes` on `ConciergeConfiguration`) is cleared only
+after a *confirmed* success — a failed publish must never leave the console
+claiming to be live when it isn't.
+
+### Import is a full declarative replacement — omission deletes
+
+GuideAnts' `/api/guides/import` doesn't diff or merge. It matches the
+uploaded bundle to an existing guide by `manifest.json`'s `name` field
+(checked against `config.GUIDEANTS_GUIDE_NAME` before any network call —
+a mismatch would create a second guide instead of updating the live one)
+and then wipes and re-adds every dependent collection: tools, OpenAPI
+schemas, context options, vector-store files. Whatever the zip doesn't
+contain is gone from the live guide, not left alone.
+
+That makes silent omission the dangerous failure mode — a guide stripped of
+a tool still answers the phone fluently, it just quietly can't do that one
+thing anymore, and nothing about the call itself would tell you. This
+repo already lived through a version of it: the original exported
+`guide-demo/Twillio demo agent/` tree's `voice-receptionist.json` was
+missing the `findReservations` operation, and building a bundle from it
+would have deleted the tool a caller needs to cancel a rental over the
+phone. `guide-demo/template/` now sources its `OpenAPI/*.json` from the
+canonical `guide-demo/tools/*.json` copies instead, and `bundle.py` checks
+`EXPECTED_OPERATION_IDS` against the schemas actually going into the
+bundle on every publish — so a truncated or stale schema is a refused
+publish, not a guide that silently lost a capability. `bundle.py`'s other
+checks are the same idea applied everywhere else omission could hurt: the
+manifest name match above, and that the rendered instructions are non-empty
+and still carry `config.FINAL_ANSWER_SENTINEL` (empty or sentinel-less
+instructions would mean this app never speaks anything the guide says —
+see `_SentinelGate` above).
+
+### Knowledge indexing is asynchronous
+
+`render.knowledge_files()` turns every publishable `KnowledgeItem` (active,
+and within its effective/expiration window — see `render.is_publishable()`)
+into one Markdown file under `VectorStores/default/` in the bundle, so
+console knowledge edits *do* reach the guide's vector store on Publish —
+unlike workflows, which remain console-only (see "Known gaps" below, and
+the file map). But a `200` from `/api/guides/import` only means GuideAnts
+accepted the files; it indexes them into a searchable vector store on its
+own schedule afterward. A successful publish is not the same moment as
+"the guide can now answer questions about this," and there's no callback or
+poll in this app to tell the two apart — the manual verification checklist
+for this feature builds in a wait before testing a knowledge-dependent
+call for exactly this reason.
+
+### The draft boundary: what keeps an unpublished edit off a live call
+
+`app/main.py`'s `_published_greeting()` (called from `_greeting_for()`) reads
+`app/guide_publish/publisher.py`'s `latest_succeeded()` — the most recent
+`GuidePublication` row with `status == "succeeded"` — and speaks the
+greeting out of that row's stored `published_config` snapshot, not out of
+the live `ConciergeConfiguration` row. That's the entire mechanism that
+keeps an admin's in-progress edit from reaching a caller before they hit
+Publish: the greeting a caller hears is frozen at whatever was true the
+last time a publish actually succeeded, however far the draft has since
+moved on. The rest of the instructions work the same way one level up —
+GuideAnts itself is only ever holding whatever the last successful import
+sent it, so nothing about a caller's turn ever reads the draft directly.
+
+### Accepted risks
+
+- **Publishing mid-call changes the guide the caller is already talking
+  to.** The published guide reads its live instructions on every turn, not
+  a snapshot taken when the call started — there's no per-call pinning.
+  An admin who publishes while someone is on the phone can change what
+  that same caller hears answered a moment later, mid-conversation.
+- **Two concurrent publishes are last-write-wins.** Nothing serializes
+  `publish()` across admins; whichever bundle GuideAnts finishes importing
+  last is what's live, and the other admin's changes are simply
+  overwritten with no merge and no warning at publish time. Both attempts
+  are still recorded as their own `GuidePublication` rows either way, so
+  the history isn't lost — `POST /api/concierge/publications/{id}/rollback`
+  (`app/guide_publish/publisher.py`'s `republish()`, re-pushing a stored
+  bundle byte-for-byte) is the recovery path if the wrong one wins.
+
+---
+
 ## The GuideAnts endpoint this app depends on
 
 `app/guide_client.py` calls **`POST {GUIDEANTS_BASE_URL}/api/published/openai/{GUIDEANTS_PUB_ID}/v1/responses`** — GuideAnts' OpenAI-wire-compatible Responses endpoint (implemented server-side in `PublishedOpenAiChatWireHandler.PostResponsesAsync`, routed via `PublishedOpenAiWireEndpoints`, GuideAnts repo). Relevant contract details:
@@ -760,5 +885,5 @@ From SETUP.md's hardening notes — not implemented, not required for the demo t
 - If GuideAnts loses track of a conversation mid-call (restart, expiry — see "The GuideAnts endpoint this app depends on" above), the fallback starts a brand-new conversation with **no recap** of what was said earlier in the call. The guide won't remember anything from before the reset; a caller who'd already explained their situation would have to repeat it. Replaying a summary from `st.messages` into the fresh conversation's first turn would fix this but was deliberately left out — this failure mode is mostly a dev-environment concern (a live GuideAnts restart mid-call), not something expected in normal operation.
 - Against an older GuideAnts build whose streamed events don't carry `conversation` yet: the very first turn of a call streams with no way to capture a continuation handle, so that turn's server-side conversation is orphaned (the client has no id for it). `stream_missing_conversation` catches this after the fact, and the *next* turn falls back to one non-streaming call, which starts (and captures the id of) yet another fresh conversation — so the first turn's context is lost, same as the lost-conversation case above. Every turn after that streams and continues normally. This only happens once per call, on the first turn, against a build old enough to lack the field — see `app/guide_client.py` above.
 - See "Interruption notes" above for the known rough edges of the barge-in note-folding feature specifically.
-- **Console knowledge is not synced to the guide.** Knowledge items created or edited in the admin console (`app/knowledge_api.py`) live only in SQLite; the published guide answers from its own GuideAnts vector store (`guide-demo/Twillio demo agent/VectorStores/`). Documents and URLs are stored as a filename/address only — no file content is uploaded or fetched. The two routes to close this (push into the vector store, or a `search_knowledge` client tool) are written up in `docs/superpowers/specs/2026-09-16-e6-knowledge-design.md`, "Future: syncing to the published guide".
+- **Knowledge document/URL content is never uploaded or fetched.** Publish now pushes every publishable knowledge item into the guide's vector store as a rendered Markdown file (`app/guide_publish/render.py`'s `knowledge_files()` — see "Publishing console configuration to the guide" above), closing the sync gap this bullet used to describe. What's still missing: a `document`/`url` item's Markdown file is built from its title/category/tags/content fields only — the actual uploaded file or linked page is stored as a filename/address and never fetched or read, so a knowledge item that's supposed to represent a PDF or webpage publishes only whatever text an admin typed into its `content` field. See `docs/superpowers/specs/2026-09-16-e6-knowledge-design.md`, "Future: syncing to the published guide", for the original design of the gap this closed.
 - **Console workflows have no live effect either.** Workflows created or edited in the admin console (`app/workflow_api.py`) are stored in SQLite and never read by anything in `app/`'s call-handling code — publishing a workflow changes nothing about what the concierge does on a call. See `docs/superpowers/specs/2026-09-17-e6-workflows-design.md`, "Future: giving a published workflow live effect".
