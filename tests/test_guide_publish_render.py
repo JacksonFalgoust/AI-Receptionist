@@ -94,7 +94,19 @@ def test_unknown_slot_raises():
         template.render_instructions(slots)
 
 
-@pytest.mark.parametrize("bad", ["**Peachtree**", "Peach_tree", "# Peachtree", "- Peachtree"])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "**Peachtree**",
+        "Peach_tree",
+        "# Peachtree",
+        "- Peachtree",
+        "Peach`tree`",
+        "• Peachtree",
+        "Peach[tree]",
+        "Peach<tree>",
+    ],
+)
 def test_markdown_in_a_slot_value_is_rejected(bad):
     """Slot values are spoken aloud; instructions.md forbids markup and a
     caller would hear the symbols read out."""
@@ -109,6 +121,18 @@ def test_markdown_in_a_slot_value_is_rejected(bad):
 
 def test_active_in_window_item_is_publishable():
     assert render.is_publishable(_item(), date(2026, 9, 18)) is True
+
+
+def test_item_effective_today_is_publishable():
+    """An item with effective_date set to exactly today is publishable."""
+    item = _item(effective_date=datetime(2026, 9, 18))
+    assert render.is_publishable(item, date(2026, 9, 18)) is True
+
+
+def test_item_expiring_today_is_publishable():
+    """An item with expiration_date set to exactly today is publishable."""
+    item = _item(expiration_date=datetime(2026, 9, 18))
+    assert render.is_publishable(item, date(2026, 9, 18)) is True
 
 
 @pytest.mark.parametrize("status", ["disabled", "error", "needs_review", "processing"])

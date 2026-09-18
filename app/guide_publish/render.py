@@ -39,7 +39,7 @@ def _tone_prose(identity: dict) -> str:
     tone = identity.get("tone", "professional")
     if tone == "custom":
         return _clean(identity.get("customTone", ""), "identity.customTone")
-    return _TONE_PROSE.get(tone, _TONE_PROSE["professional"])
+    return _clean(_TONE_PROSE.get(tone, _TONE_PROSE["professional"]), "identity.tone_prose")
 
 
 def build_slots(configuration: models.ConciergeConfiguration) -> dict[str, str]:
@@ -53,7 +53,9 @@ def build_slots(configuration: models.ConciergeConfiguration) -> dict[str, str]:
             profile.get("description", ""), "business.description"
         ),
         "business.address": _clean(profile.get("address", ""), "business.address"),
-        "business.hours_prose": hours_module.hours_prose(profile.get("hours", [])),
+        "business.hours_prose": _clean(
+            hours_module.hours_prose(profile.get("hours", [])), "business.hours_prose"
+        ),
         "identity.tone_prose": _tone_prose(configuration.identity),
     }
 
