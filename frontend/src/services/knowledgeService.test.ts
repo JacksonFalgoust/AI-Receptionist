@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resetStore, store } from '@/mocks/store'
 
@@ -91,5 +91,101 @@ describe('knowledgeService writes', () => {
 
   it('raises a not_found AppError for an unknown id', async () => {
     await expect(knowledgeService.get('kn_9999')).rejects.toMatchObject({ kind: 'not_found' })
+  })
+})
+
+describe('httpKnowledgeService (VITE_LIVE_SERVICES=knowledge)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+    vi.resetModules()
+  })
+
+  async function loadLive(response: { status: number; ok: boolean; json: () => Promise<unknown> }) {
+    // Mocks stay on globally; only knowledge is named live.
+    vi.stubEnv('VITE_USE_MOCKS', 'true')
+    vi.stubEnv('VITE_LIVE_SERVICES', 'knowledge')
+    vi.resetModules()
+    const fetchMock = vi.fn().mockResolvedValue(response)
+    vi.stubGlobal('fetch', fetchMock)
+    const { knowledgeService: service } = await import('./knowledgeService')
+    return { service, fetchMock }
+  }
+
+  it('lists with filters serialised as a query string', async () => {
+    const { service, fetchMock } = await loadLive({
+      status: 200,
+      ok: true,
+      json: async () => ({ items: [], page: 1, pageSize: 20, total: 0 }),
+    })
+
+    await service.list({ type: 'policy', page: 1, pageSize: 20 })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/knowledge?type=policy&page=1&pageSize=20'),
+      expect.anything(),
+    )
+  })
+
+  it('creates with a JSON POST body', async () => {
+    const { service, fetchMock } = await loadLive({
+      status: 201,
+      ok: true,
+      json: async () => ({ id: 'kn_1' }),
+    })
+
+    await service.create({ title: 'Hours', type: 'faq' })
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toMatch(/\/api\/knowledge$/)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({ title: 'Hours', type: 'faq' })
+  })
+
+  it('deletes with a DELETE and resolves on 204', async () => {
+    const { service, fetchMock } = await loadLive({
+      status: 204,
+      ok: true,
+      json: async () => null,
+    })
+
+    await expect(service.remove('kn_1')).resolves.toBeUndefined()
+    expect(fetchMock.mock.calls[0][1].method).toBe('DELETE')
+  })
+
+  it('maps a 404 to a not_found AppError', async () => {
+    const { service } = await loadLive({
+      status: 404,
+      ok: false,
+      json: async () => ({ detail: 'Knowledge item not found' }),
+    })
+
+    await expect(service.get('missing')).rejects.toMatchObject({ kind: 'not_found' })
+  })
+
+  it('sends an explicit null for a clearable field the caller set to undefined', async () => {
+    const { service, fetchMock } = await loadLive({
+      status: 200,
+      ok: true,
+      json: async () => ({ id: 'kn_1' }),
+    })
+
+    await service.update('kn_1', { category: undefined })
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body).toHaveProperty('category', null)
+  })
+
+  it('leaves a field the caller never mentioned fully absent from the body', async () => {
+    const { service, fetchMock } = await loadLive({
+      status: 200,
+      ok: true,
+      json: async () => ({ id: 'kn_1' }),
+    })
+
+    await service.update('kn_1', { title: 'x' })
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body).not.toHaveProperty('category')
   })
 })

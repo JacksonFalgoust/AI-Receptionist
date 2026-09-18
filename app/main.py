@@ -58,11 +58,13 @@ Conversation memory lives server-side in GuideAnts, keyed by a conversation
 id captured on the call's first turn (see guide_client.GuideSession) and
 passed back as the `conversation` parameter on every later turn -- so only
 the caller's latest utterance is ever sent, never a resent transcript.
-`st.messages` below is therefore just a local log of what was actually said
-for debugging; nothing about GuideAnts continuation depends on its
-contents. When a barge-in cuts a reply short, the text the caller actually
-heard is folded into the next turn's input (guide_client.build_input) so
-the guide knows not to repeat itself -- see ARCHITECTURE.md's
+`st.messages` below is therefore just a local log of what was actually
+said; nothing about GuideAnts continuation depends on its contents. It is
+also, as of app/call_recording.py, the source /api/conversations persists
+as a call's transcript once the call ends. When a barge-in cuts a reply
+short, the text the caller actually heard is folded into the next turn's
+input (guide_client.build_input) so the guide knows not to repeat itself
+-- see ARCHITECTURE.md's
 "Interruption notes" section for how that works and its known rough edges.
 """
 
@@ -71,21 +73,44 @@ import contextlib
 import json
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 from twilio.twiml.voice_response import Connect, VoiceResponse
 
 from . import barge_in, config, fillers, reservations, speaker_events, speech_timing, twilio_auth
+from . import call_recording
+from .auth_api import router as auth_router
 from .booqable_client import BooqableClient, BooqableError
+from .conversations_api import router as conversations_router
+from .db import init_db
 from .guide_client import Delta, GuideSession, ToolCallStarted, build_input, stream_reply
+from .knowledge_api import router as knowledge_router
 from .reservations_api import router as reservations_router
+from .workflow_api import router as workflow_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("voice_receptionist")
 
-app = FastAPI()
+
+@contextlib.asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # E6 slice 1: creates the SQLite tables (conversations, auth_sessions,
+    # ...) on startup if they don't already exist -- see app/db.py's
+    # init_db(). FastAPI's docs recommend a lifespan context manager over
+    # the deprecated @app.on_event("startup") handler for fastapi>=0.115
+    # (confirmed via find-docs against the pinned version).
+    init_db()
+    yield
+
+
+app = FastAPI(lifespan=_lifespan)
 app.include_router(reservations_router)
+app.include_router(auth_router)
+app.include_router(conversations_router)
+app.include_router(knowledge_router)
+app.include_router(workflow_router)
 
 # Ceiling on holding a buffered turn while the caller is (per clientSpeaking
 # events) still audibly speaking. Normally the commit timer is re-armed by
@@ -165,6 +190,10 @@ async def twiml(request: Request) -> Response:
 class CallState:
     guide: GuideSession = field(default_factory=GuideSession)
     messages: list = field(default_factory=list)  # local log only, see module docstring
+    # Wall-clock time this call began -- used only by call_recording.record_call()
+    # to compute duration and approximate per-message timestamps when the
+    # call ends; nothing in the call-flow state machine itself reads this.
+    started_at: datetime = field(default_factory=datetime.utcnow)
     task: object = None  # asyncio.Task | None
     partial_reply: str = ""  # real reply text streamed so far this turn (never the filler)
     # Text of a reply the caller was actually cut off mid-way through by a
@@ -699,3 +728,8 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         timer, st.pending_commit = st.pending_commit, None
         await _cancel_and_await(timer)
         await cancel_task()
+        if authenticated:
+            try:
+                await call_recording.record_call(st)
+            except Exception:
+                logger.exception("Failed to persist conversation record")

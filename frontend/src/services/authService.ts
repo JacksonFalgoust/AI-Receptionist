@@ -1,15 +1,15 @@
 import { buildMockSessionUser, MOCK_PASSWORD } from '@/mocks/session'
 import type { Session } from '@/types'
 
-import { delay, SESSION_STORAGE_KEY, USE_MOCKS } from './config'
+import { delay, isLive, SESSION_STORAGE_KEY } from './config'
 import { AppError } from './errors'
 import { http } from './http'
 
 /**
  * Reference implementation of the service pattern every other service follows:
  * one interface, a mock implementation, an HTTP implementation, and a single
- * export chosen by `USE_MOCKS`. Components import only `authService` and never
- * learn which one they got.
+ * export chosen by `isLive('auth')` (see `VITE_LIVE_SERVICES`, ./config).
+ * Components import only `authService` and never learn which one they got.
  */
 
 export interface SignInInput {
@@ -112,6 +112,6 @@ const httpAuthService: AuthService = {
   },
 }
 
-export const authService: AuthService = USE_MOCKS
-  ? mockAuthService
-  : httpAuthService
+export const authService: AuthService = isLive('auth')
+  ? httpAuthService
+  : mockAuthService

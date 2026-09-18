@@ -23,3 +23,21 @@ export function delay(ms: number = MOCK_LATENCY_MS): Promise<void> {
 }
 
 export const SESSION_STORAGE_KEY = 'guideants.concierge.session'
+
+/**
+ * `VITE_USE_MOCKS=false` used to be all-or-nothing -- every one of the
+ * thirteen services in this directory switching to its HTTP implementation
+ * at once. E6 ships one service at a time instead: `VITE_LIVE_SERVICES`
+ * names which services go live while the rest keep using mocks. Once every
+ * service has migrated, this and USE_MOCKS can both retire.
+ */
+const LIVE_SERVICES = new Set(
+  (import.meta.env.VITE_LIVE_SERVICES ?? '')
+    .split(',')
+    .map((service) => service.trim())
+    .filter(Boolean),
+)
+
+export function isLive(service: string): boolean {
+  return !USE_MOCKS || LIVE_SERVICES.has(service)
+}
