@@ -1,10 +1,23 @@
 from datetime import datetime, timedelta
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
-from app import models
+from app import config, models
 from app.db import Base
+
+
+@pytest.fixture
+def db_session():
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    yield session
+    session.close()
 
 
 def _memory_session():
@@ -170,3 +183,48 @@ def test_workflow_steps_default_to_empty_list():
     db.commit()
 
     assert db.get(models.Workflow, workflow.id).steps == []
+
+
+def test_concierge_configuration_defaults_describe_the_bike_shop():
+    """The seed must match today's authored instructions.md so that the
+    first publish is a verifiable no-op. The frontend mock describes a
+    different fictional business entirely -- do not seed from it."""
+    assert config.DEFAULT_BUSINESS_PROFILE["name"] == "Peachtree Pedals"
+    assert config.DEFAULT_BUSINESS_PROFILE["address"] == "1234 Road Pkwy, Atlanta, GA"
+    assert len(config.DEFAULT_BUSINESS_PROFILE["hours"]) == 7
+    assert config.DEFAULT_IDENTITY["customTone"] == "warm, upbeat, and polite"
+
+
+def test_concierge_configuration_model_roundtrips(db_session):
+    row = models.ConciergeConfiguration(
+        organization_id="org-1",
+        business_profile=config.DEFAULT_BUSINESS_PROFILE,
+        identity=config.DEFAULT_IDENTITY,
+        terminology=config.DEFAULT_TERMINOLOGY,
+    )
+    db_session.add(row)
+    db_session.commit()
+    stored = db_session.query(models.ConciergeConfiguration).one()
+    assert stored.business_profile["name"] == "Peachtree Pedals"
+    assert stored.has_unpublished_changes is False
+    assert stored.last_published_at is None
+
+
+def test_guide_publication_model_roundtrips(db_session):
+    row = models.GuidePublication(
+        organization_id="org-1",
+        published_by="admin@example.com",
+        content_hash="abc123",
+        instructions_text="You are the phone receptionist...",
+        published_config={"identity": {"greeting": "Hi"}},
+        knowledge_item_count=3,
+        bundle_bytes=b"PK\x03\x04",
+        status="succeeded",
+    )
+    db_session.add(row)
+    db_session.commit()
+    stored = db_session.query(models.GuidePublication).one()
+    assert stored.status == "succeeded"
+    assert stored.bundle_bytes == b"PK\x03\x04"
+    assert stored.published_config["identity"]["greeting"] == "Hi"
+    assert stored.warnings is None

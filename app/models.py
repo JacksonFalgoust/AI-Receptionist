@@ -10,7 +10,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON, Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -142,3 +144,63 @@ class AuthSession(Base):
     user_email: Mapped[str] = mapped_column(String, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class ConciergeConfiguration(Base):
+    """The console's Configuration pages (frontend/src/types/concierge.ts's
+    ConciergeConfiguration), and the source of the slot values rendered into
+    the published guide's instructions.
+
+    Three JSON columns rather than flat fields because saveDraft merges
+    section-wise: a PATCH carrying `identity` alone must not wipe
+    `business_profile`. A section present in a patch replaces that column
+    wholesale -- never a field-by-field merge, the same rule
+    models.Workflow.steps follows."""
+
+    __tablename__ = "concierge_configuration"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    organization_id: Mapped[str] = mapped_column(
+        String, nullable=False, unique=True, index=True
+    )
+    business_profile: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    identity: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    terminology: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # Set by any PATCH; cleared ONLY by a confirmed successful publish.
+    has_unpublished_changes: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    last_published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+
+
+class GuidePublication(Base):
+    """One attempt to push a rendered bundle to the live GuideAnts guide.
+
+    Every publish is a full declarative replacement of the guide, so this
+    history is the only record of what was sent -- `bundle_bytes` is kept so
+    a bad publish can be rolled back by re-pushing an earlier one."""
+
+    __tablename__ = "guide_publications"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    organization_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    published_by: Mapped[str] = mapped_column(String, nullable=False)
+    # sha256 over the canonical file map -- drives no-op detection and diffs.
+    content_hash: Mapped[str] = mapped_column(String, nullable=False)
+    instructions_text: Mapped[str] = mapped_column(Text, nullable=False)
+    # The three config sections as published. app/main.py's _greeting_for()
+    # reads the latest succeeded row's copy, which is what keeps draft edits
+    # from reaching callers before Publish.
+    published_config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    knowledge_item_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    bundle_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False)  # pending|succeeded|failed
+    # GuideAnts' ImportGuideResultDto warnings -- surfaced, never swallowed.
+    warnings: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)

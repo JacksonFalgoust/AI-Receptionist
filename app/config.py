@@ -28,6 +28,46 @@ WELCOME_GREETING = os.environ.get(
 WELCOME_BACK_GREETING_TEMPLATE = os.environ.get(
     "WELCOME_BACK_GREETING_TEMPLATE", "Hi {name}, welcome back! How can I help you today?"
 )
+
+# --- Console configuration seed -------------------------------------------
+# Seeded on first read (app/configuration_store.py), NOT in a migration:
+# app/db.py's create_all() is the real runtime schema path, so a migration's
+# data step would never run for most checkouts.
+#
+# These values reproduce guide-demo/template/instructions.template.md's
+# rendered output exactly, which is what makes the first publish a no-op.
+DEFAULT_BUSINESS_PROFILE = {
+    "name": "Peachtree Pedals",
+    "description": "a bike rental shop in Atlanta, Georgia",
+    "phone": "",
+    "website": "",
+    "timezone": "America/New_York",
+    "address": "1234 Road Pkwy, Atlanta, GA",
+    "locations": "1 location",
+    "hours": [
+        {"day": day, "open": "09:00", "close": "18:00", "closed": False}
+        for day in range(7)
+    ],
+}
+
+DEFAULT_IDENTITY = {
+    "name": "Peachtree Pedals Receptionist",
+    "greeting": WELCOME_GREETING,
+    "closing": "Thanks for calling. Have a great ride!",
+    "voice": "",
+    "tone": "custom",
+    "customTone": "warm, upbeat, and polite",
+    "primaryLanguage": "en-US",
+    "supportedLanguages": ["en-US"],
+}
+
+DEFAULT_TERMINOLOGY = {
+    "customer": "Customer",
+    "reservation": "Reservation",
+    "location": "Location",
+    "employee": "Team member",
+}
+
 # Ceiling on the Booqable customer lookup done before answering the call --
 # this runs in the call-answering path (POST /twiml must respond promptly),
 # so a slow/unreachable Booqable must never delay or block picking up.
@@ -187,3 +227,13 @@ POSTMARK_API_URL = os.environ.get("POSTMARK_API_URL", "https://api.postmarkapp.c
 # Fallback channel when the guide calls sendPaymentLink without one: "email" or
 # "sms".
 PAYMENT_LINK_DEFAULT_CHANNEL = os.environ.get("PAYMENT_LINK_DEFAULT_CHANNEL", "email").strip().lower()
+
+# --- GuideAnts authoring API ----------------------------------------------
+# Distinct from GUIDEANTS_API_KEY, which is the *published-guide* key.
+# /api/guides requires an admin JWT (RequireAuthorization("RequireAdmin")).
+# Unset -> publishing returns 503; preview and bundle download still work.
+GUIDEANTS_ADMIN_EMAIL = os.environ.get("GUIDEANTS_ADMIN_EMAIL", "")
+GUIDEANTS_ADMIN_PASSWORD = os.environ.get("GUIDEANTS_ADMIN_PASSWORD", "")
+# The update-match key: GuideAnts decides create-vs-update by matching
+# manifest.json's name against an existing guide's name.
+GUIDEANTS_GUIDE_NAME = os.environ.get("GUIDEANTS_GUIDE_NAME", "Twilio Demo Agent")
