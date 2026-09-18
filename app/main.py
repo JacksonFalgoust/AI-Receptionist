@@ -83,6 +83,7 @@ from . import barge_in, config, fillers, reservations, speaker_events, speech_ti
 from . import call_recording
 from .auth_api import router as auth_router
 from .booqable_client import BooqableClient, BooqableError
+from .concierge_api import router as concierge_router
 from .conversations_api import router as conversations_router
 from .db import init_db
 from .guide_client import Delta, GuideSession, ToolCallStarted, build_input, stream_reply
@@ -108,6 +109,7 @@ async def _lifespan(app: FastAPI):
 app = FastAPI(lifespan=_lifespan)
 app.include_router(reservations_router)
 app.include_router(auth_router)
+app.include_router(concierge_router)
 app.include_router(conversations_router)
 app.include_router(knowledge_router)
 app.include_router(workflow_router)
