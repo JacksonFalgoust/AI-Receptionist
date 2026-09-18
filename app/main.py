@@ -26,7 +26,7 @@ finished, falling back to a word-count estimate of the speaking time
 (speech_timing.py) until the first such event is recognized on the call.
 Every `Delta` this module receives from guide_client.stream_reply() is already gated: the guide
 is instructed to open its final answer with a fixed trigger phrase
-(config.FINAL_ANSWER_SENTINEL, see guide-demo/Twillio demo agent/instructions.md's "FINAL
+(config.FINAL_ANSWER_SENTINEL, see guide-demo/template/instructions.template.md's "FINAL
 ANSWER MARKER" paragraph and guide_client._SentinelGate), and nothing reaches this module until
 that phrase has been seen and stripped -- so respond_to() can forward every delta to Twilio the
 instant it arrives with no local buffering of its own. This is why a reply can go quiet for a

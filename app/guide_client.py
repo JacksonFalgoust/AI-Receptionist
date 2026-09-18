@@ -650,7 +650,7 @@ async def _stream_reply_with_tools(
 
     A round's deltas pass through a `_SentinelGate`: withheld until
     `config.FINAL_ANSWER_SENTINEL` (the guide is instructed -- see
-    guide-demo/Twillio demo agent/instructions.md's "FINAL ANSWER MARKER"
+    guide-demo/template/instructions.template.md's "FINAL ANSWER MARKER"
     paragraph -- to speak it once, at the very start of its actual final
     answer) has been seen in that round's stream, then forwarded live from
     that point on with no further delay. This is not just a latency
