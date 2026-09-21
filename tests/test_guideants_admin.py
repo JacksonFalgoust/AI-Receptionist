@@ -31,7 +31,7 @@ import pathlib
 import pytest
 
 from app import config
-from app.guide_publish import guide_dto, guideants_admin
+from app.guide_publish import guide_dto, guideants_admin, template
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "guide_detail.json"
 GUIDE_ID = "fb9d753f-f61a-406a-9748-d90864d7acb2"
@@ -645,3 +645,91 @@ def test_a_read_back_with_no_file_list_restores_every_file_it_knew_about():
 
     restore = [c for c in FakeAsyncClient.calls if c["method"] == "PUT"][1]
     assert restore["json"]["fileIdsToKeep"] == [f["id"] for f in before["files"]]
+
+
+# --------------------------------------------------------------------------
+# Tool sources: an empty guide is given the template's
+# --------------------------------------------------------------------------
+
+
+def _server_side_tools():
+    """The tools as GuideAnts hands them back after a write: it derives the
+    operations from the spec that was sent."""
+    return [
+        {
+            "name": name,
+            "openApiSpec": text,
+            "apiHost": name,
+            "authConfig": None,
+            "operations": [
+                {"id": f"{name}-{op}", "operationId": op}
+                for op in guide_dto.spec_operation_ids(text)
+            ],
+        }
+        for name, text in template.load_tool_sources().items()
+    ]
+
+
+def _toolless_guide():
+    before = load_detail()
+    before["customTools"] = []
+    return before
+
+
+def test_publishing_to_a_guide_with_no_tools_adds_the_template_tools():
+    before = _toolless_guide()
+    after = copy.deepcopy(before)
+    after["instructions"] = "NEW"
+    after["customTools"] = _server_side_tools()
+    FakeAsyncClient.responses = [
+        LOGIN_OK(), GUIDE_LIST(), FakeResponse(200, before),
+        FakeResponse(200, {}), FakeResponse(200, after),
+    ]
+
+    result = asyncio.run(guideants_admin.update_guide("NEW", KNOWLEDGE))
+
+    put = next(c for c in FakeAsyncClient.calls if c["method"] == "PUT")
+    sent = {tool["name"]: tool for tool in put["json"]["customTools"]}
+    assert sorted(sent) == ["caller-phone", "voice-receptionist"]
+    # The spec goes up exactly as the file has it; the server does the rest.
+    for name, text in template.load_tool_sources().items():
+        assert sent[name]["openApiSpec"] == text
+        assert sent[name]["apiHost"] == name
+    assert result["warnings"] == [
+        "Added tool source(s) the guide was missing: voice-receptionist, caller-phone."
+    ]
+
+
+def test_a_guide_that_already_has_its_tools_is_sent_them_unchanged():
+    before, _ = script_happy_path()
+    result = asyncio.run(guideants_admin.update_guide("NEW INSTRUCTIONS", KNOWLEDGE))
+
+    put = next(c for c in FakeAsyncClient.calls if c["method"] == "PUT")
+    assert put["json"]["customTools"] == before["customTools"]
+    assert result["warnings"] == []
+
+
+def test_only_the_missing_tool_source_is_added():
+    before = load_detail()
+    kept = next(t for t in before["customTools"] if t["name"] == "caller-phone")
+    before["customTools"] = [kept]
+    missing = guide_dto.missing_custom_tools(before, template.load_tool_sources())
+    assert [t["name"] for t in missing] == ["voice-receptionist"]
+
+
+def test_added_tools_that_come_back_without_operations_fail_verification():
+    before = _toolless_guide()
+    after = copy.deepcopy(before)
+    after["instructions"] = "NEW"
+    after["customTools"] = _server_side_tools()
+    after["customTools"][0]["operations"] = []
+    FakeAsyncClient.responses = [
+        LOGIN_OK(), GUIDE_LIST(), FakeResponse(200, before),
+        FakeResponse(200, {}), FakeResponse(200, after),
+        FakeResponse(200, {}),  # the restore PUT
+    ]
+
+    with pytest.raises(guideants_admin.GuideAntsAdminError) as excinfo:
+        asyncio.run(guideants_admin.update_guide("NEW", KNOWLEDGE))
+
+    assert "expected operations" in str(excinfo.value)

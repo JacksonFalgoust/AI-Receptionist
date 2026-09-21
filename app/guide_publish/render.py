@@ -104,17 +104,44 @@ def _item_markdown(item: models.KnowledgeItem) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _slug(title: str) -> str:
+    """Lowercase ASCII words joined by hyphens: "Damage Policy!" -> "damage-policy"."""
+    return re.sub(r"[^a-z0-9]+", "-", (title or "").lower()).strip("-")[:60].strip("-")
+
+
 def knowledge_files(
     items: list[models.KnowledgeItem], today: date
 ) -> dict[str, bytes]:
-    """One file per publishable item, named by id so bundles hash stably
-    across runs (a title-derived name would change the content hash on a
-    rename and trigger a spurious republish)."""
-    return {
-        f"VectorStores/default/{item.id}.md": _item_markdown(item).encode("utf-8")
-        for item in sorted(items, key=lambda i: i.id)
-        if is_publishable(item, today)
-    }
+    """One file per publishable item, named after its title
+    (`VectorStores/default/damage-policy.md`) so the files in GuideAnts say
+    what they hold.
+
+    Items that share a slug keep the plain name for the lowest id and get
+    `-2`, `-3`, ... after it, in id order, so the names are the same on
+    every run and the bundle's content hash stays stable.
+
+    The catch with a title-derived name is that it is only as stable as the
+    title. Renaming an item, or adding one whose title collides with an
+    existing item's and has a lower id, changes a path -- and Publish
+    treats a changed path as a new file: the old one is deleted and the new
+    one re-indexed, during which the guide cannot answer from it. If that
+    downtime ever matters, put the id back in the name
+    (`damage-policy-<id>.md`): the name then survives everything except a
+    title edit's slug, and never collides.
+    """
+    used: set[str] = set()
+    files: dict[str, bytes] = {}
+    for item in sorted(items, key=lambda i: i.id):
+        if not is_publishable(item, today):
+            continue
+        base = _slug(item.title) or "untitled"
+        name, suffix = base, 1
+        while name in used:
+            suffix += 1
+            name = f"{base}-{suffix}"
+        used.add(name)
+        files[f"VectorStores/default/{name}.md"] = _item_markdown(item).encode("utf-8")
+    return files
 
 
 def knowledge_topics(items: list[models.KnowledgeItem], today: date) -> list[str]:

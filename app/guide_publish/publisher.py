@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 # would hash identically today -- so without this marker the first publish
 # after the change would be taken for a no-op and the knowledge would never
 # be sent. Bump the suffix again if what a push covers ever changes.
-_HASH_MARKER = ":knowledge-sync-v1"
+_HASH_MARKER = ":tools-v1"
 
 KNOWLEDGE_PREFIX = "VectorStores/default/"
 

@@ -59,7 +59,7 @@ import logging
 import httpx
 
 from .. import config
-from . import guide_dto
+from . import guide_dto, template
 
 logger = logging.getLogger(__name__)
 
@@ -249,8 +249,18 @@ def _describe_difference(before: dict, after: dict) -> str:
     return "; ".join(differences[:5]) or "an unlocated difference"
 
 
-async def update_guide(instructions: str, knowledge: dict[str, bytes]) -> dict:
-    """Change the live guide's instructions and its knowledge files.
+async def update_guide(
+    instructions: str,
+    knowledge: dict[str, bytes],
+    tools: dict[str, str] | None = None,
+) -> dict:
+    """Change the live guide's instructions and its knowledge files, and
+    add any of the template's tool sources it does not have yet.
+
+    `tools` maps a tool source name to its OpenAPI text and defaults to the
+    template's (`template.load_tool_sources()`). A source the guide already
+    has is left exactly as it is; only an absent one is added, which is
+    what makes publishing to an empty guide give it its tools.
 
     Read the guide, refuse anything we have not proven round-trips, plan
     the file sync against what was just read, rebuild the full-state DTO,
@@ -258,7 +268,7 @@ async def update_guide(instructions: str, knowledge: dict[str, bytes]) -> dict:
     instructions and the planned files moved. A failed verification
     attempts one best-effort restore before raising.
 
-    `knowledge` is keyed by BUNDLE path (`VectorStores/default/<id>.md`);
+    `knowledge` is keyed by BUNDLE path (`VectorStores/default/<title-slug>.md`);
     anything outside that folder is ignored, which keeps this function's
     contract tied to the one folder Publish owns.
 
@@ -303,11 +313,14 @@ async def update_guide(instructions: str, knowledge: dict[str, bytes]) -> dict:
                 "items in the console first"
             )
 
+        sources = template.load_tool_sources() if tools is None else tools
+        new_tools = guide_dto.missing_custom_tools(before, sources)
+
         await _request(
             client,
             "PUT",
             detail_path,
-            json=guide_dto.build_update_dto(before, instructions, plan),
+            json=guide_dto.build_update_dto(before, instructions, plan, new_tools),
         )
 
         after = await _request(client, "GET", detail_path)
@@ -317,7 +330,9 @@ async def update_guide(instructions: str, knowledge: dict[str, bytes]) -> dict:
                 "when verifying the update"
             )
 
-        problem = _verification_problem(before, after, instructions, plan, desired)
+        problem = _verification_problem(
+            before, after, instructions, plan, desired, new_tools
+        )
         if problem:
             restored = await _restore(client, detail_path, before, after)
             raise GuideAntsAdminError(
@@ -334,7 +349,15 @@ async def update_guide(instructions: str, knowledge: dict[str, bytes]) -> dict:
 
         return {
             "guideId": guide_id,
-            "warnings": [],
+            "warnings": (
+                [
+                    "Added tool source(s) the guide was missing: "
+                    + ", ".join(tool["name"] for tool in new_tools)
+                    + "."
+                ]
+                if new_tools
+                else []
+            ),
             "files": {
                 "added": len(plan.added),
                 "replaced": len(plan.replaced),
@@ -350,15 +373,35 @@ def _verification_problem(
     instructions: str,
     plan: guide_dto.FileSyncPlan,
     desired: dict[str, bytes],
+    new_tools: list[dict] | None = None,
 ) -> str | None:
     """What the read-back disproves, or None if the write did exactly what
-    was asked. The file set is checked separately from the rest of the
-    guide, because the files are the part that was meant to move."""
+    was asked. The file set and the added tools are checked separately from
+    the rest of the guide, because they are the parts that were meant to
+    move."""
     if after.get("instructions") != instructions:
         return "the guide's instructions are not what was sent"
 
+    added = {tool["name"]: tool for tool in new_tools or []}
+    after_tools = {tool.get("name"): tool for tool in after.get("customTools") or []}
+    for name, tool in added.items():
+        expected = guide_dto.spec_operation_ids(tool["openApiSpec"])
+        found = sorted(
+            str(op.get("operationId"))
+            for op in (after_tools.get(name) or {}).get("operations") or []
+        )
+        if found != expected:
+            return (
+                f"the added tool source {name!r} does not have the expected "
+                f"operations: expected {expected}, found {found}"
+            )
+
     before_view = guide_dto.comparable(before, include_files=False)
     after_view = guide_dto.comparable(after, include_files=False)
+    # An added tool is the one part of customTools that was meant to move.
+    after_view["customTools"] = [
+        tool for tool in after_view["customTools"] if tool.get("name") not in added
+    ]
     if before_view != after_view:
         return (
             "the update changed more than the instructions and the knowledge "

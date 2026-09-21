@@ -161,10 +161,10 @@ def test_item_outside_its_effective_window_is_not_publishable():
     assert render.is_publishable(expired, date(2026, 9, 18)) is False
 
 
-def test_knowledge_files_are_keyed_by_deterministic_path():
+def test_knowledge_files_are_named_after_the_title():
     files = render.knowledge_files([_item()], date(2026, 9, 18))
-    assert list(files) == ["VectorStores/default/k1.md"]
-    body = files["VectorStores/default/k1.md"].decode()
+    assert list(files) == ["VectorStores/default/damage-policy.md"]
+    body = files["VectorStores/default/damage-policy.md"].decode()
     assert "Damage policy" in body
     assert "normal wear" in body
 
@@ -173,7 +173,38 @@ def test_unpublishable_items_are_absent_from_the_bundle():
     files = render.knowledge_files(
         [_item(id="k1"), _item(id="k2", status="disabled")], date(2026, 9, 18)
     )
-    assert list(files) == ["VectorStores/default/k1.md"]
+    assert list(files) == ["VectorStores/default/damage-policy.md"]
+
+
+@pytest.mark.parametrize(
+    "title, name",
+    [
+        ("Cancellations & Changes!", "cancellations-changes"),
+        ("  Hours -- Weekend  ", "hours-weekend"),
+        ("!!!", "untitled"),
+        ("", "untitled"),
+    ],
+)
+def test_file_names_are_slugs_of_the_title(title, name):
+    files = render.knowledge_files([_item(title=title)], date(2026, 9, 18))
+    assert list(files) == [f"VectorStores/default/{name}.md"]
+
+
+def test_items_sharing_a_title_are_numbered_in_id_order():
+    files = render.knowledge_files(
+        [_item(id="b"), _item(id="c"), _item(id="a")], date(2026, 9, 18)
+    )
+    contents = {path: body for path, body in files.items()}
+    assert sorted(contents) == [
+        "VectorStores/default/damage-policy-2.md",
+        "VectorStores/default/damage-policy-3.md",
+        "VectorStores/default/damage-policy.md",
+    ]
+    # Same input in a different order gives the same names.
+    again = render.knowledge_files(
+        [_item(id="a"), _item(id="b"), _item(id="c")], date(2026, 9, 18)
+    )
+    assert list(again) == list(files)
 
 
 def test_static_files_include_both_tool_schemas_and_the_manifest():

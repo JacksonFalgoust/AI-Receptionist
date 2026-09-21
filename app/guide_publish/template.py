@@ -56,6 +56,23 @@ def render_instructions(slots: dict[str, str]) -> str:
     return text
 
 
+# Tool source name -> its OpenAPI file. The name is the guide's tool source
+# name and its `apiHost`, matching `servers[0].url` (`client://<name>`).
+TOOL_SOURCES = {
+    "voice-receptionist": "OpenAPI/voice-receptionist.json",
+    "caller-phone": "OpenAPI/caller-phone.json",
+}
+
+
+def load_tool_sources() -> dict[str, str]:
+    """Tool source name -> the OpenAPI file's text, unchanged. GuideAnts
+    stores exactly what an admin would paste, so it is not re-serialized."""
+    return {
+        name: (TEMPLATE_DIR / path).read_text(encoding="utf-8")
+        for name, path in TOOL_SOURCES.items()
+    }
+
+
 def load_static_files() -> dict[str, bytes]:
     files = {name: (TEMPLATE_DIR / name).read_bytes() for name in STATIC_FILES}
     # The manifest's name is the guide's identity, so it follows

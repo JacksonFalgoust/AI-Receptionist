@@ -21,6 +21,12 @@ Three pieces make that safe:
     different order each read, and mints fresh operation ids. Pass
     `include_files=False` when the files are *meant* to move -- a
     knowledge sync compares the file set separately.
+  * `missing_custom_tools()` fills in the custom tool sources a guide has
+    none of -- an empty guide otherwise stays empty, because the PUT
+    carries `customTools` across from the read verbatim. Only a source
+    whose NAME is absent is added; one already on the guide is never
+    rewritten, which is what keeps the verified round-trip on a stocked
+    guide byte-for-byte unchanged.
   * `plan_file_sync()` decides, before anything is sent, which existing
     vector-store files to keep by id and which to (re-)upload. Publish
     owns the guide's whole vector store: a file the console does not
@@ -35,6 +41,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
@@ -43,6 +50,7 @@ from typing import Any
 # timestamps, processedAt -- move on their own and say nothing about
 # whether we damaged the guide.
 _SHADOW_KEEP = ("status", "contentHash", "fileSize")
+_HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 
 
 def unsupported_features(detail: dict) -> list[str]:
@@ -113,6 +121,36 @@ def unsupported_features(detail: dict) -> list[str]:
     return reasons
 
 
+def missing_custom_tools(detail: dict, sources: dict[str, str]) -> list[dict]:
+    """The custom tool sources in `sources` (name -> OpenAPI document text)
+    that the guide does not have yet, shaped for `customTools`.
+
+    Only `name`, `apiHost` and the raw `openApiSpec` are sent. GuideAnts
+    derives every operation -- its `schemaFragment` and `toolDefinition` --
+    from the spec on write (measured 2026-09-21: an empty `operations`
+    list came back with all nine operations). The spec must be the file's
+    text unchanged, since that is what an admin's own paste stores.
+    """
+    have = {tool.get("name") for tool in detail.get("customTools") or []}
+    return [
+        {"name": name, "openApiSpec": text, "apiHost": name, "authConfig": None,
+         "operations": []}
+        for name, text in sources.items()
+        if name not in have
+    ]
+
+
+def spec_operation_ids(spec_text: str) -> list[str]:
+    """Sorted operationIds declared by an OpenAPI document."""
+    document = json.loads(spec_text)
+    return sorted(
+        operation["operationId"]
+        for methods in (document.get("paths") or {}).values()
+        for method, operation in methods.items()
+        if method.lower() in _HTTP_METHODS and "operationId" in operation
+    )
+
+
 # The one folder kind Publish owns. Compared case-insensitively because
 # the field is a server-side enum name and nothing guarantees its casing.
 VECTOR_STORE_KIND = "vectorstore"
@@ -159,7 +197,7 @@ class FileSyncPlan:
 def plan_file_sync(detail: dict, desired: dict[str, bytes]) -> FileSyncPlan:
     """Reconcile the guide's vector store against what the console publishes.
 
-    `desired` maps a bare relativePath (`<knowledge item id>.md`) to the
+    `desired` maps a bare relativePath (`<title-slug>.md`) to the
     file's bytes. Only `folderKind == "VectorStore"` files are considered:
     every other folder kind is kept untouched, because Publish does not own
     them.
@@ -236,10 +274,14 @@ def non_vector_store_file_ids(detail: dict) -> set[str]:
 
 
 def build_update_dto(
-    detail: dict, instructions: str, plan: FileSyncPlan | None = None
+    detail: dict,
+    instructions: str,
+    plan: FileSyncPlan | None = None,
+    new_tools: list[dict] | None = None,
 ) -> dict:
     """The GET body of a guide, rebuilt as the PUT body that changes only
-    its instructions and, with a plan, its vector-store files.
+    its instructions and, with a plan, its vector-store files. `new_tools`
+    (from `missing_custom_tools`) are appended to the guide's own.
 
     Every field is carried across deliberately. `fileIdsToKeep` is the one
     that matters most: naming an existing file id keeps it, which keeps its
@@ -271,7 +313,7 @@ def build_update_dto(
         "topP": detail["topP"],
         "reasoningEffort": detail["reasoningEffort"],
         "toolIds": [tool["id"] for tool in detail["tools"]] if detail["tools"] else [],
-        "customTools": detail["customTools"],
+        "customTools": list(detail["customTools"]) + list(new_tools or []),
         "contextOptions": detail["contextOptions"],
         "authProviders": detail["authProviders"],
         "fileIdsToKeep": file_ids_to_keep,

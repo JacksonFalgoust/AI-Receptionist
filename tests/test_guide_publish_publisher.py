@@ -20,7 +20,7 @@ from sqlalchemy.pool import StaticPool
 
 from app import config, configuration_store, models
 from app.db import Base
-from app.guide_publish import guideants_admin, publisher
+from app.guide_publish import guideants_admin, publisher, render
 
 
 @pytest.fixture
@@ -327,7 +327,7 @@ def test_a_knowledge_only_change_is_pushed(db, push_ok):
     assert second.knowledge_item_count == first.knowledge_item_count
     assert len(push_ok) == 2, "a knowledge edit must reach the guide"
     assert b"close an hour early" in push_ok.knowledge[-1][
-        f"VectorStores/default/{item.id}.md"
+        f"VectorStores/default/{render._slug(item.title)}.md"
     ]
 
 
