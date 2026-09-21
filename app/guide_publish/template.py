@@ -13,8 +13,11 @@ stops saying what someone intended.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
+
+from app import config
 
 TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "guide-demo" / "template"
 INSTRUCTIONS_PATH = TEMPLATE_DIR / "instructions.template.md"
@@ -54,4 +57,10 @@ def render_instructions(slots: dict[str, str]) -> str:
 
 
 def load_static_files() -> dict[str, bytes]:
-    return {name: (TEMPLATE_DIR / name).read_bytes() for name in STATIC_FILES}
+    files = {name: (TEMPLATE_DIR / name).read_bytes() for name in STATIC_FILES}
+    # The manifest's name is the guide's identity, so it follows
+    # GUIDEANTS_GUIDE_NAME rather than a copy checked into the template.
+    manifest = json.loads(files["manifest.json"])
+    manifest["name"] = config.GUIDEANTS_GUIDE_NAME
+    files["manifest.json"] = json.dumps(manifest, indent=2).encode("utf-8")
+    return files
