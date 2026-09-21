@@ -18,12 +18,25 @@ Three pieces make that safe:
   * `comparable()` is the normalized view used to prove, after the PUT,
     that nothing but the instructions moved. It has to be
     order-insensitive: GuideAnts returns a custom tool's operations in a
-    different order each read, and mints fresh operation ids.
+    different order each read, and mints fresh operation ids. Pass
+    `include_files=False` when the files are *meant* to move -- a
+    knowledge sync compares the file set separately.
+  * `plan_file_sync()` decides, before anything is sent, which existing
+    vector-store files to keep by id and which to (re-)upload. Publish
+    owns the guide's whole vector store: a file the console does not
+    publish is omitted from `fileIdsToKeep`, and an omitted file is
+    DELETED. Only files that genuinely changed are replaced, because
+    replacing one clears its chunks immediately while re-indexing runs
+    asynchronously -- a needless replace is a window in which the guide
+    cannot answer from that document.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
 from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any
 
 # Kept only when normalizing a file's markdown shadow. The rest -- ids,
@@ -100,16 +113,154 @@ def unsupported_features(detail: dict) -> list[str]:
     return reasons
 
 
-def build_update_dto(detail: dict, instructions: str) -> dict:
+# The one folder kind Publish owns. Compared case-insensitively because
+# the field is a server-side enum name and nothing guarantees its casing.
+VECTOR_STORE_KIND = "vectorstore"
+VECTOR_STORE_NAME = "default"
+
+
+def _is_vector_store(file: dict) -> bool:
+    return str(file.get("folderKind") or "").lower() == VECTOR_STORE_KIND
+
+
+def _content_hash_of(file: dict) -> str:
+    """The SHA-256 hex of the stored file's raw bytes, as GuideAnts records
+    it on the markdown shadow.
+
+    An empty string means "unknown": the shadow is missing, or the file is
+    still being processed and has no hash yet. Unknown must read as
+    CHANGED -- treating it as unchanged would leave a half-processed file
+    in place and silently skip the upload that fixes it.
+    """
+    shadow = file.get("markdownShadow")
+    if not isinstance(shadow, dict):
+        return ""
+    return str(shadow.get("contentHash") or "")
+
+
+@dataclass(frozen=True)
+class FileSyncPlan:
+    """What a publish will do to the guide's vector store.
+
+    `keep_ids` and `adds` go straight into the DTO; the four path lists and
+    `would_delete_everything` are for the caller's guard, its warning and
+    its counts.
+    """
+
+    keep_ids: list[str] = field(default_factory=list)
+    adds: list[dict] = field(default_factory=list)
+    unchanged: list[str] = field(default_factory=list)
+    added: list[str] = field(default_factory=list)
+    replaced: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
+    would_delete_everything: bool = False
+
+
+def plan_file_sync(detail: dict, desired: dict[str, bytes]) -> FileSyncPlan:
+    """Reconcile the guide's vector store against what the console publishes.
+
+    `desired` maps a bare relativePath (`<knowledge item id>.md`) to the
+    file's bytes. Only `folderKind == "VectorStore"` files are considered:
+    every other folder kind is kept untouched, because Publish does not own
+    them.
+
+    An existing vector-store file is kept exactly when `desired` still has
+    its path AND its recorded content hash matches the bytes we would
+    upload. Anything else is dropped -- and dropped means deleted, since
+    `fileIdsToKeep` is a full-state field. A dropped path that is still
+    desired is re-added (a replace); one that is not is simply gone.
+    """
+    wanted = {
+        path: hashlib.sha256(content).hexdigest() for path, content in desired.items()
+    }
+
+    existing = [file for file in detail.get("files") or [] if _is_vector_store(file)]
+    existing_paths = {str(file.get("relativePath")) for file in existing}
+
+    keep_ids: list[str] = []
+    kept_paths: set[str] = set()
+    for file in existing:
+        path = str(file.get("relativePath"))
+        if path in kept_paths:
+            # A duplicate path: keep at most the first match, so the second
+            # copy is dropped rather than silently shadowing the first.
+            continue
+        if path in wanted and _content_hash_of(file).lower() == wanted[path]:
+            keep_ids.append(str(file.get("id")))
+            kept_paths.add(path)
+
+    add_paths = sorted(path for path in desired if path not in kept_paths)
+    adds = [
+        {
+            "folderKind": "VectorStore",
+            "vectorStoreName": VECTOR_STORE_NAME,
+            "relativePath": path,
+            "contentBytes": base64.b64encode(desired[path]).decode("ascii"),
+            "contentType": "text/markdown",
+        }
+        for path in add_paths
+    ]
+
+    return FileSyncPlan(
+        keep_ids=keep_ids,
+        adds=adds,
+        unchanged=sorted(kept_paths),
+        added=[path for path in add_paths if path not in existing_paths],
+        replaced=[path for path in add_paths if path in existing_paths],
+        removed=sorted(existing_paths - set(desired)),
+        # Refusing this is the caller's job, but recognizing it is this
+        # function's: an empty render against a stocked vector store would
+        # wipe the guide's whole knowledge base, and the bytes of a deleted
+        # file cannot be read back to undo it.
+        would_delete_everything=not desired and bool(existing),
+    )
+
+
+def vector_store_paths(detail: dict) -> list[str]:
+    """Every vector-store file's relativePath, sorted -- the set a sync is
+    verified against after the PUT."""
+    return sorted(
+        str(file.get("relativePath"))
+        for file in detail.get("files") or []
+        if _is_vector_store(file)
+    )
+
+
+def non_vector_store_file_ids(detail: dict) -> set[str]:
+    """Files Publish does not own. They are always kept by id."""
+    return {
+        str(file.get("id"))
+        for file in detail.get("files") or []
+        if not _is_vector_store(file)
+    }
+
+
+def build_update_dto(
+    detail: dict, instructions: str, plan: FileSyncPlan | None = None
+) -> dict:
     """The GET body of a guide, rebuilt as the PUT body that changes only
-    its instructions.
+    its instructions and, with a plan, its vector-store files.
 
     Every field is carried across deliberately. `fileIdsToKeep` is the one
-    that matters most: naming the existing file ids keeps them, which keeps
-    their vector-store index -- omitting a file deletes it and re-indexing
-    it would cost minutes of a guide that cannot answer.
+    that matters most: naming an existing file id keeps it, which keeps its
+    vector-store index -- omitting a file deletes it, and re-indexing costs
+    minutes of a guide that cannot answer.
+
+    Without a `plan` this keeps every file and adds none, which is what a
+    restore and an instructions-only write want. With one, it keeps the
+    files the plan matched plus every file Publish does not own, and
+    uploads the rest.
     """
     guide = detail["guide"]
+    if plan is None:
+        file_ids_to_keep = [file["id"] for file in detail["files"]]
+        files_to_add: list[dict] = []
+    else:
+        untouched = non_vector_store_file_ids(detail)
+        file_ids_to_keep = list(plan.keep_ids) + [
+            file["id"] for file in detail["files"] if str(file.get("id")) in untouched
+        ]
+        files_to_add = list(plan.adds)
     return {
         "name": guide["name"],
         "description": guide["description"],
@@ -123,8 +274,8 @@ def build_update_dto(detail: dict, instructions: str) -> dict:
         "customTools": detail["customTools"],
         "contextOptions": detail["contextOptions"],
         "authProviders": detail["authProviders"],
-        "fileIdsToKeep": [file["id"] for file in detail["files"]],
-        "filesToAdd": [],
+        "fileIdsToKeep": file_ids_to_keep,
+        "filesToAdd": files_to_add,
         "conversationStarters": detail["conversationStarters"],
         "crewMemberIds": [],
         "environmentVariables": detail["environmentVariables"],
@@ -163,7 +314,7 @@ def _normalized_custom_tool(tool: dict) -> dict:
     return out
 
 
-def comparable(detail: dict) -> dict:
+def comparable(detail: dict, include_files: bool = True) -> dict:
     """A normalized view of a guide used to prove an update changed nothing
     it was not meant to.
 
@@ -180,6 +331,9 @@ def comparable(detail: dict) -> dict:
     Lists that come back in an arbitrary order -- files, custom tools and
     a tool's operations -- are sorted, so "same set" compares equal while
     a genuinely missing tool, context option or file still shows up.
+
+    `include_files=False` drops the `files` key entirely, for the one
+    caller whose write is *meant* to change it.
     """
     view = deepcopy(detail)
     view.pop("instructions", None)
@@ -189,10 +343,16 @@ def comparable(detail: dict) -> dict:
         guide.pop("updated", None)
         guide.pop("id", None)
 
-    view["files"] = sorted(
-        (_normalized_file(file) for file in view.get("files") or []),
-        key=lambda file: str(file.get("relativePath")),
-    )
+    if include_files:
+        view["files"] = sorted(
+            (_normalized_file(file) for file in view.get("files") or []),
+            key=lambda file: str(file.get("relativePath")),
+        )
+    else:
+        # A knowledge sync moves the files on purpose, so comparing them
+        # here would always fail. The file set is verified separately,
+        # against the paths and ids the plan asked for.
+        view.pop("files", None)
 
     view["customTools"] = sorted(
         (_normalized_custom_tool(tool) for tool in view.get("customTools") or []),

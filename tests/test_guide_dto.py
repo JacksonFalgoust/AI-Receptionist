@@ -7,7 +7,9 @@ knowledge file), with the long strings trimmed. Everything here is pure --
 nothing touches a network.
 """
 
+import base64
 import copy
+import hashlib
 import json
 import pathlib
 
@@ -21,6 +23,29 @@ FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "guide_detail.json"
 @pytest.fixture
 def detail():
     return json.loads(FIXTURE.read_text())
+
+
+def sha(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def vector_store_file(file_id: str, path: str, content: bytes | None, **overrides):
+    """An existing file as the GET body reports it. `content` is what it was
+    indexed FROM -- None means the shadow has no hash yet, which is what a
+    file still being processed looks like."""
+    file = {
+        "id": file_id,
+        "folderKind": "VectorStore",
+        "vectorStoreName": "default",
+        "relativePath": path,
+        "contentType": "text/markdown",
+        "created": "2026-09-21T00:00:00",
+        "markdownShadow": None
+        if content is None
+        else {"status": "Completed", "contentHash": sha(content), "fileSize": len(content)},
+    }
+    file.update(overrides)
+    return file
 
 
 # --------------------------------------------------------------------------
@@ -245,3 +270,223 @@ def test_comparable_does_not_mutate_its_input(detail):
     original = copy.deepcopy(detail)
     guide_dto.comparable(detail)
     assert detail == original
+
+
+# --------------------------------------------------------------------------
+# plan_file_sync -- which knowledge files survive a publish
+#
+# `fileIdsToKeep` is full-state: an omitted file is DELETED, and GuideAnts
+# never hands back a stored file's bytes, so these decisions are one-way.
+# --------------------------------------------------------------------------
+
+
+def test_an_unchanged_file_is_kept_by_id_not_re_uploaded(detail):
+    content = b"# Policies\n"
+    detail["files"] = [vector_store_file("keep-me", "policies.md", content)]
+
+    plan = guide_dto.plan_file_sync(detail, {"policies.md": content})
+
+    assert plan.keep_ids == ["keep-me"]
+    assert plan.adds == []
+    assert plan.unchanged == ["policies.md"]
+    assert (plan.added, plan.replaced, plan.removed) == ([], [], [])
+
+
+def test_a_changed_file_is_dropped_and_re_added(detail):
+    detail["files"] = [vector_store_file("old", "policies.md", b"# Old\n")]
+
+    plan = guide_dto.plan_file_sync(detail, {"policies.md": b"# New\n"})
+
+    assert plan.keep_ids == [], "the old id is not named, which is what deletes it"
+    assert plan.replaced == ["policies.md"]
+    assert plan.added == [] and plan.removed == [] and plan.unchanged == []
+    assert plan.adds[0]["relativePath"] == "policies.md"
+
+
+def test_a_new_file_is_added(detail):
+    content = b"# Policies\n"
+    detail["files"] = [vector_store_file("keep-me", "policies.md", content)]
+
+    plan = guide_dto.plan_file_sync(
+        detail, {"policies.md": content, "hours.md": b"# Hours\n"}
+    )
+
+    assert plan.keep_ids == ["keep-me"]
+    assert plan.added == ["hours.md"]
+    assert [add["relativePath"] for add in plan.adds] == ["hours.md"]
+
+
+def test_a_file_the_console_no_longer_publishes_is_removed(detail):
+    content = b"# Policies\n"
+    detail["files"] = [
+        vector_store_file("keep-me", "policies.md", content),
+        vector_store_file("gone", "expired-promo.md", b"# Promo\n"),
+    ]
+
+    plan = guide_dto.plan_file_sync(detail, {"policies.md": content})
+
+    assert plan.keep_ids == ["keep-me"]
+    assert plan.removed == ["expired-promo.md"]
+    assert plan.adds == []
+
+
+def test_a_hand_uploaded_file_is_removed_too(detail):
+    """Publish owns the whole vector store. A file nobody published through
+    the console is still a file the console will delete -- this pins that
+    it is a decision, not an accident."""
+    detail["files"] = [vector_store_file("by-hand", "uploaded-in-guideants.md", b"x")]
+    plan = guide_dto.plan_file_sync(detail, {"policies.md": b"# Policies\n"})
+    assert plan.removed == ["uploaded-in-guideants.md"]
+    assert plan.keep_ids == []
+
+
+def test_a_file_with_no_content_hash_counts_as_changed(detail):
+    """A shadow that is missing, empty or still processing tells us nothing.
+    Keeping it would leave a half-indexed file in place forever."""
+    for shadow in (None, {}, {"status": "Processing", "contentHash": None}):
+        detail["files"] = [
+            vector_store_file("unknown", "policies.md", None, markdownShadow=shadow)
+        ]
+        plan = guide_dto.plan_file_sync(detail, {"policies.md": b"# Policies\n"})
+        assert plan.keep_ids == [], shadow
+        assert plan.replaced == ["policies.md"], shadow
+
+
+def test_the_hash_comparison_ignores_case(detail):
+    content = b"# Policies\n"
+    detail["files"] = [
+        vector_store_file(
+            "keep-me",
+            "policies.md",
+            None,
+            markdownShadow={"status": "Completed", "contentHash": sha(content).upper()},
+        )
+    ]
+    assert guide_dto.plan_file_sync(detail, {"policies.md": content}).keep_ids == ["keep-me"]
+
+
+def test_only_the_first_matching_duplicate_path_is_kept(detail):
+    content = b"# Policies\n"
+    detail["files"] = [
+        vector_store_file("first", "policies.md", content),
+        vector_store_file("second", "policies.md", content),
+    ]
+
+    plan = guide_dto.plan_file_sync(detail, {"policies.md": content})
+
+    assert plan.keep_ids == ["first"]
+    assert plan.unchanged == ["policies.md"]
+    assert plan.adds == [], "the duplicate is dropped, not re-uploaded"
+
+
+def test_folder_kinds_publish_does_not_own_are_ignored_by_the_plan(detail):
+    detail["files"] = [
+        vector_store_file("sheet", "data.csv", b"a,b\n", folderKind="CodeInterpreter"),
+    ]
+
+    plan = guide_dto.plan_file_sync(detail, {"policies.md": b"# Policies\n"})
+
+    assert plan.removed == [], "another folder kind is never deleted by Publish"
+    assert plan.would_delete_everything is False
+    assert guide_dto.non_vector_store_file_ids(detail) == {"sheet"}
+    assert guide_dto.vector_store_paths(detail) == []
+
+
+def test_the_folder_kind_is_matched_case_insensitively(detail):
+    content = b"# Policies\n"
+    detail["files"] = [
+        vector_store_file("keep-me", "policies.md", content, folderKind="vectorstore")
+    ]
+    assert guide_dto.plan_file_sync(detail, {"policies.md": content}).keep_ids == ["keep-me"]
+
+
+def test_wiping_the_whole_vector_store_is_flagged(detail):
+    detail["files"] = [vector_store_file("only", "policies.md", b"x")]
+    assert guide_dto.plan_file_sync(detail, {}).would_delete_everything is True
+
+
+def test_an_empty_guide_and_an_empty_console_is_not_a_wipe(detail):
+    detail["files"] = []
+    plan = guide_dto.plan_file_sync(detail, {})
+    assert plan.would_delete_everything is False
+    assert plan.keep_ids == [] and plan.adds == []
+
+
+def test_an_upload_entry_carries_base64_content_and_the_folder(detail):
+    detail["files"] = []
+    content = "# Hours\n\nOpen every day.\n".encode()
+
+    plan = guide_dto.plan_file_sync(detail, {"hours.md": content})
+
+    assert plan.adds == [
+        {
+            "folderKind": "VectorStore",
+            "vectorStoreName": "default",
+            "relativePath": "hours.md",
+            "contentBytes": base64.b64encode(content).decode(),
+            "contentType": "text/markdown",
+        }
+    ]
+    assert base64.b64decode(plan.adds[0]["contentBytes"]) == content
+
+
+def test_the_plan_does_not_mutate_its_input(detail):
+    original = copy.deepcopy(detail)
+    guide_dto.plan_file_sync(detail, {"anything.md": b"x"})
+    assert detail == original
+
+
+# --------------------------------------------------------------------------
+# build_update_dto with a plan
+# --------------------------------------------------------------------------
+
+
+def test_the_dto_keeps_the_planned_ids_and_uploads_the_planned_files(detail):
+    content = b"# Policies\n"
+    detail["files"] = [
+        vector_store_file("keep-me", "policies.md", content),
+        vector_store_file("stale", "hours.md", b"# Old hours\n"),
+        vector_store_file("sheet", "data.csv", b"a,b\n", folderKind="CodeInterpreter"),
+    ]
+    desired = {"policies.md": content, "hours.md": b"# New hours\n"}
+    plan = guide_dto.plan_file_sync(detail, desired)
+
+    dto = guide_dto.build_update_dto(detail, "NEW INSTRUCTIONS", plan)
+
+    assert dto["instructions"] == "NEW INSTRUCTIONS"
+    # The kept knowledge file and the foreign folder kind; NOT the stale one.
+    assert dto["fileIdsToKeep"] == ["keep-me", "sheet"]
+    assert [add["relativePath"] for add in dto["filesToAdd"]] == ["hours.md"]
+    # Everything else is still carried across verbatim.
+    assert dto["customTools"] == detail["customTools"]
+    assert dto["contextOptions"] == detail["contextOptions"]
+
+
+def test_without_a_plan_the_dto_keeps_every_file_and_adds_none(detail):
+    """The restore path and any instructions-only write.  """
+    dto = guide_dto.build_update_dto(detail, "x")
+    assert dto["fileIdsToKeep"] == [f["id"] for f in detail["files"]]
+    assert dto["filesToAdd"] == []
+
+
+# --------------------------------------------------------------------------
+# comparable(include_files=False)
+# --------------------------------------------------------------------------
+
+
+def test_comparable_can_exclude_the_files_that_a_sync_moves(detail):
+    other = copy.deepcopy(detail)
+    other["files"] = []
+    assert guide_dto.comparable(detail, include_files=False) == guide_dto.comparable(
+        other, include_files=False
+    )
+    assert "files" not in guide_dto.comparable(detail, include_files=False)
+
+
+def test_excluding_the_files_still_catches_collateral_damage(detail):
+    other = copy.deepcopy(detail)
+    other["files"] = []
+    other["contextOptions"] = []
+    assert guide_dto.comparable(detail, include_files=False) != guide_dto.comparable(
+        other, include_files=False
+    )
