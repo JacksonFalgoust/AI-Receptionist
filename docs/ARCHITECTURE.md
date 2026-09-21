@@ -63,7 +63,7 @@ Caller ⇄ Twilio ⇄ ───────────────────�
 | [app/workflow_api.py](../app/workflow_api.py) | FastAPI router for the admin console's Workflows pages: `GET/POST /api/workflows`, `GET/PATCH/DELETE /api/workflows/{id}`, `POST /api/workflows/{id}/publish`, bearer-auth only. Console-only — publishing has no effect on live calls. |
 | [app/workflow_store.py](../app/workflow_store.py) | SQLAlchemy CRUD for `Workflow`: `steps` is a JSON column replaced wholesale on every save, and `publish_workflow` refuses to activate a workflow with no steps. |
 | [app/guide_publish/hours.py](../app/guide_publish/hours.py) | Pure functions turning `BusinessHours[]` into spoken prose (`hours_prose`) and a single time into TTS-safe words (`time_prose`) — e.g. "nine A M", never "9:00 AM". No I/O. |
-| [app/guide_publish/render.py](../app/guide_publish/render.py) | Pure: `ConciergeConfiguration` row + `KnowledgeItem` rows -> the template's slot values (`build_slots`) and one Markdown file per publishable knowledge item (`knowledge_files`, `is_publishable`). Rejects any field containing markup a caller would hear read aloud. |
+| [app/guide_publish/render.py](../app/guide_publish/render.py) | Pure: `ConciergeConfiguration` row + `KnowledgeItem` rows -> the template's slot values (`build_slots`, which takes the `knowledge_topics` list) and one Markdown file per publishable knowledge item (`knowledge_files`, `is_publishable`). `knowledge_topics` lists the publishable titles, sanitized, de-duplicated and sorted case-insensitively. Rejects any field containing markup a caller would hear read aloud. |
 | [app/guide_publish/template.py](../app/guide_publish/template.py) | Loads `guide-demo/template/instructions.template.md` and fills its `{{slot}}` placeholders (`render_instructions`); errors in both directions — an unfilled slot or a value with no matching slot. `load_static_files()` reads the template's other files (manifest, OpenAPI schemas, context options) verbatim. |
 | [app/guide_publish/bundle.py](../app/guide_publish/bundle.py) | Assembles the deterministic bundle zip and refuses to build an unsafe one: checks the tool schemas carry the exact expected operation set, the manifest name matches `config.GUIDEANTS_GUIDE_NAME`, and the instructions are non-empty and sentinel-bearing — all before any network call. The zip itself is **no longer uploaded** (see "Why the import endpoint is not used" below); it still runs the invariants, produces the `content_hash` the history and the preview diff are keyed on, and backs `GET /api/concierge/bundle`. |
 | [app/guide_publish/guide_dto.py](../app/guide_publish/guide_dto.py) | Pure, no I/O: `build_update_dto()` rebuilds GuideAnts' full-state `UpdateGuideDto` from a `GET /api/guides/{id}` body with the instructions changed and, given a plan, the knowledge files re-synced; `plan_file_sync()` decides which existing `VectorStore` files to keep by id (same path, same content hash), which to replace, add or remove, and flags a plan that would wipe the whole store; `unsupported_features()` is the fail-closed guard listing anything on the guide this round-trip has not been verified to preserve; `comparable()` is the order-insensitive normalized view used to prove, after the write, that nothing else moved (`include_files=False` for a write that is meant to move the files). |
@@ -731,7 +731,17 @@ ConciergeConfiguration draft row (app/configuration_store.py, has_unpublished_ch
         ▼
 render (app/guide_publish/render.py + hours.py) -> slots filled into
 guide-demo/template/instructions.template.md (app/guide_publish/template.py)
+
+The template is generic: it names no business. Six slots, a closed set that
+`render_instructions` enforces in both directions: the five business/identity
+slots (`business.name`, `.description`, `.address`, `.hours_prose`,
+`identity.tone_prose`) come from the Configuration, and `{{knowledge.topics}}`
+lists the titles of exactly the knowledge items this publish sends (or the
+word `none`), so the guide only searches for topics that exist. Adding or
+renaming a knowledge item therefore changes the instructions as well as the
+files, and the content hash notices.
         │  + knowledge_files() for every publishable KnowledgeItem
+        │    (same fetched list also feeds {{knowledge.topics}})
         ▼
 bundle (app/guide_publish/bundle.py) -- invariants checked here, before
 anything is sent; the zip is kept LOCALLY (hash, history, /bundle download)

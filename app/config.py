@@ -34,8 +34,9 @@ WELCOME_BACK_GREETING_TEMPLATE = os.environ.get(
 # app/db.py's create_all() is the real runtime schema path, so a migration's
 # data step would never run for most checkouts.
 #
-# These values reproduce guide-demo/template/instructions.template.md's
-# rendered output exactly, which is what makes the first publish a no-op.
+# These fill guide-demo/template/instructions.template.md's business and
+# identity slots. The template itself is generic (any business); these
+# values are just the demo shop it ships configured for.
 DEFAULT_BUSINESS_PROFILE = {
     "name": "Peachtree Pedals",
     "description": "a bike rental shop in Atlanta, Georgia",
