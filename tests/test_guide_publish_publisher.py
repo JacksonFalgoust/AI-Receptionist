@@ -422,3 +422,43 @@ def test_an_instructions_change_pushes_exactly_the_new_instructions(db, push_ok)
     assert len(push_ok) == 2
     assert push_ok.instructions[-1] == second.instructions_text
     assert "Dogwood Cycles" in push_ok.instructions[-1]
+
+
+def test_a_knowledge_title_appears_in_the_instructions_publish_sends(db, push_ok):
+    asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+    sent = push_ok.instructions[0]
+    from app.guide_publish import render as render_module
+
+    titles = render_module.knowledge_topics(
+        publisher._knowledge_items(db), __import__("datetime").date.today()
+    )
+    assert titles, "the seed has publishable knowledge"
+    assert all(title in sent for title in titles)
+
+
+def test_adding_or_renaming_knowledge_changes_the_pushed_instructions(db, push_ok):
+    from datetime import datetime
+
+    asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+    item = models.KnowledgeItem(
+        id="k-topic",
+        organization_id=config.DEFAULT_ORGANIZATION_ID,
+        title="Winter hours",
+        type="policy", status="active", source="Manual entry",
+        content="We close early in January.", tags=[],
+        updated_at=datetime.utcnow(),
+    )
+    db.add(item)
+    db.commit()
+
+    asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+    assert len(push_ok) == 2, "a new topic must push, not be treated as a no-op"
+    assert "Winter hours" in push_ok.instructions[1]
+    assert "Winter hours" not in push_ok.instructions[0]
+
+    item.title = "Holiday hours"
+    db.commit()
+    asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+    assert len(push_ok) == 3
+    assert "Holiday hours" in push_ok.instructions[2]
+    assert "Winter hours" not in push_ok.instructions[2]

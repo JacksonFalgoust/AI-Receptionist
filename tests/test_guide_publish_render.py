@@ -1,9 +1,9 @@
 """Console rows -> the strings and files that go into a guide bundle.
 
-The golden test here is the safety net for the whole pipeline: if
-rendering the seeded configuration no longer reproduces the authored
-instructions byte-for-byte, the first publish is no longer a no-op and
-something changed that a caller will hear.
+The template is generic (any business). The business and identity slots
+come from Configuration and `{{knowledge.topics}}` lists the titles of the
+knowledge items Publish sends; the rendering test below checks those land
+and that the authored contract (marker, tool names) survives.
 """
 
 from datetime import date, datetime
@@ -41,25 +41,39 @@ def _item(**overrides):
     return models.KnowledgeItem(**fields)
 
 
-# --- the golden test ------------------------------------------------------
+# --- rendering ------------------------------------------------------------
 
-def test_seeded_configuration_reproduces_the_authored_instructions():
-    """Rendering the seed must equal the instructions the guide runs today.
-    If this fails, either the seed in app/config.py or a slot in
-    instructions.template.md drifted -- fix the drift, do not update this
-    assertion to match."""
-    rendered = template.render_instructions(render.build_slots(_configuration()))
+def test_seeded_configuration_fills_every_slot_and_keeps_the_contract():
+    """The five business/identity slots and the topics slot land in the
+    text, nothing is left unfilled, and the authored contract (final-answer
+    marker, tool names) is untouched by rendering."""
+    rendered = template.render_instructions(
+        render.build_slots(_configuration(), ["Damage policy", "Bike Types"])
+    )
 
     assert "Peachtree Pedals" in rendered
     assert "a bike rental shop in Atlanta, Georgia" in rendered
     assert "every day, nine A M to six P M" in rendered
     assert "1234 Road Pkwy, Atlanta, GA" in rendered
     assert "warm, upbeat, and polite" in rendered
+    assert "Damage policy; Bike Types" in rendered
     assert "{{" not in rendered  # every slot filled
-    # The authored contract survives rendering untouched.
     assert "FINAL ANSWER MARKER" in rendered
     assert "Declare victory." in rendered
-    assert "findReservations" in rendered
+    for tool in (
+        "listCatalog",
+        "checkAvailability",
+        "findReservations",
+        "createCustomer",
+        "sendPaymentLink",
+        "get_caller_phone_number",
+    ):
+        assert tool in rendered
+
+
+def test_template_stays_generic():
+    """Business specifics belong in Configuration, never in the template."""
+    assert "bike" not in template.INSTRUCTIONS_PATH.read_text(encoding="utf-8").lower()
 
 
 def test_changing_hours_changes_the_rendered_instructions():
@@ -75,7 +89,7 @@ def test_changing_hours_changes_the_rendered_instructions():
             ],
         }
     )
-    rendered = template.render_instructions(render.build_slots(configuration))
+    rendered = template.render_instructions(render.build_slots(configuration, []))
     assert "ten A M to four P M" in rendered
     assert "every day, nine A M to six P M" not in rendered
 
@@ -88,7 +102,7 @@ def test_unfilled_slot_raises():
 
 
 def test_unknown_slot_raises():
-    slots = render.build_slots(_configuration())
+    slots = render.build_slots(_configuration(), [])
     slots["business.nonsense"] = "boom"
     with pytest.raises(template.SlotError, match="unknown"):
         template.render_instructions(slots)
@@ -114,7 +128,7 @@ def test_markdown_in_a_slot_value_is_rejected(bad):
         business_profile={**config.DEFAULT_BUSINESS_PROFILE, "name": bad}
     )
     with pytest.raises(ValueError, match="business.name"):
-        render.build_slots(configuration)
+        render.build_slots(configuration, [])
 
 
 # --- knowledge ------------------------------------------------------------
@@ -178,7 +192,7 @@ def test_incomplete_hours_name_the_field_like_every_other_slot_failure():
     profile["hours"] = profile["hours"][:3]
 
     with pytest.raises(ValueError) as excinfo:
-        render.build_slots(_configuration(business_profile=profile))
+        render.build_slots(_configuration(business_profile=profile), [])
 
     message = str(excinfo.value)
     assert message.startswith("business.hours_prose: ")
@@ -192,4 +206,58 @@ def test_a_day_missing_its_times_also_names_the_field():
     profile["hours"] = hours
 
     with pytest.raises(ValueError, match=r"^business\.hours_prose: Tuesday is open"):
-        render.build_slots(_configuration(business_profile=profile))
+        render.build_slots(_configuration(business_profile=profile), [])
+
+
+# --- knowledge topics -----------------------------------------------------
+
+TODAY = date(2026, 9, 18)
+
+
+def test_topics_are_the_titles_of_publishable_items_only():
+    items = [
+        _item(id="a", title="Damage policy"),
+        _item(id="b", title="Old policy", status="disabled"),
+        _item(id="c", title="Expired", expiration_date=datetime(2026, 1, 1)),
+        _item(id="d", title="Future", effective_date=datetime(2026, 12, 1)),
+    ]
+    assert render.knowledge_topics(items, TODAY) == ["Damage policy"]
+
+
+def test_topics_are_sorted_case_insensitively():
+    items = [
+        _item(id="a", title="zebra"),
+        _item(id="b", title="Apple"),
+        _item(id="c", title="banana"),
+    ]
+    assert render.knowledge_topics(items, TODAY) == ["Apple", "banana", "zebra"]
+
+
+def test_topics_sanitize_forbidden_characters():
+    items = [_item(id="a", title="**Rental** [FAQ]_v2"), _item(id="b", title="#  ")]
+    topics = render.knowledge_topics(items, TODAY)
+    assert topics == ["Rental FAQ v2"]
+    assert not render._FORBIDDEN.search(topics[0])
+
+
+def test_topics_drop_exact_duplicates():
+    items = [_item(id="a", title="Hours"), _item(id="b", title="Hours")]
+    assert render.knowledge_topics(items, TODAY) == ["Hours"]
+
+
+def test_topics_slot_is_none_without_items():
+    assert render.knowledge_topics([], TODAY) == []
+    assert render.build_slots(_configuration(), [])["knowledge.topics"] == "none"
+
+
+def test_topics_slot_joins_with_semicolons():
+    slots = render.build_slots(_configuration(), ["A", "B"])
+    assert slots["knowledge.topics"] == "A; B"
+
+
+def test_rendered_instructions_contain_each_topic_title():
+    items = [_item(id="a", title="Damage policy"), _item(id="b", title="Bike Types")]
+    topics = render.knowledge_topics(items, TODAY)
+    rendered = template.render_instructions(render.build_slots(_configuration(), topics))
+    for title in ("Damage policy", "Bike Types"):
+        assert title in rendered

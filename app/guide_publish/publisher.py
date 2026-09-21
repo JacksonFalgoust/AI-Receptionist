@@ -145,8 +145,14 @@ def _render(db: Session) -> RenderResult:
     """Render and bundle. Raises ValueError/BundleError -- always before
     the caller reaches the network."""
     configuration = configuration_store.get_configuration(db)
-    instructions = template.render_instructions(render.build_slots(configuration))
-    knowledge = render.knowledge_files(_knowledge_items(db), date.today())
+    # One fetch feeds both the topics slot and the files, so the prompt can
+    # never advertise a topic the push does not carry (or vice versa).
+    items = _knowledge_items(db)
+    today = date.today()
+    instructions = template.render_instructions(
+        render.build_slots(configuration, render.knowledge_topics(items, today))
+    )
+    knowledge = render.knowledge_files(items, today)
     zip_bytes, bundle_hash = bundle_module.build_bundle(
         instructions, knowledge, template.load_static_files()
     )

@@ -53,10 +53,17 @@ def _hours_prose(profile: dict, field: str) -> str:
         raise ValueError(f"{field}: {exc}") from exc
 
 
-def build_slots(configuration: models.ConciergeConfiguration) -> dict[str, str]:
+def build_slots(
+    configuration: models.ConciergeConfiguration, knowledge_topics: list[str]
+) -> dict[str, str]:
     """The complete slot set. Adding one here requires adding it to
     instructions.template.md too -- template.render_instructions() rejects
-    any mismatch in either direction."""
+    any mismatch in either direction.
+
+    `knowledge_topics` is the list from knowledge_topics(): exactly the
+    titles of the items Publish sends, so the guide only searches for topics
+    that exist. An empty list renders as the word "none", which the template
+    tells the guide to read as "never search"."""
     profile = configuration.business_profile
     return {
         "business.name": _clean(profile.get("name", ""), "business.name"),
@@ -68,6 +75,7 @@ def build_slots(configuration: models.ConciergeConfiguration) -> dict[str, str]:
             _hours_prose(profile, "business.hours_prose"), "business.hours_prose"
         ),
         "identity.tone_prose": _tone_prose(configuration.identity),
+        "knowledge.topics": "; ".join(knowledge_topics) if knowledge_topics else "none",
     }
 
 
@@ -107,3 +115,24 @@ def knowledge_files(
         for item in sorted(items, key=lambda i: i.id)
         if is_publishable(item, today)
     }
+
+
+def knowledge_topics(items: list[models.KnowledgeItem], today: date) -> list[str]:
+    """Titles of the publishable items, for the `{{knowledge.topics}}` slot.
+
+    Titles are console-authored free text spoken aloud by the guide, so
+    forbidden markup is replaced with a space rather than rejected -- one
+    oddly-titled item must not block a publish the way a bad business name
+    does. Exact duplicates collapse to one; the result is sorted
+    case-insensitively so the prompt (and its hash) does not depend on
+    row order."""
+    seen: set[str] = set()
+    topics: list[str] = []
+    for item in items:
+        if not is_publishable(item, today):
+            continue
+        title = " ".join(_FORBIDDEN.sub(" ", item.title or "").split())
+        if title and title not in seen:
+            seen.add(title)
+            topics.append(title)
+    return sorted(topics, key=lambda t: (t.lower(), t))
