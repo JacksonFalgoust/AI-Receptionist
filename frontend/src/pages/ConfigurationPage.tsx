@@ -21,8 +21,8 @@ import {
 import type { ConfigurationFormValues } from '@/features/configuration/configurationFormSchema'
 import { IdentityFields } from '@/features/configuration/IdentityFields'
 import { TerminologyFields } from '@/features/configuration/TerminologyFields'
-import { conciergeService } from '@/services/conciergeService'
-import { toAppError } from '@/services/errors'
+import { configurationService } from '@/services/configurationService'
+import { AppError, toAppError } from '@/services/errors'
 import type { ConciergeConfiguration } from '@/types'
 
 const CONFIGURATION_KEY = ['concierge', 'configuration']
@@ -47,7 +47,7 @@ const TAB_ORDER: ConfigurationTab[] = ['businessProfile', 'identity', 'terminolo
 export function ConfigurationPage() {
   const query = useQuery({
     queryKey: CONFIGURATION_KEY,
-    queryFn: () => conciergeService.getConfiguration(),
+    queryFn: () => configurationService.getConfiguration(),
   })
 
   return (
@@ -82,13 +82,27 @@ function ConfigurationForm({ configuration }: { configuration: ConciergeConfigur
     }: {
       values: ConfigurationFormValues
       thenPublish: boolean
-    }) => {
+    }): Promise<{ configuration: ConciergeConfiguration; warnings: string[] }> => {
       // Publish always saves what's on screen first — nobody wants an edit
       // to look published when it was actually last session's stale draft.
-      const saved = await conciergeService.saveDraft(formValuesToPatch(values))
-      return thenPublish ? conciergeService.publish() : saved
+      const saved = await configurationService.saveDraft(formValuesToPatch(values))
+      if (!thenPublish) return { configuration: saved, warnings: [] }
+
+      // A publish can fail after the HTTP call itself succeeds (e.g. GuideAnts
+      // unreachable) — `published: false` must surface as a failure, never as
+      // a success toast over an unpublished draft.
+      const result = await configurationService.publish()
+      if (!result.published) {
+        throw new AppError({
+          kind: 'server',
+          title: 'Publish failed',
+          description: result.error ?? 'The guide could not be updated. Try again.',
+          actions: [{ label: 'Retry', retry: true }],
+        })
+      }
+      return { configuration: result.configuration, warnings: result.warnings }
     },
-    onSuccess: (updated, variables) => {
+    onSuccess: ({ configuration: updated, warnings }, variables) => {
       queryClient.setQueryData(CONFIGURATION_KEY, updated)
       form.reset(configurationToFormValues(updated))
       if (variables.thenPublish) {
@@ -96,6 +110,14 @@ function ConfigurationForm({ configuration }: { configuration: ConciergeConfigur
         // saveDraft() alone has nothing for the header badge to refetch.
         queryClient.invalidateQueries({ queryKey: ['concierge', 'status'] })
         toast.show('Configuration published.', { tone: 'success' })
+        // A publish updates the guide's instructions and its knowledge
+        // files. Anything that is true but not finished — knowledge the
+        // guide is still re-indexing, most of all — comes back as a
+        // warning, and is shown on a tone that does not auto-dismiss. A
+        // success toast alone would imply the change was already live.
+        for (const warning of warnings) {
+          toast.show(warning, { tone: 'warning' })
+        }
       } else {
         toast.show('Draft saved.', { tone: 'success' })
       }

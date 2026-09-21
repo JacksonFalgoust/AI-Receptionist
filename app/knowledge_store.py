@@ -3,9 +3,10 @@ only by app/knowledge_api.py. Same conventions as app/conversation_store.py:
 every function takes a Session and none commit, so the caller owns the
 transaction boundary.
 
-Console-only: nothing here reaches the live GuideAnts guide, which answers
-from its own vector store -- see
-docs/superpowers/specs/2026-09-16-e6-knowledge-design.md, "Future".
+No longer console-only: a publish renders these rows into the guide bundle
+and GuideAnts' import replaces the live vector store wholesale, so a row
+edited or deleted here changes the next call. See
+docs/superpowers/specs/2026-09-18-guide-publish-pipeline-design.md.
 """
 
 from __future__ import annotations
@@ -33,6 +34,41 @@ def _scoped():
     )
 
 
+def seed_default_items(db: Session) -> None:
+    """Populates an empty table from config.DEFAULT_KNOWLEDGE_ITEMS.
+
+    Seed-on-first-read, exactly as app/configuration_store.py does and for
+    the same reason: app/db.py's create_all() is the real runtime schema
+    path, so a migration's data step would never run for most checkouts.
+
+    This runs on the publish path too (app/guide_publish/publisher.py), not
+    only when the console's Knowledge page is opened. A publish replaces the
+    live guide's vector store wholesale, so publishing from an empty table
+    would DELETE the shop's entire policy knowledge -- and an admin who goes
+    straight from Configuration to Publish never touches list_items().
+
+    No commit: the caller owns the transaction, as everywhere else here.
+    """
+    if db.scalar(select(func.count()).select_from(_scoped().subquery())):
+        return
+    for seed in config.DEFAULT_KNOWLEDGE_ITEMS:
+        db.add(
+            models.KnowledgeItem(
+                id=seed["id"],
+                organization_id=config.DEFAULT_ORGANIZATION_ID,
+                title=seed["title"],
+                type=seed["type"],
+                status="active",
+                source="Manual entry",
+                category=seed.get("category"),
+                content=seed["content"],
+                tags=[],
+                updated_at=datetime.utcnow(),
+            )
+        )
+    db.flush()
+
+
 def list_items(
     db: Session,
     *,
@@ -44,6 +80,7 @@ def list_items(
 ) -> tuple[list[models.KnowledgeItem], int]:
     """Most recently updated first, matching the mock service's
     sortByDesc(updatedAt)."""
+    seed_default_items(db)
     query = _scoped()
     if type:
         query = query.where(models.KnowledgeItem.type == type)

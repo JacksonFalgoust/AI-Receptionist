@@ -54,6 +54,11 @@ from creating the GuideAnts guide through placing a real phone call.
    Web API tool source this demo used to use: there's no HTTP endpoint or
    shared API key that anyone (or anything) other than an active call
    through this app could use to invoke a reservation operation.
+   **You can skip the manual steps below on a guide with no tools:** the
+   console's Publish button adds both tool sources (`voice-receptionist` and
+   `caller-phone`, from `guide-demo/template/OpenAPI/`) to a guide that has
+   neither, and leaves any source the guide already has untouched. The manual
+   paste below is the fallback if you'd rather not publish yet.
    1. In the guide editor, open its **Tools** section and click **+ Add Tool
       Source**.
    2. In the picker, choose **Client Actions** ("An action executed by the
@@ -96,6 +101,38 @@ from creating the GuideAnts guide through placing a real phone call.
       variables in step 3 below — leave `BOOQABLE_API_KEY` unset and the
       reservation tools will fail closed with a clear config error rather
       than silently doing nothing.
+
+### 1.8 Create an admin service account (only if publishing from the console)
+
+The admin console's Publish button updates the guide's **instructions** and
+its **knowledge files** (`PUT /api/guides/{id}`, verified by reading the
+guide back afterwards). It does not touch the guide's tools or context
+options.
+
+Publish **owns the guide's knowledge base**: the console's knowledge items
+become the guide's `VectorStore` files, and any other file in that store —
+including one you upload by hand in the GuideAnts editor — is deleted on the
+next publish and cannot be restored from the console, because GuideAnts does
+not hand a stored file's bytes back. Either manage knowledge in the console,
+or do not use Publish. (Publish does refuse outright if there is nothing
+publishable at all, rather than emptying the store.) Files that changed are
+re-indexed in the background, so give a publish a minute before testing a
+new policy on a call.
+
+Publishing requires a GuideAnts user with the **Admin** role, a different
+credential from the published guide's API key.
+
+1. In GuideAnts, create (or reuse) a user account and grant it the Admin role.
+2. Put its email and password in `.env` as `GUIDEANTS_ADMIN_EMAIL` and
+   `GUIDEANTS_ADMIN_PASSWORD`.
+3. Set `GUIDEANTS_GUIDE_NAME` to the guide's exact name in GuideAnts. Publish
+   looks the guide up by this name; if no guide matches, or more than one
+   does, it refuses rather than guessing — it never creates a guide.
+
+Leave the credentials unset to run without publishing: the console still
+renders previews and offers a bundle download (for inspection and archiving
+— importing that zip by hand in GuideAnts is **not** a safe substitute, see
+`docs/ARCHITECTURE.md`'s "Why the import endpoint is not used").
 
 ## 2. Install this project's dependencies
 

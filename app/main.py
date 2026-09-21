@@ -26,7 +26,7 @@ finished, falling back to a word-count estimate of the speaking time
 (speech_timing.py) until the first such event is recognized on the call.
 Every `Delta` this module receives from guide_client.stream_reply() is already gated: the guide
 is instructed to open its final answer with a fixed trigger phrase
-(config.FINAL_ANSWER_SENTINEL, see guide-demo/Twillio demo agent/instructions.md's "FINAL
+(config.FINAL_ANSWER_SENTINEL, see guide-demo/template/instructions.template.md's "FINAL
 ANSWER MARKER" paragraph and guide_client._SentinelGate), and nothing reaches this module until
 that phrase has been seen and stripped -- so respond_to() can forward every delta to Twilio the
 instant it arrives with no local buffering of its own. This is why a reply can go quiet for a
@@ -83,6 +83,7 @@ from . import barge_in, config, fillers, reservations, speaker_events, speech_ti
 from . import call_recording
 from .auth_api import router as auth_router
 from .booqable_client import BooqableClient, BooqableError
+from .concierge_api import router as concierge_router
 from .conversations_api import router as conversations_router
 from .db import init_db
 from .guide_client import Delta, GuideSession, ToolCallStarted, build_input, stream_reply
@@ -108,6 +109,7 @@ async def _lifespan(app: FastAPI):
 app = FastAPI(lifespan=_lifespan)
 app.include_router(reservations_router)
 app.include_router(auth_router)
+app.include_router(concierge_router)
 app.include_router(conversations_router)
 app.include_router(knowledge_router)
 app.include_router(workflow_router)
@@ -126,15 +128,45 @@ PENDING_TURN_CEILING_SECONDS = 10.0
 _STREAM_TO_TWILIO_BURST_THRESHOLD_SECONDS = 0.05
 
 
+def _published_greeting() -> str:
+    """The greeting from the last SUCCEEDED publish, or the configured
+    default. Reading the published snapshot rather than the live
+    configuration row is what preserves draft semantics: editing a greeting
+    in the console must not change what callers hear until Publish.
+
+    Wrapped in a broad try like the rest of this function's lookups -- it
+    sits in the call-answering path, and a database problem must never
+    delay answering the phone."""
+    try:
+        from . import db as db_module
+        from .guide_publish import publisher
+
+        session = db_module.SessionLocal()
+        try:
+            publication = publisher.latest_succeeded(session)
+            if publication:
+                greeting = (publication.published_config or {}).get("identity", {}).get(
+                    "greeting"
+                )
+                if greeting:
+                    return greeting
+        finally:
+            session.close()
+    except Exception:  # noqa: BLE001 -- never block answering a call
+        logger.warning("could not read published greeting; using the default", exc_info=True)
+    return config.WELCOME_GREETING
+
+
 async def _greeting_for(from_number: str) -> str:
     """Personalize the welcome greeting for a known Booqable customer, by
-    caller phone number. Falls back to the plain WELCOME_GREETING on any
-    failure -- this sits directly in the call-answering path (Twilio expects
-    a prompt TwiML response), so a slow/unreachable Booqable or an unset
-    BOOQABLE_API_KEY (which makes BooqableClient() itself raise immediately,
-    see booqable_client.py) must never delay or break answering the call."""
+    caller phone number. Falls back to the published greeting (or the plain
+    WELCOME_GREETING if nothing has been published) on any failure -- this
+    sits directly in the call-answering path (Twilio expects a prompt TwiML
+    response), so a slow/unreachable Booqable or an unset BOOQABLE_API_KEY
+    (which makes BooqableClient() itself raise immediately, see
+    booqable_client.py) must never delay or break answering the call."""
     if not from_number:
-        return config.WELCOME_GREETING
+        return _published_greeting()
     try:
         client = BooqableClient()
         customer = await asyncio.wait_for(
@@ -142,14 +174,14 @@ async def _greeting_for(from_number: str) -> str:
             timeout=config.CALLER_LOOKUP_TIMEOUT_SECONDS,
         )
         if not customer:
-            return config.WELCOME_GREETING
+            return _published_greeting()
         name = (client.attrs(customer).get("name") or "").split()
         if not name:
-            return config.WELCOME_GREETING
+            return _published_greeting()
         return config.WELCOME_BACK_GREETING_TEMPLATE.format(name=name[0])
     except (BooqableError, asyncio.TimeoutError, Exception):
         logger.warning("Caller lookup failed; using default greeting", exc_info=True)
-        return config.WELCOME_GREETING
+        return _published_greeting()
 
 
 @app.post("/twiml")

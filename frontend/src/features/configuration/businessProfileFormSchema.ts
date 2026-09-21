@@ -104,7 +104,7 @@ export function profileToFormValues(profile: BusinessProfile): BusinessProfileFo
   }
 }
 
-/** The submitted form, turned into what `conciergeService.saveDraft` expects. */
+/** The submitted form, turned into what `configurationService.saveDraft` expects. */
 export function formValuesToProfile(values: BusinessProfileFormValues): BusinessProfile {
   const hours: BusinessHours[] = values.hours.map((day, index) =>
     day.closed

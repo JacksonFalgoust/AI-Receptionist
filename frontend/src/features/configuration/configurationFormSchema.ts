@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 import type { ConciergeConfiguration } from '@/types'
-import type { ConciergeConfigurationPatch } from '@/services/conciergeService'
+import type { ConciergeConfigurationPatch } from '@/services/configurationService'
 
 import {
   businessProfileFormSchema,
@@ -50,7 +50,7 @@ export function configurationToFormValues(
   }
 }
 
-/** The submitted form, turned into what `conciergeService.saveDraft` expects. */
+/** The submitted form, turned into what `configurationService.saveDraft` expects. */
 export function formValuesToPatch(values: ConfigurationFormValues): ConciergeConfigurationPatch {
   return {
     businessProfile: formValuesToProfile(values.businessProfile),

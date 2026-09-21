@@ -52,7 +52,7 @@ import { workflowSeed } from './workflows'
  * A caller must never mutate a value returned from a service directly —
  * only the corresponding service method may change store state. Some
  * service mutators (e.g. conciergeService.pause/resume) mutate the
- * existing object in place; others (e.g. conciergeService.saveDraft/publish,
+ * existing object in place; others (e.g. configurationService.saveDraft/publish,
  * workflowService.saveDraft/publish) replace it via reassignment. Both are
  * safe from a caller's perspective — the return value always reflects
  * current state — but this means a cached result (e.g. in React Query)

@@ -2,12 +2,15 @@
 frontend/src/services/knowledgeService.ts's httpKnowledgeService, made real
 (E6 slice 2).
 
-CONSOLE-ONLY: these records drive the admin console's Knowledge pages and
-nothing else. On a live call the GuideAnts guide answers from its own
-vector store (guide-demo/Twillio demo agent/VectorStores/), not this table,
-so editing an item here does not change what the concierge says. What has
-to change to close that gap: docs/superpowers/specs/
-2026-09-16-e6-knowledge-design.md, "Future: syncing to the published guide".
+These records are no longer console-only. A publish renders every
+publishable item into the bundle's VectorStores/default/ (see
+app/guide_publish/render.py's knowledge_files) and GuideAnts' import
+replaces the live guide's vector store wholesale -- so an item edited here
+changes what a caller hears on the next call, and an item deleted here is
+deleted from the live guide. An empty table is seeded first
+(app/knowledge_store.py's seed_default_items) precisely so a publish can
+never wipe the shop's policy knowledge. The pipeline:
+docs/superpowers/specs/2026-09-18-guide-publish-pipeline-design.md.
 """
 
 from __future__ import annotations
