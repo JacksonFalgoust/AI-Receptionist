@@ -110,11 +110,11 @@ function ConfigurationForm({ configuration }: { configuration: ConciergeConfigur
         // saveDraft() alone has nothing for the header badge to refetch.
         queryClient.invalidateQueries({ queryKey: ['concierge', 'status'] })
         toast.show('Configuration published.', { tone: 'success' })
-        // A publish updates the guide's INSTRUCTIONS only. Anything it
-        // deliberately did not do — syncing knowledge, most of all — comes
-        // back as a warning, and is shown on a tone that does not
-        // auto-dismiss. A success toast alone would imply more happened
-        // than did.
+        // A publish updates the guide's instructions and its knowledge
+        // files. Anything that is true but not finished — knowledge the
+        // guide is still re-indexing, most of all — comes back as a
+        // warning, and is shown on a tone that does not auto-dismiss. A
+        // success toast alone would imply the change was already live.
         for (const warning of warnings) {
           toast.show(warning, { tone: 'warning' })
         }

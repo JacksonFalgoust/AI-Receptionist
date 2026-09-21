@@ -19,11 +19,11 @@ call's transcript, tool actions, and wrap-up classification are written as a
 
 As of E6 slice 2 the same database also holds the admin console's knowledge
 items (`app/knowledge_store.py`, served by `app/knowledge_api.py`). Those
-remain **console-only**: Publish updates the live guide's *instructions* and
-nothing else, so console knowledge edits do not change what the guide can
-look up on a call (see "Publishing console configuration to the guide"
-below for why, and "Known gaps"). The guide's knowledge base is edited in
-the GuideAnts editor.
+**are** pushed to the live guide by Publish, which replaces the guide's
+vector-store files with the rendered knowledge items — and owns that store
+outright, so a file the console does not publish is deleted from the guide
+(see "Publishing console configuration to the guide" below, and "Known
+gaps").
 
 `app/fillers.py`, `app/barge_in.py`, and `app/speaker_events.py` are the exceptions to
 "no business logic": pure, I/O-free heuristics that decide whether a
@@ -58,7 +58,7 @@ Caller ⇄ Twilio ⇄ ───────────────────�
 | [app/reservations_api.py](../app/reservations_api.py) | FastAPI router: just `/api/booqable/ping`, a manual pre-demo connectivity check. Independent of the Twilio WS path. |
 | [app/reservations.py](../app/reservations.py) | Booqable business logic (catalog lookup, availability check, create/cancel order) called directly by `app/guide_client.py`'s reservation tool handlers. See "Reservation tools" below. |
 | [app/booqable_client.py](../app/booqable_client.py) | Thin async `httpx` wrapper around Booqable's JSON:API v4 (Bearer-token auth). |
-| [app/knowledge_api.py](../app/knowledge_api.py) | FastAPI router for the admin console's Knowledge pages: `GET/POST /api/knowledge`, `GET/PATCH/DELETE /api/knowledge/{id}`, bearer-auth only. Edits here reach the live guide only via Publish (see "Publishing console configuration to the guide" below) — indexing is asynchronous after a successful push. |
+| [app/knowledge_api.py](../app/knowledge_api.py) | FastAPI router for the admin console's Knowledge pages: `GET/POST /api/knowledge`, `GET/PATCH/DELETE /api/knowledge/{id}`, bearer-auth only. Edits here reach the live guide only via Publish (see "Publishing console configuration to the guide" below) — indexing is asynchronous after a successful push, so a changed item is not searchable the instant Publish returns. |
 | [app/knowledge_store.py](../app/knowledge_store.py) | SQLAlchemy CRUD for `KnowledgeItem`: filters, search, paging, the rule that a requested `processing` status is saved as `needs_review` (no ingestion pipeline exists), and `seed_default_items()`, which fills an empty table from `config.DEFAULT_KNOWLEDGE_ITEMS` so the console and the bundle download describe the shop's real policy set rather than an empty one. |
 | [app/workflow_api.py](../app/workflow_api.py) | FastAPI router for the admin console's Workflows pages: `GET/POST /api/workflows`, `GET/PATCH/DELETE /api/workflows/{id}`, `POST /api/workflows/{id}/publish`, bearer-auth only. Console-only — publishing has no effect on live calls. |
 | [app/workflow_store.py](../app/workflow_store.py) | SQLAlchemy CRUD for `Workflow`: `steps` is a JSON column replaced wholesale on every save, and `publish_workflow` refuses to activate a workflow with no steps. |
@@ -66,9 +66,9 @@ Caller ⇄ Twilio ⇄ ───────────────────�
 | [app/guide_publish/render.py](../app/guide_publish/render.py) | Pure: `ConciergeConfiguration` row + `KnowledgeItem` rows -> the template's slot values (`build_slots`) and one Markdown file per publishable knowledge item (`knowledge_files`, `is_publishable`). Rejects any field containing markup a caller would hear read aloud. |
 | [app/guide_publish/template.py](../app/guide_publish/template.py) | Loads `guide-demo/template/instructions.template.md` and fills its `{{slot}}` placeholders (`render_instructions`); errors in both directions — an unfilled slot or a value with no matching slot. `load_static_files()` reads the template's other files (manifest, OpenAPI schemas, context options) verbatim. |
 | [app/guide_publish/bundle.py](../app/guide_publish/bundle.py) | Assembles the deterministic bundle zip and refuses to build an unsafe one: checks the tool schemas carry the exact expected operation set, the manifest name matches `config.GUIDEANTS_GUIDE_NAME`, and the instructions are non-empty and sentinel-bearing — all before any network call. The zip itself is **no longer uploaded** (see "Why the import endpoint is not used" below); it still runs the invariants, produces the `content_hash` the history and the preview diff are keyed on, and backs `GET /api/concierge/bundle`. |
-| [app/guide_publish/guide_dto.py](../app/guide_publish/guide_dto.py) | Pure, no I/O: `build_update_dto()` rebuilds GuideAnts' full-state `UpdateGuideDto` from a `GET /api/guides/{id}` body with only the instructions changed; `unsupported_features()` is the fail-closed guard listing anything on the guide this round-trip has not been verified to preserve; `comparable()` is the order-insensitive normalized view used to prove, after the write, that nothing else moved. |
-| [app/guide_publish/guideants_admin.py](../app/guide_publish/guideants_admin.py) | The only module that calls GuideAnts' *authoring* API, using `GUIDEANTS_ADMIN_EMAIL`/`GUIDEANTS_ADMIN_PASSWORD` (a GuideAnts Admin-role user) — a different credential from the published guide's `GUIDEANTS_API_KEY` used on calls. `update_guide_instructions()` does a verified read-modify-write: `POST /api/auth/login`, `GET /api/guides` (match by `GUIDEANTS_GUIDE_NAME`), `GET /api/guides/{id}`, refuse on `unsupported_features`, `PUT /api/guides/{id}`, then `GET` again and compare — a failed verification attempts one restore and raises. Holds the login cookie, re-authenticating once on a 401. It has **no import path**: `import_bundle` was deleted, not deprecated. |
-| [app/guide_publish/publisher.py](../app/guide_publish/publisher.py) | Orchestrates a publish: render -> bundle (locally, for the invariants and the hash) -> push the rendered *instructions* -> record. `latest_succeeded()` is what `app/main.py`'s greeting reads; `republish()` re-sends a stored publication's `instructions_text` as the rollback path. Adds `KNOWLEDGE_NOT_SYNCED_WARNING` to every publication of a guide that has knowledge items. |
+| [app/guide_publish/guide_dto.py](../app/guide_publish/guide_dto.py) | Pure, no I/O: `build_update_dto()` rebuilds GuideAnts' full-state `UpdateGuideDto` from a `GET /api/guides/{id}` body with the instructions changed and, given a plan, the knowledge files re-synced; `plan_file_sync()` decides which existing `VectorStore` files to keep by id (same path, same content hash), which to replace, add or remove, and flags a plan that would wipe the whole store; `unsupported_features()` is the fail-closed guard listing anything on the guide this round-trip has not been verified to preserve; `comparable()` is the order-insensitive normalized view used to prove, after the write, that nothing else moved (`include_files=False` for a write that is meant to move the files). |
+| [app/guide_publish/guideants_admin.py](../app/guide_publish/guideants_admin.py) | The only module that calls GuideAnts' *authoring* API, using `GUIDEANTS_ADMIN_EMAIL`/`GUIDEANTS_ADMIN_PASSWORD` (a GuideAnts Admin-role user) — a different credential from the published guide's `GUIDEANTS_API_KEY` used on calls. `update_guide(instructions, knowledge)` does a verified read-modify-write: `POST /api/auth/login`, `GET /api/guides` (match by `GUIDEANTS_GUIDE_NAME`), `GET /api/guides/{id}`, refuse on `unsupported_features`, refuse a plan that would delete every knowledge file, `PUT /api/guides/{id}` (new instructions, `fileIdsToKeep` + `filesToAdd` from the plan), then `GET` again and compare — instructions, everything-but-the-files, the vector-store path set, and that every id meant to be kept survived. A failed verification attempts one restore and raises. Holds the login cookie, re-authenticating once on a 401. It has **no import path**: `import_bundle` was deleted, not deprecated. |
+| [app/guide_publish/publisher.py](../app/guide_publish/publisher.py) | Orchestrates a publish: render -> bundle (locally, for the invariants and the hash) -> push the rendered *instructions and knowledge files* -> record. `latest_succeeded()` is what `app/main.py`'s greeting reads; `republish()` re-sends a stored publication's `instructions_text` plus the knowledge files inside its stored `bundle_bytes` as the rollback path, and refuses a row that has no stored bundle. The stored `content_hash` folds in a constant marker (`_HASH_MARKER`) so a publication recorded before knowledge sync existed can never be mistaken for "unchanged". A push that moved any file adds one warning saying what moved and that indexing is asynchronous. |
 | [app/configuration_store.py](../app/configuration_store.py) | SQLAlchemy access to the single-row `ConciergeConfiguration` (business profile, identity, terminology), seeded from `app/config.py` defaults on first read. `save_draft`/`mark_published` manage `has_unpublished_changes`. |
 | [app/concierge_api.py](../app/concierge_api.py) | FastAPI router backing `configurationService.ts`: `GET`/`PATCH /api/concierge/configuration`, `POST .../preview`, `POST .../publish`, `GET /api/concierge/publications`, `POST /api/concierge/publications/{id}/rollback`, `GET /api/concierge/bundle` (an inspection/archive download of the rendered bundle — **not** a manual-import path: importing that zip by hand in GuideAnts hits the same destructive bug Publish avoids, on any guide with indexed files). Not console-only — a successful publish changes what the next caller hears. |
 
@@ -736,22 +736,34 @@ guide-demo/template/instructions.template.md (app/guide_publish/template.py)
 bundle (app/guide_publish/bundle.py) -- invariants checked here, before
 anything is sent; the zip is kept LOCALLY (hash, history, /bundle download)
 and never uploaded
-        │  only the rendered instructions go on the wire
+        │  the rendered instructions and knowledge files go on the wire
         ▼
-guideants_admin.update_guide_instructions()  -- a verified read-modify-write
+guideants_admin.update_guide()  -- a verified read-modify-write
         GET  /api/guides                 find the guide by GUIDEANTS_GUIDE_NAME
         GET  /api/guides/{id}            read its full state ("before")
              unsupported_features()      refuse here, before any write
+             plan_file_sync()            keep unchanged files by id; replace,
+                                         add, remove the rest. Refuse here
+                                         too if it would wipe the store
         PUT  /api/guides/{id}            before, rebuilt with new instructions
+                                         + fileIdsToKeep + filesToAdd
         GET  /api/guides/{id}            read it back ("after")
              verify                      after.instructions == what was sent
-                                         comparable(before) == comparable(after)
-             on failure                  ONE restore PUT of "before", then raise
+                                         comparable(..., include_files=False)
+                                           before == after
+                                         vector-store paths == what was sent
+                                         every kept id survived
+             on failure                  ONE restore PUT of "before"'s
+                                         instructions and settings, keeping
+                                         whatever files are on the guide now,
+                                         then raise
         │
         ▼
-live guide's instructions updated in place -- tools, context options and
-knowledge files untouched; GUIDEANTS_PUB_ID unchanged, no re-publish of the
-phone number or the Conversation Relay config needed
+live guide's instructions AND vector store updated in place -- tools and
+context options untouched; GUIDEANTS_PUB_ID unchanged, no re-publish of the
+phone number or the Conversation Relay config needed. Files that changed are
+re-indexed asynchronously, so they are not searchable the instant this
+returns
 ```
 
 `app/guide_publish/publisher.py`'s `publish()` is the orchestrator: it loads
@@ -765,26 +777,34 @@ after a *confirmed* success — a failed publish must never leave the console
 claiming to be live when it isn't.
 
 The "is there anything to send" decision is three-tier, and it keys on the
-**rendered instructions**, not the bundle hash — the instructions are the
-only thing a push changes, so anything that leaves them identical has
-nothing to send. Most configuration fields are not template slots:
-`identity.greeting`/`closing`, `terminology.*`, and the business profile's
+**content hash**, which covers the rendered instructions and the rendered
+knowledge files — exactly what a push changes. Most configuration fields
+are not template slots and not knowledge: `identity.greeting`/`closing`,
+`terminology.*`, and the business profile's
 `phone`/`website`/`timezone`/`locations` appear nowhere in
-`instructions.template.md`. Knowledge edits move the content hash but not
-the instructions either. Yet the greeting reaches callers only through
-`published_config` (see "The draft boundary" below), which is written when a
-publication row is created. So:
+`instructions.template.md`, so editing them moves neither. Yet the greeting
+reaches callers only through `published_config` (see "The draft boundary"
+below), which is written when a publication row is created. So:
 
 - **Same content hash *and* same configuration snapshot** — a true no-op. No
   push, no new row, the previous publication is returned as-is.
-- **Same instructions, different hash or snapshot** — nothing to send
-  GuideAnts, but a new `succeeded` `GuidePublication` is still recorded
-  carrying the new snapshot and the new hash, and `mark_published()` still
-  runs. This covers both a greeting-only edit and a knowledge-only edit.
-  Without it a greeting-only publish would be swallowed: the draft flag
-  would never clear and `_published_greeting()` would keep speaking the old
-  greeting forever.
-- **Different instructions** — the full render, push and record path.
+- **Same content hash, different snapshot** — nothing to send GuideAnts (it
+  already holds exactly these instructions and these files), but a new
+  `succeeded` `GuidePublication` is still recorded carrying the new
+  snapshot, and `mark_published()` still runs. This is the greeting-only
+  edit. Without it a greeting-only publish would be swallowed: the draft
+  flag would never clear and `_published_greeting()` would keep speaking
+  the old greeting forever.
+- **Different content hash** — the full render, push and record path. An
+  edit to a knowledge item lands here even though it moves no instruction.
+
+The stored hash folds in a constant marker
+(`publisher._HASH_MARKER = ":knowledge-sync-v1"`), so it is
+`sha256(bundle_hash + marker)` rather than the bundle hash itself. Rows
+written before Publish synced knowledge stored the bare bundle hash; without
+the marker one of them could equal a hash computed today and the very first
+knowledge sync would be skipped as a no-op. Bump the suffix if what a push
+covers ever changes again.
 
 ### Why the import endpoint is not used
 
@@ -853,32 +873,78 @@ instructions would mean this app never speaks anything the guide says (see
 `_SentinelGate` above). Those checks now guard what is *rendered* rather
 than what is uploaded, but a refused publish is still a refused publish.
 
-### Knowledge is NOT synced by Publish
+### Knowledge IS synced by Publish — and Publish owns the whole store
 
-This supersedes anything elsewhere in this repo saying knowledge is pushed
-on Publish. Uploading knowledge meant uploading a bundle, and uploading a
-bundle is the destructive path above — worse, precisely *because* the guide
-has indexed knowledge files. So Publish sends the instructions and nothing
-else, and the guide's vector store is edited in the GuideAnts editor.
+This supersedes anything elsewhere in this repo saying knowledge is not
+pushed on Publish. That was true while the only way to upload knowledge was
+the destructive import endpoint. It is not true any more: `UpdateGuideDto`
+carries `fileIdsToKeep` and `filesToAdd`, and the update path deletes a
+removed file's `DocumentChunks` *before* deleting the file, so replacing an
+indexed file returns 200 where import returns a foreign-key 500. Verified
+against a real GuideAnts on **2026-09-21**: adding a file while keeping
+another (the kept file's id preserved), replacing an indexed file, and
+removing one — tools, context options and other files unchanged in all
+three.
 
-Because that is easy to forget at exactly the wrong moment, every
-publication of a guide that has knowledge items carries
-`publisher.KNOWLEDGE_NOT_SYNCED_WARNING` in its `warnings` — on the push
-path and on the no-push path alike — and the console shows it. Claiming a
-sync that did not happen would be a lie the next phone call exposes.
+**Publish owns the guide's entire `VectorStore` folder.** `fileIdsToKeep`
+is full-state, so the set of files named is the set that survives. Every
+publishable `KnowledgeItem` is named or uploaded; **anything else in the
+vector store is deleted**, including a file someone uploaded by hand in the
+GuideAnts editor. That deletion is irreversible from this app: GuideAnts
+returns a file's metadata but never its bytes, so nothing here can put a
+deleted file back — not even the one best-effort restore after a failed
+verification, which keeps whatever files are on the guide at that moment
+rather than naming ids that no longer exist. Files of any other
+`folderKind` are not Publish's business and are always kept.
 
-`render.knowledge_files()` still turns every publishable `KnowledgeItem`
-(active, and within its effective/expiration window — see
-`render.is_publishable()`) into one Markdown file under
-`VectorStores/default/` in the *locally built* bundle. That is what
-`GET /api/concierge/bundle` hands back for inspection or archiving, and what
-`knowledge_item_count` counts. `app/knowledge_store.py`'s
-`seed_default_items()` populates an empty table from
-`config.DEFAULT_KNOWLEDGE_ITEMS` (the shop's original vector-store document,
-one item per section) on first read, so that download and that count
-describe the shop's real policy set rather than an empty one. It runs on the
-publish path as well as on `GET /api/knowledge`, because an admin can reach
-Publish without ever opening the console's Knowledge page. Same
+Four rules follow, and each is a test:
+
+1. **Unchanged files are left alone.** A file is kept by id when its path is
+   still published *and* its `markdownShadow.contentHash` (the SHA-256 hex
+   of the stored bytes) equals the hash of the bytes that would be
+   uploaded. Replacing a file clears its chunks immediately while
+   re-indexing runs asynchronously, so a needless replace is a window in
+   which the guide cannot answer from that document. A missing or empty
+   `contentHash` — a shadow that is null, or a file still being processed —
+   counts as **changed**, because "unknown" must never be read as "fine".
+2. **Changed files are re-indexed asynchronously.** GuideAnts extracts and
+   indexes an uploaded file in the background (`Indexed N chunks` in its
+   logs). Publish returns before that finishes, so a successful publication
+   that moved any file carries one warning saying so, with the counts:
+   *"Knowledge updated (N added or replaced, M removed). GuideAnts indexes
+   it in the background, so changed items may take a minute to become
+   searchable."* No file moved, no warning.
+3. **An empty knowledge set against a stocked store is refused**, before any
+   PUT, with a message pointing at the console. A render with no publishable
+   items is far more likely to be a misconfiguration (everything
+   deactivated, every item expired) than a deliberate request to erase the
+   receptionist's knowledge base — and it is the one mistake here with no
+   undo. A guide that already has no vector-store files is not affected: the
+   guard is about deleting, not about being empty.
+4. **A rollback replays the knowledge too.** `republish()` re-sends the
+   stored `instructions_text` *and* the `VectorStores/default/` entries of
+   that publication's stored `bundle_bytes`. Restoring old wording on top of
+   a newer knowledge base would be a state that was never published, so a
+   publication row with no stored bundle is refused (HTTP 422) rather than
+   partially replayed.
+
+`render.knowledge_files()` turns every publishable `KnowledgeItem` (active,
+and within its effective/expiration window — see `render.is_publishable()`)
+into one Markdown file under `VectorStores/default/<item id>.md`, named by
+id so the bundle hashes stably across runs. Those same bytes are what the
+PUT uploads and what `GET /api/concierge/bundle` hands back for inspection
+or archiving, and their count is `knowledge_item_count`. An item that stops
+being publishable (deactivated, or past its expiration date) simply
+disappears from that set — which is exactly how an expired policy leaves the
+guide's vector store.
+
+`app/knowledge_store.py`'s `seed_default_items()` populates an empty table
+from `config.DEFAULT_KNOWLEDGE_ITEMS` (the shop's original vector-store
+document, one item per section) on first read. It runs on the publish path
+as well as on `GET /api/knowledge`, because an admin can reach Publish
+without ever opening the console's Knowledge page — and now that Publish
+owns the vector store, publishing from an unseeded table would be the
+"delete everything" case rather than a harmless empty bundle. Same
 seed-on-first-read discipline as `configuration_store.get_configuration()`,
 and for the same reason: `create_all()` is the real runtime schema path, so
 a migration's data step would never run for most checkouts.
@@ -977,5 +1043,5 @@ From SETUP.md's hardening notes — not implemented, not required for the demo t
 - If GuideAnts loses track of a conversation mid-call (restart, expiry — see "The GuideAnts endpoint this app depends on" above), the fallback starts a brand-new conversation with **no recap** of what was said earlier in the call. The guide won't remember anything from before the reset; a caller who'd already explained their situation would have to repeat it. Replaying a summary from `st.messages` into the fresh conversation's first turn would fix this but was deliberately left out — this failure mode is mostly a dev-environment concern (a live GuideAnts restart mid-call), not something expected in normal operation.
 - Against an older GuideAnts build whose streamed events don't carry `conversation` yet: the very first turn of a call streams with no way to capture a continuation handle, so that turn's server-side conversation is orphaned (the client has no id for it). `stream_missing_conversation` catches this after the fact, and the *next* turn falls back to one non-streaming call, which starts (and captures the id of) yet another fresh conversation — so the first turn's context is lost, same as the lost-conversation case above. Every turn after that streams and continues normally. This only happens once per call, on the first turn, against a build old enough to lack the field — see `app/guide_client.py` above.
 - See "Interruption notes" above for the known rough edges of the barge-in note-folding feature specifically.
-- **Console knowledge is not synced to the guide by Publish.** This supersedes the earlier "knowledge is synced on Publish" wording here and in `frontend/TODO.md`. Publish updates the live guide's *instructions* only: pushing knowledge meant uploading a bundle to `/api/guides/import`, which deletes a guide's dependent rows one non-transactional statement at a time and then fails on a foreign key precisely when the guide has indexed knowledge files (observed 2026-09-18 — see "Why the import endpoint is not used" above). So knowledge items edited in the console are stored in SQLite, rendered into the local bundle and counted, and never reach the guide's vector store; every publication of a guide with knowledge items carries `publisher.KNOWLEDGE_NOT_SYNCED_WARNING` saying so. The knowledge base is edited in the GuideAnts editor. A safe sync would need either a fixed import endpoint or a per-file GuideAnts file API; on top of that, a `document`/`url` item's Markdown is still built from its title/category/tags/content fields only — the uploaded file or linked page is stored as a filename/address and never fetched. See `docs/superpowers/specs/2026-09-16-e6-knowledge-design.md`, "Future: syncing to the published guide".
+- **Publish owns the guide's whole knowledge store, and a deletion cannot be undone from here.** This supersedes the earlier "knowledge is not synced on Publish" wording here and in `frontend/TODO.md`. Publish now replaces the live guide's `VectorStore` files with the rendered knowledge items through the same verified `PUT /api/guides/{id}` (never the import endpoint — see "Why the import endpoint is not used" above), keeping unchanged files by id. The gap is the ownership: any other vector-store file, including one uploaded by hand in the GuideAnts editor, is deleted on the next publish, and GuideAnts hands back a file's metadata but never its bytes, so this app cannot restore it. Publish refuses only the total wipe (no publishable items at all); it does not warn before deleting a file it does not recognize, and the console has no view of what is in the guide's vector store that the console did not put there. Indexing is also asynchronous, so a changed item is not searchable the moment Publish returns — the publication's warning says so. Separately, a `document`/`url` item's Markdown is still built from its title/category/tags/content fields only: the uploaded file or linked page is stored as a filename/address and never fetched, so what reaches the vector store is the console's description of a document, not the document. See `docs/superpowers/specs/2026-09-16-e6-knowledge-design.md`.
 - **Console workflows have no live effect either.** Workflows created or edited in the admin console (`app/workflow_api.py`) are stored in SQLite and never read by anything in `app/`'s call-handling code — publishing a workflow changes nothing about what the concierge does on a call. See `docs/superpowers/specs/2026-09-17-e6-workflows-design.md`, "Future: giving a published workflow live effect".
