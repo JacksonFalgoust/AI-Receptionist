@@ -307,24 +307,15 @@ def test_republish_restores_the_stored_snapshot_and_bundle_knowledge(db, push_ok
 
 
 def test_a_knowledge_only_change_is_pushed(db, push_ok):
-    """A knowledge edit moves no template slot, so the instructions are
+    """Editing an existing item's content moves no template slot (its title,
+    and so the topics list, is unchanged), so the instructions are
     byte-identical -- the content hash is what notices, and the whole point
     of keying on it is that this edit reaches the guide."""
-    from datetime import datetime
-
     first = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
     assert len(push_ok) == 1
 
-    db.add(
-        models.KnowledgeItem(
-            id="k-new",
-            organization_id=config.DEFAULT_ORGANIZATION_ID,
-            title="Winter hours",
-            type="policy", status="active", source="Manual entry",
-            content="We close an hour early in January.", tags=[],
-            updated_at=datetime.utcnow(),
-        )
-    )
+    item = publisher._knowledge_items(db)[0]
+    item.content = "We close an hour early in January."
     db.commit()
 
     second = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
@@ -333,11 +324,10 @@ def test_a_knowledge_only_change_is_pushed(db, push_ok):
     assert second.status == "succeeded"
     assert second.content_hash != first.content_hash
     assert second.instructions_text == first.instructions_text
-    assert second.knowledge_item_count == first.knowledge_item_count + 1
+    assert second.knowledge_item_count == first.knowledge_item_count
     assert len(push_ok) == 2, "a knowledge edit must reach the guide"
-    assert "VectorStores/default/k-new.md" in push_ok.knowledge[-1]
     assert b"close an hour early" in push_ok.knowledge[-1][
-        "VectorStores/default/k-new.md"
+        f"VectorStores/default/{item.id}.md"
     ]
 
 
