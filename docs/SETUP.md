@@ -54,6 +54,11 @@ from creating the GuideAnts guide through placing a real phone call.
    Web API tool source this demo used to use: there's no HTTP endpoint or
    shared API key that anyone (or anything) other than an active call
    through this app could use to invoke a reservation operation.
+   **You can skip the manual steps below on a guide with no tools:** the
+   console's Publish button adds both tool sources (`voice-receptionist` and
+   `caller-phone`, from `guide-demo/template/OpenAPI/`) to a guide that has
+   neither, and leaves any source the guide already has untouched. The manual
+   paste below is the fallback if you'd rather not publish yet.
    1. In the guide editor, open its **Tools** section and click **+ Add Tool
       Source**.
    2. In the picker, choose **Client Actions** ("An action executed by the
