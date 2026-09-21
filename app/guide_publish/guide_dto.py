@@ -313,7 +313,7 @@ def build_update_dto(
         "topP": detail["topP"],
         "reasoningEffort": detail["reasoningEffort"],
         "toolIds": [tool["id"] for tool in detail["tools"]] if detail["tools"] else [],
-        "customTools": list(detail["customTools"]) + list(new_tools or []),
+        "customTools": list(detail["customTools"] or []) + list(new_tools or []),
         "contextOptions": detail["contextOptions"],
         "authProviders": detail["authProviders"],
         "fileIdsToKeep": file_ids_to_keep,

@@ -490,3 +490,10 @@ def test_excluding_the_files_still_catches_collateral_damage(detail):
     assert guide_dto.comparable(detail, include_files=False) != guide_dto.comparable(
         other, include_files=False
     )
+
+
+def test_a_null_custom_tools_list_is_treated_as_empty(detail):
+    detail["customTools"] = None
+    new_tools = guide_dto.missing_custom_tools(detail, {"caller-phone": "{}"})
+    dto = guide_dto.build_update_dto(detail, "x", None, new_tools)
+    assert [tool["name"] for tool in dto["customTools"]] == ["caller-phone"]
