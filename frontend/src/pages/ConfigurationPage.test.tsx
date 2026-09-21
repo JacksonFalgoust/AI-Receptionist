@@ -3,7 +3,7 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import { resetStore, store } from '@/mocks/store'
-import { conciergeService } from '@/services/conciergeService'
+import { configurationService } from '@/services/configurationService'
 import { renderWithProviders, seedSession } from '@/test/renderWithProviders'
 
 import { ConfigurationPage } from './ConfigurationPage'
@@ -79,7 +79,7 @@ describe('ConfigurationPage', () => {
   it('disables Publish while Save draft is in flight, so a second click cannot race it', async () => {
     const user = userEvent.setup()
     let resolveSave: (value: typeof store.conciergeConfiguration) => void = () => {}
-    vi.spyOn(conciergeService, 'saveDraft').mockReturnValue(
+    vi.spyOn(configurationService, 'saveDraft').mockReturnValue(
       new Promise((resolve) => {
         resolveSave = resolve
       }),
@@ -153,5 +153,27 @@ describe('ConfigurationPage', () => {
     expect(await screen.findByText('Configuration published.')).toBeInTheDocument()
     expect(store.conciergeConfiguration.hasUnpublishedChanges).toBe(false)
     expect(store.conciergeConfiguration.lastPublishedAt).toBeTruthy()
+  })
+
+  it('reports a failed publish as a failure, never as success', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(configurationService, 'publish').mockResolvedValue({
+      published: false,
+      status: 'failed',
+      publicationId: 'pub_failed',
+      warnings: [],
+      error: 'GuideAnts unreachable on import',
+      configuration: store.conciergeConfiguration,
+    })
+    renderWithProviders(<ConfigurationPage />)
+    await screen.findByDisplayValue('Horizon Partners')
+
+    await user.click(screen.getByRole('button', { name: 'Publish changes' }))
+    const confirmDialog = within(await screen.findByRole('dialog'))
+    await user.click(confirmDialog.getByRole('button', { name: 'Publish' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/unreachable/i)
+    expect(screen.queryByText('Configuration published.')).not.toBeInTheDocument()
+    expect(store.conciergeConfiguration.hasUnpublishedChanges).toBe(true)
   })
 })

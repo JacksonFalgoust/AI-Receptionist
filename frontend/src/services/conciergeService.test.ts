@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { resetStore, store } from '@/mocks/store'
+import { resetStore } from '@/mocks/store'
 
 import { conciergeService } from './conciergeService'
+import { configurationService } from './configurationService'
 
 describe('conciergeService status', () => {
   beforeEach(() => {
@@ -33,69 +34,12 @@ describe('conciergeService status', () => {
 
     // Publishing stamps the status card's "last configuration change" line.
     const beforePublish = await conciergeService.getStatus()
-    await conciergeService.publish()
+    await configurationService.publish()
     const afterPublish = await conciergeService.getStatus()
 
     expect(afterPublish).not.toBe(beforePublish)
     expect(afterPublish.lastConfigurationChangeAt).not.toBe(
       beforePublish.lastConfigurationChangeAt,
     )
-  })
-})
-
-describe('conciergeService configuration', () => {
-  beforeEach(() => {
-    resetStore()
-  })
-
-  it('returns the seeded configuration with nothing unpublished', async () => {
-    const configuration = await conciergeService.getConfiguration()
-
-    expect(configuration.businessProfile.name).toBe('Horizon Partners')
-    expect(configuration.hasUnpublishedChanges).toBe(false)
-  })
-
-  it('saveDraft records the change without publishing it (PRD §13.4)', async () => {
-    const before = await conciergeService.getConfiguration()
-
-    const draft = await conciergeService.saveDraft({
-      identity: { ...before.identity, greeting: 'Good morning, Horizon Partners.' },
-    })
-
-    expect(draft.identity.greeting).toBe('Good morning, Horizon Partners.')
-    expect(draft.hasUnpublishedChanges).toBe(true)
-    // Publishing markers must be untouched by a save.
-    expect(draft.lastPublishedAt).toBe(before.lastPublishedAt)
-    expect(store.conciergeStatus.lastConfigurationChangeAt).toBe(
-      before.lastPublishedAt,
-    )
-  })
-
-  it('saveDraft merges only the sections it is given', async () => {
-    const before = await conciergeService.getConfiguration()
-
-    const draft = await conciergeService.saveDraft({
-      businessProfile: { ...before.businessProfile, phone: '+1 555 0199' },
-    })
-
-    expect(draft.businessProfile.phone).toBe('+1 555 0199')
-    expect(draft.identity.greeting).toBe(before.identity.greeting)
-    expect(draft.terminology).toEqual(before.terminology)
-  })
-
-  it('publish clears the flag and stamps both timestamps', async () => {
-    const before = await conciergeService.getConfiguration()
-    await conciergeService.saveDraft({
-      identity: { ...before.identity, closing: 'Thanks for calling Horizon Partners.' },
-    })
-
-    const published = await conciergeService.publish()
-
-    expect(published.hasUnpublishedChanges).toBe(false)
-    expect(published.identity.closing).toBe('Thanks for calling Horizon Partners.')
-    expect(new Date(published.lastPublishedAt!).getTime()).toBeGreaterThan(
-      new Date(before.lastPublishedAt!).getTime(),
-    )
-    expect(store.conciergeStatus.lastConfigurationChangeAt).toBe(published.lastPublishedAt)
   })
 })

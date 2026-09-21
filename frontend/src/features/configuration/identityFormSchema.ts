@@ -71,7 +71,7 @@ export function identityToFormValues(identity: ConciergeIdentity): IdentityFormV
   }
 }
 
-/** The submitted form, turned into what `conciergeService.saveDraft` expects. */
+/** The submitted form, turned into what `configurationService.saveDraft` expects. */
 export function formValuesToIdentity(values: IdentityFormValues): ConciergeIdentity {
   const tone = values.tone as Tone
 
