@@ -2,10 +2,11 @@
 .../publish, GET /api/concierge/publications, GET /api/concierge/bundle --
 the live backing for frontend/src/services/configurationService.ts.
 
-Unlike app/knowledge_api.py and app/workflow_api.py, these records are NOT
-console-only: a successful publish rewrites the live GuideAnts guide's
-INSTRUCTIONS and changes what the next caller hears. Knowledge items are
-not synced -- see app/guide_publish/guideants_admin.py for why.
+Unlike app/workflow_api.py, these records are NOT console-only: a
+successful publish rewrites the live GuideAnts guide's INSTRUCTIONS and
+replaces its KNOWLEDGE FILES, and changes what the next caller hears. The
+publish owns the guide's whole vector store -- see
+app/guide_publish/guideants_admin.py for what that deletes and why.
 
 Wire shape is camelCase; the models are snake_case. The translation happens
 here, the same split app/conversations_api.py uses.
@@ -167,9 +168,10 @@ async def rollback(
     db: Annotated[Session, Depends(get_db)],
     session: Annotated[models.AuthSession, Depends(auth.require_auth)],
 ) -> dict:
-    """Re-push a previously published set of instructions. Publish only ever
-    changes the guide's instructions, so putting the old ones back is a
-    complete undo."""
+    """Re-push a previously published set of instructions and the knowledge
+    files stored in that publication's bundle. Publish only ever changes
+    those two things, so putting both back is a complete undo -- except
+    that files deleted in between were never retrievable and are gone."""
     if not guideants_admin.is_configured():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

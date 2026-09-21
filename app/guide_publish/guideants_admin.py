@@ -24,9 +24,32 @@ already committed. Observed result on a live guide: a 500 response and a
 guide left with zero custom tools and zero context options. It is not
 atomic, whatever the earlier design note claimed.
 
-So publishing now changes the one field it actually needs to change, via a
-read-modify-write `PUT /api/guides/{id}` that is verified afterwards. See
-`guide_dto.py` for the DTO mapping and the comparison.
+So publishing goes through a read-modify-write `PUT /api/guides/{id}` that
+is verified afterwards, and changes only the two things it means to: the
+guide's instructions and its vector-store knowledge files. See
+`guide_dto.py` for the DTO mapping, the file plan and the comparison.
+
+WHAT THE KNOWLEDGE SYNC OWNS
+----------------------------
+`UpdateGuideDto` is full-state, so `fileIdsToKeep` decides what survives:
+an existing file whose id is omitted is deleted, and the update path
+clears its `DocumentChunks` first, which is why replacing an indexed file
+works here (200) where the import endpoint fails (FK, 500).
+
+That makes Publish the owner of the guide's whole vector store. Any
+`VectorStore` file the console does not publish -- including one uploaded
+by hand in the GuideAnts editor -- is deleted on the next publish, and
+this app cannot put it back: GuideAnts returns a file's metadata, never
+its bytes. Files of any other `folderKind` are kept untouched.
+
+Two consequences shape the code below:
+
+  * A file that has not changed (same path, same content hash) is kept by
+    id rather than re-uploaded. Replacing a file clears its chunks
+    immediately while re-indexing is asynchronous, so a needless replace
+    is a window in which the guide cannot answer from that document.
+  * An empty desired set against a stocked vector store is REFUSED before
+    any PUT. That is the one mistake with no undo.
 """
 
 from __future__ import annotations
@@ -42,6 +65,10 @@ logger = logging.getLogger(__name__)
 
 _LOGIN_PATH = "/api/auth/login"
 _GUIDES_PATH = "/api/guides"
+
+# The bundle folder whose files ARE the guide's vector store. Publish
+# owns everything under it and nothing outside it.
+_KNOWLEDGE_PREFIX = "VectorStores/default/"
 
 # Cached across publishes so a burst of them does not re-authenticate each
 # time. Cleared on 401 and by reset_session() in tests.
@@ -222,21 +249,28 @@ def _describe_difference(before: dict, after: dict) -> str:
     return "; ".join(differences[:5]) or "an unlocated difference"
 
 
-async def update_guide_instructions(instructions: str) -> dict:
-    """Change the live guide's instructions and nothing else.
+async def update_guide(instructions: str, knowledge: dict[str, bytes]) -> dict:
+    """Change the live guide's instructions and its knowledge files.
 
-    Read the guide, refuse anything we have not proven round-trips, rebuild
-    the full-state DTO with the new instructions, PUT it, then read it back
-    and prove that only the instructions moved. A failed verification
+    Read the guide, refuse anything we have not proven round-trips, plan
+    the file sync against what was just read, rebuild the full-state DTO,
+    PUT it, then read it back and prove that nothing beyond the
+    instructions and the planned files moved. A failed verification
     attempts one best-effort restore before raising.
 
-    Returns {"guideId": ..., "warnings": [...]}.
+    `knowledge` is keyed by BUNDLE path (`VectorStores/default/<id>.md`);
+    anything outside that folder is ignored, which keeps this function's
+    contract tied to the one folder Publish owns.
+
+    Returns {"guideId": ..., "warnings": [...], "files": {...counts}}.
     """
     if not is_configured():
         raise GuideAntsNotConfigured(
             "GUIDEANTS_ADMIN_EMAIL and GUIDEANTS_ADMIN_PASSWORD are not set, "
             "so publishing to GuideAnts is disabled"
         )
+
+    desired = _desired_files(knowledge)
 
     async with httpx.AsyncClient(timeout=config.GUIDEANTS_TIMEOUT_SECONDS) as client:
         guide_id = await _find_guide_id(client)
@@ -257,11 +291,23 @@ async def update_guide_instructions(instructions: str) -> dict:
                 + "; ".join(reasons)
             )
 
+        # Planned from the body we just read, never from a cached one: the
+        # plan names file ids, and a stale id would delete the wrong file.
+        plan = guide_dto.plan_file_sync(before, desired)
+        if plan.would_delete_everything:
+            # Also before any PUT, and for a harder reason: deleting a
+            # file is the one step of this flow that cannot be undone.
+            raise GuideAntsAdminError(
+                "there are no publishable knowledge items, and refusing to "
+                "delete the guide's entire knowledge base -- enable or add "
+                "items in the console first"
+            )
+
         await _request(
             client,
             "PUT",
             detail_path,
-            json=guide_dto.build_update_dto(before, instructions),
+            json=guide_dto.build_update_dto(before, instructions, plan),
         )
 
         after = await _request(client, "GET", detail_path)
@@ -271,45 +317,116 @@ async def update_guide_instructions(instructions: str) -> dict:
                 "when verifying the update"
             )
 
-        problem = None
-        if after.get("instructions") != instructions:
-            problem = "the guide's instructions are not what was sent"
-        else:
-            before_view = guide_dto.comparable(before)
-            after_view = guide_dto.comparable(after)
-            if before_view != after_view:
-                problem = (
-                    "the update changed more than the instructions: "
-                    + _describe_difference(before_view, after_view)
-                )
-
+        problem = _verification_problem(before, after, instructions, plan, desired)
         if problem:
-            restored = await _restore(client, detail_path, before)
+            restored = await _restore(client, detail_path, before, after)
             raise GuideAntsAdminError(
                 f"GuideAnts guide {guide_id} failed verification -- {problem}. "
                 + (
-                    "The previous state was restored."
+                    "The previous instructions and settings were restored, and "
+                    "every file still on the guide was kept -- but a file the "
+                    "update deleted cannot be restored from here, because "
+                    "GuideAnts does not hand back a stored file's bytes."
                     if restored is None
                     else f"Restoring the previous state ALSO failed: {restored}"
                 )
             )
 
-        return {"guideId": guide_id, "warnings": []}
+        return {
+            "guideId": guide_id,
+            "warnings": [],
+            "files": {
+                "added": len(plan.added),
+                "replaced": len(plan.replaced),
+                "removed": len(plan.removed),
+                "unchanged": len(plan.unchanged),
+            },
+        }
+
+
+def _verification_problem(
+    before: dict,
+    after: dict,
+    instructions: str,
+    plan: guide_dto.FileSyncPlan,
+    desired: dict[str, bytes],
+) -> str | None:
+    """What the read-back disproves, or None if the write did exactly what
+    was asked. The file set is checked separately from the rest of the
+    guide, because the files are the part that was meant to move."""
+    if after.get("instructions") != instructions:
+        return "the guide's instructions are not what was sent"
+
+    before_view = guide_dto.comparable(before, include_files=False)
+    after_view = guide_dto.comparable(after, include_files=False)
+    if before_view != after_view:
+        return (
+            "the update changed more than the instructions and the knowledge "
+            "files: " + _describe_difference(before_view, after_view)
+        )
+
+    expected_paths = sorted(desired)
+    actual_paths = guide_dto.vector_store_paths(after)
+    if actual_paths != expected_paths:
+        return (
+            "the guide's knowledge files are not the ones that were sent: "
+            f"expected {expected_paths}, found {actual_paths}"
+        )
+
+    # An id that vanished means a file we asked to KEEP was replaced or
+    # deleted -- the paths can still line up while the index behind them
+    # was thrown away and is being rebuilt.
+    surviving = {str(file.get("id")) for file in after.get("files") or []}
+    lost = sorted(
+        (set(plan.keep_ids) | guide_dto.non_vector_store_file_ids(before)) - surviving
+    )
+    if lost:
+        return f"files that were meant to be kept were not: {', '.join(lost)}"
+    return None
+
+
+def _desired_files(knowledge: dict[str, bytes] | None) -> dict[str, bytes]:
+    """Bundle paths -> the bare relativePath GuideAnts stores.
+
+    The bundle also carries `instructions.md`, `manifest.json` and the
+    OpenAPI schemas; none of those belong in the vector store, so anything
+    outside `VectorStores/default/` is dropped rather than uploaded.
+    """
+    desired: dict[str, bytes] = {}
+    for path, content in (knowledge or {}).items():
+        if not path.startswith(_KNOWLEDGE_PREFIX):
+            continue
+        name = path[len(_KNOWLEDGE_PREFIX) :]
+        if not name or "/" in name:
+            continue
+        desired[name] = content
+    return desired
 
 
 async def _restore(
-    client: httpx.AsyncClient, detail_path: str, before: dict
+    client: httpx.AsyncClient, detail_path: str, before: dict, current: dict
 ) -> str | None:
-    """One best-effort PUT of the pre-update state. Returns None on success
-    or the failure message -- it never raises, because the caller is already
-    raising about the verification failure and must report both outcomes."""
+    """One best-effort PUT of the pre-update instructions and settings.
+    Returns None on success or the failure message -- it never raises,
+    because the caller is already raising about the verification failure
+    and must report both outcomes.
+
+    It keeps every file that is on the guide *now* rather than every file
+    that was there before: a file the failed update deleted is gone for
+    good (its bytes are not retrievable), and naming its id would only
+    make the restore itself fail.
+    """
+    dto = guide_dto.build_update_dto(before, before.get("instructions") or "")
+    # `current` is the read-back that failed verification. If it did not even
+    # report a file list, fall back to the ids that were valid a moment ago
+    # rather than sending an empty keep-list, which would delete everything.
+    source = current if isinstance(current.get("files"), list) else before
+    dto["fileIdsToKeep"] = [
+        file["id"] for file in source.get("files") or [] if file.get("id")
+    ]
+    dto["filesToAdd"] = []
     try:
-        await _request(
-            client,
-            "PUT",
-            detail_path,
-            json=guide_dto.build_update_dto(before, before.get("instructions") or ""),
-        )
+        await _request(client, "PUT", detail_path, json=dto)
     except GuideAntsAdminError as exc:
         logger.error("restoring the previous guide state failed: %s", exc)
         return str(exc)

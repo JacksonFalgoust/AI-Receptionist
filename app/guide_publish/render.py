@@ -73,9 +73,10 @@ def build_slots(configuration: models.ConciergeConfiguration) -> dict[str, str]:
 
 def is_publishable(item: models.KnowledgeItem, today: date) -> bool:
     """Active, and today falls within its effective window (either bound
-    optional). Anything else is absent from the bundle -- and because
-    GuideAnts' import replaces the vector store wholesale, absent means
-    removed from the live guide, which is what an expired policy wants."""
+    optional). Anything else is absent from the rendered set -- and because
+    Publish owns the guide's whole vector store, absent means removed from
+    the live guide on the next publish, which is what an expired policy
+    wants."""
     if item.status != "active":
         return False
     if item.effective_date and item.effective_date.date() > today:

@@ -3,9 +3,15 @@
 The rule these tests exist to protect: a FAILED publish must never leave
 the console looking published. has_unpublished_changes stays set, no
 published_config is written, and the greeting a caller hears does not move.
+
+A push now carries the rendered knowledge files as well as the rendered
+instructions, so the second rule is that "nothing to send" must key on the
+content hash, which covers both -- a knowledge edit that left the
+instructions alone used to be swallowed.
 """
 
 import asyncio
+import hashlib
 
 import pytest
 from sqlalchemy import create_engine
@@ -28,26 +34,44 @@ def db():
     session.close()
 
 
+class Push(list):
+    """Every (instructions, knowledge) pair that reached GuideAnts, plus the
+    file counts the next push should report back."""
+
+    files = {"added": 0, "replaced": 0, "removed": 0, "unchanged": 0}
+
+    @property
+    def instructions(self):
+        return [call[0] for call in self]
+
+    @property
+    def knowledge(self):
+        return [call[1] for call in self]
+
+
 @pytest.fixture
 def push_ok(monkeypatch):
-    """Records the INSTRUCTIONS pushed -- a publish sends nothing else."""
-    calls = []
+    calls = Push()
 
-    async def fake_update(instructions):
-        calls.append(instructions)
-        return {"guideId": "abc", "warnings": ["model alias not resolved"]}
+    async def fake_update(instructions, knowledge):
+        calls.append((instructions, knowledge))
+        return {
+            "guideId": "abc",
+            "warnings": ["model alias not resolved"],
+            "files": dict(calls.files),
+        }
 
-    monkeypatch.setattr(guideants_admin, "update_guide_instructions", fake_update)
+    monkeypatch.setattr(guideants_admin, "update_guide", fake_update)
     monkeypatch.setattr(guideants_admin, "is_configured", lambda: True)
     return calls
 
 
 @pytest.fixture
 def push_fails(monkeypatch):
-    async def fake_update(instructions):
+    async def fake_update(instructions, knowledge):
         raise guideants_admin.GuideAntsAdminError("GuideAnts unreachable on GET /api/guides")
 
-    monkeypatch.setattr(guideants_admin, "update_guide_instructions", fake_update)
+    monkeypatch.setattr(guideants_admin, "update_guide", fake_update)
     monkeypatch.setattr(guideants_admin, "is_configured", lambda: True)
 
 
@@ -66,12 +90,14 @@ def test_successful_publish_records_and_clears_the_draft_flag(db, push_ok):
     publication = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
 
     assert publication.status == "succeeded"
-    assert publication.warnings[0] == "model alias not resolved"
-    assert publisher.KNOWLEDGE_NOT_SYNCED_WARNING in publication.warnings
+    assert publication.warnings == ["model alias not resolved"]
     assert publication.published_config["identity"]["greeting"] == "Hi there"
     assert publication.bundle_bytes
-    assert push_ok == [publication.instructions_text], (
-        "a publish sends the rendered instructions and nothing else"
+    assert push_ok.instructions == [publication.instructions_text]
+    # And the knowledge, keyed by the bundle path the admin client strips.
+    assert push_ok.knowledge[0], "a publish sends the rendered knowledge too"
+    assert all(
+        name.startswith("VectorStores/default/") for name in push_ok.knowledge[0]
     )
     assert configuration_store.get_configuration(db).has_unpublished_changes is False
 
@@ -210,9 +236,12 @@ def test_republish_pushes_the_stored_instructions_again(db, push_ok):
     assert rolled_back.instructions_text == first.instructions_text
     assert rolled_back.id != first.id, "a rollback is recorded as its own publication"
     assert len(push_ok) == 3
-    assert push_ok[-1] == first.instructions_text, (
+    assert push_ok.instructions[-1] == first.instructions_text, (
         "a rollback re-sends the STORED instructions, not a re-render"
     )
+    assert push_ok.knowledge[-1] == publisher.knowledge_from_bundle(
+        first.bundle_bytes
+    ), "and the knowledge it was published with, not today's"
 
 
 def test_republish_without_stored_instructions_fails_cleanly(db, push_ok):
@@ -229,9 +258,10 @@ def test_republish_without_stored_instructions_fails_cleanly(db, push_ok):
     assert push_ok == []
 
 
-def test_republish_needs_no_stored_bundle(db, push_ok):
-    """The bundle is no longer what a rollback replays, so an old row that
-    predates bundle storage is still a valid rollback target."""
+def test_republish_without_a_stored_bundle_is_refused(db, push_ok):
+    """The bundle is where a rollback's knowledge files come from. Replaying
+    the instructions alone would leave the guide answering restored wording
+    out of the knowledge base the admin is rolling back from."""
     publication = models.GuidePublication(
         organization_id=config.DEFAULT_ORGANIZATION_ID,
         published_by="admin@example.com", content_hash="old",
@@ -242,19 +272,44 @@ def test_republish_needs_no_stored_bundle(db, push_ok):
     db.add(publication)
     db.commit()
 
+    with pytest.raises(ValueError, match="no stored bundle"):
+        asyncio.run(publisher.republish(db, publication, published_by="a@example.com"))
+    assert push_ok == []
+
+
+def test_republish_restores_the_stored_snapshot_and_bundle_knowledge(db, push_ok):
+    """A stored bundle is the whole rollback payload: the instructions the
+    row recorded, the knowledge that bundle holds, and the snapshot the
+    greeting is read out of."""
+    zip_bytes, content_hash, _instructions, _count = publisher.build_zip(db)
+    publication = models.GuidePublication(
+        organization_id=config.DEFAULT_ORGANIZATION_ID,
+        published_by="admin@example.com", content_hash=content_hash,
+        instructions_text="the instructions as published",
+        published_config={"identity": {"greeting": "Old greeting"}},
+        knowledge_item_count=1, bundle_bytes=zip_bytes, status="succeeded",
+    )
+    db.add(publication)
+    db.commit()
+
     replay = asyncio.run(
         publisher.republish(db, publication, published_by="a@example.com")
     )
+
     assert replay.status == "succeeded"
-    assert push_ok == ["the instructions as published"]
+    assert push_ok.instructions == ["the instructions as published"]
+    assert push_ok.knowledge[0] == publisher.knowledge_from_bundle(zip_bytes)
+    assert push_ok.knowledge[0], "the stored bundle really does carry knowledge"
+    assert all(
+        name.startswith("VectorStores/default/") for name in push_ok.knowledge[0]
+    ), "only the vector-store folder is replayed, not instructions.md or the schemas"
     assert replay.published_config == {"identity": {"greeting": "Old greeting"}}
 
 
-def test_knowledge_only_change_records_without_a_push(db, push_ok):
-    """Publish does not sync knowledge -- GuideAnts' import endpoint is
-    unsafe for a guide with indexed files. A knowledge edit therefore moves
-    the content hash but leaves the instructions alone, so nothing is sent;
-    the publication is still recorded so the console stops looking dirty."""
+def test_a_knowledge_only_change_is_pushed(db, push_ok):
+    """A knowledge edit moves no template slot, so the instructions are
+    byte-identical -- the content hash is what notices, and the whole point
+    of keying on it is that this edit reaches the guide."""
     from datetime import datetime
 
     first = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
@@ -276,26 +331,82 @@ def test_knowledge_only_change_records_without_a_push(db, push_ok):
 
     assert second.id != first.id
     assert second.status == "succeeded"
-    assert second.content_hash != first.content_hash, "the bundle really did change"
+    assert second.content_hash != first.content_hash
     assert second.instructions_text == first.instructions_text
     assert second.knowledge_item_count == first.knowledge_item_count + 1
-    assert len(push_ok) == 1, "a knowledge edit changes no instructions to send"
-    assert publisher.KNOWLEDGE_NOT_SYNCED_WARNING in second.warnings
+    assert len(push_ok) == 2, "a knowledge edit must reach the guide"
+    assert "VectorStores/default/k-new.md" in push_ok.knowledge[-1]
+    assert b"close an hour early" in push_ok.knowledge[-1][
+        "VectorStores/default/k-new.md"
+    ]
 
 
-def test_the_knowledge_warning_says_publish_did_not_sync_it(db, push_ok):
+def test_the_warning_reports_what_moved_in_the_vector_store(db, push_ok):
+    """Indexing is asynchronous, so a publish that changed knowledge is not
+    fully live when it returns -- the console has to say so."""
+    push_ok.files = {"added": 2, "replaced": 1, "removed": 3, "unchanged": 5}
     publication = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
-    assert publication.knowledge_item_count > 0
-    warning = publisher.KNOWLEDGE_NOT_SYNCED_WARNING
-    assert warning in publication.warnings
-    assert "not synced" in warning and "GuideAnts editor" in warning
+
+    warning = next(w for w in publication.warnings if w.startswith("Knowledge"))
+    assert "3 added or replaced" in warning
+    assert "3 removed" in warning
+    assert "background" in warning
+    # The remote warning is still carried, not replaced.
+    assert "model alias not resolved" in publication.warnings
 
 
-def test_no_knowledge_warning_when_there_is_no_knowledge(db, push_ok, monkeypatch):
-    monkeypatch.setattr(publisher, "_knowledge_items", lambda db: [])
+def test_no_knowledge_warning_when_no_file_moved(db, push_ok):
+    push_ok.files = {"added": 0, "replaced": 0, "removed": 0, "unchanged": 4}
     publication = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
-    assert publication.knowledge_item_count == 0
-    assert publisher.KNOWLEDGE_NOT_SYNCED_WARNING not in (publication.warnings or [])
+    assert publication.warnings == ["model alias not resolved"]
+
+
+def test_no_knowledge_warning_on_the_no_push_path(db, push_ok):
+    """Nothing was sent, so there is nothing to say about indexing."""
+    asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+    row = configuration_store.get_configuration(db)
+    configuration_store.save_draft(
+        db, row, {"identity": {**row.identity, "greeting": "Howdy!"}}
+    )
+    db.commit()
+
+    second = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+    assert len(push_ok) == 1
+    assert second.warnings is None
+
+
+def test_the_knowledge_sync_marker_is_folded_into_the_stored_hash(db, push_ok):
+    """A publication recorded before Publish synced knowledge stored the
+    bare bundle hash. If that row could still match today's hash, the first
+    publish after this change would be read as a no-op and the knowledge
+    would never be sent."""
+    zip_bytes, content_hash, instructions, _count = publisher.build_zip(db)
+    bare = hashlib.sha256()
+    # The pre-marker hash: name + bytes of every file in the bundle.
+    import zipfile, io
+
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as archive:
+        for name in sorted(archive.namelist()):
+            bare.update(name.encode("utf-8"))
+            bare.update(archive.read(name))
+    assert content_hash != bare.hexdigest(), "the marker must change the hash"
+
+    db.add(
+        models.GuidePublication(
+            organization_id=config.DEFAULT_ORGANIZATION_ID,
+            published_by="admin@example.com",
+            content_hash=bare.hexdigest(),           # an old-style row
+            instructions_text=instructions,
+            published_config={}, knowledge_item_count=1,
+            bundle_bytes=zip_bytes, status="succeeded",
+        )
+    )
+    db.commit()
+
+    publication = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+
+    assert len(push_ok) == 1, "an old-style row must not suppress the first sync"
+    assert publication.content_hash == content_hash
 
 
 def test_an_instructions_change_pushes_exactly_the_new_instructions(db, push_ok):
@@ -309,5 +420,5 @@ def test_an_instructions_change_pushes_exactly_the_new_instructions(db, push_ok)
     second = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
 
     assert len(push_ok) == 2
-    assert push_ok[-1] == second.instructions_text
-    assert "Dogwood Cycles" in push_ok[-1]
+    assert push_ok.instructions[-1] == second.instructions_text
+    assert "Dogwood Cycles" in push_ok.instructions[-1]

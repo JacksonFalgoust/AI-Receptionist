@@ -42,19 +42,23 @@ def db_session_factory():
 
 @pytest.fixture
 def push_ok(monkeypatch):
-    async def fake_update(instructions):
-        return {"guideId": "abc", "warnings": []}
+    async def fake_update(instructions, knowledge):
+        return {
+            "guideId": "abc",
+            "warnings": [],
+            "files": {"added": 0, "replaced": 0, "removed": 0, "unchanged": 1},
+        }
 
-    monkeypatch.setattr(guideants_admin, "update_guide_instructions", fake_update)
+    monkeypatch.setattr(guideants_admin, "update_guide", fake_update)
     monkeypatch.setattr(guideants_admin, "is_configured", lambda: True)
 
 
 @pytest.fixture
 def push_fails(monkeypatch):
-    async def fake_update(instructions):
+    async def fake_update(instructions, knowledge):
         raise guideants_admin.GuideAntsAdminError("GuideAnts unreachable on GET /api/guides")
 
-    monkeypatch.setattr(guideants_admin, "update_guide_instructions", fake_update)
+    monkeypatch.setattr(guideants_admin, "update_guide", fake_update)
     monkeypatch.setattr(guideants_admin, "is_configured", lambda: True)
 
 
@@ -108,10 +112,10 @@ def test_publish_succeeds_and_clears_the_draft_flag(db_session_factory, push_ok)
 
 
 def test_publish_failure_reports_error_and_stays_dirty(db_session_factory, monkeypatch):
-    async def fake_update(instructions):
+    async def fake_update(instructions, knowledge):
         raise guideants_admin.GuideAntsAdminError("GuideAnts unreachable on GET /api/guides")
 
-    monkeypatch.setattr(guideants_admin, "update_guide_instructions", fake_update)
+    monkeypatch.setattr(guideants_admin, "update_guide", fake_update)
     monkeypatch.setattr(guideants_admin, "is_configured", lambda: True)
 
     client.patch("/api/concierge/configuration", json={"terminology": {"customer": "Rider"}})
