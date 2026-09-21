@@ -49,7 +49,7 @@ describe('application routing', () => {
     expect(screen.getByText('Manage your AI Concierge')).toBeInTheDocument()
   })
 
-  it('signs a user in and lands them on Overview', async () => {
+  it('signs a user in and lands them on Conversations', async () => {
     const user = userEvent.setup()
     renderApp('/login')
 
@@ -57,7 +57,7 @@ describe('application routing', () => {
     await user.type(screen.getByLabelText('Password'), MOCK_PASSWORD)
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
-    expect(await screen.findByRole('heading', { name: 'Overview' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Conversations' })).toBeInTheDocument()
     // Shell rendered too, not just the page.
     expect(screen.getByLabelText(/Organization: Horizon Partners/)).toBeInTheDocument()
   })
@@ -84,10 +84,10 @@ describe('application routing', () => {
     await user.type(screen.getByLabelText('Password'), MOCK_PASSWORD)
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
-    await screen.findByRole('heading', { name: 'Overview' })
+    await screen.findByRole('heading', { name: 'Conversations' })
     expect(screen.queryByRole('link', { name: 'Users & Roles' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Billing' })).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Analytics' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Conversations' })).toBeInTheDocument()
   })
 
   it('resolves the knowledge editor routes C1 links to', async () => {
@@ -110,7 +110,7 @@ describe('application routing', () => {
 
     // An analyst has no manage:knowledge — the guard must send them away
     // rather than render the editor.
-    expect(await screen.findByRole('heading', { name: 'Overview' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Conversations' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Add knowledge' })).not.toBeInTheDocument()
   })
 
@@ -121,7 +121,7 @@ describe('application routing', () => {
 
     // An analyst has no use:test — the guard must send them away rather than
     // render the drawer's page destination.
-    expect(await screen.findByRole('heading', { name: 'Overview' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Conversations' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Test Concierge' })).not.toBeInTheDocument()
   })
 })
