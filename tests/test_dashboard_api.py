@@ -144,3 +144,68 @@ def test_activity_rejects_unknown_preset(db_session_factory):
 def test_activity_rejects_malformed_from_date(db_session_factory):
     response = client.get("/api/dashboard/activity", params={"from": "not-a-date"})
     assert response.status_code == 422
+
+
+def test_escalations_synthesizes_placeholder_status_and_assigned_to(db_session_factory):
+    conversation_id = _seed(db_session_factory, escalated=True, intent="Refund request")
+
+    response = client.get("/api/dashboard/escalations")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    row = body[0]
+    assert row["id"] == conversation_id
+    assert row["conversationId"] == conversation_id
+    assert row["organizationId"] == "org_default"
+    assert row["customerName"] == "Jane Doe"
+    assert row["reason"] == "Refund request"
+    assert row["assignedTo"] is None
+    assert row["status"] == "new"
+    assert row["createdAt"].endswith("Z")
+
+
+def test_escalations_reason_falls_back_when_intent_is_null(db_session_factory):
+    _seed(db_session_factory, escalated=True, intent=None)
+
+    response = client.get("/api/dashboard/escalations")
+
+    assert response.json()[0]["reason"] == "Escalated during the call"
+
+
+def test_escalations_customer_name_falls_back_when_null(db_session_factory):
+    _seed(db_session_factory, escalated=True, customer_name=None)
+
+    response = client.get("/api/dashboard/escalations")
+
+    assert response.json()[0]["customerName"] == "Unknown caller"
+
+
+def test_escalations_excludes_non_escalated_conversations(db_session_factory):
+    _seed(db_session_factory, escalated=False)
+
+    response = client.get("/api/dashboard/escalations")
+
+    assert response.json() == []
+
+
+def test_escalations_count_matches_uncapped_total(db_session_factory):
+    _seed(db_session_factory, escalated=True, customer_name="A")
+    _seed(db_session_factory, escalated=True, customer_name="B")
+    _seed(db_session_factory, escalated=False, customer_name="C")
+
+    response = client.get("/api/dashboard/escalations/count")
+
+    assert response.status_code == 200
+    assert response.json() == 2
+
+
+def test_escalations_count_is_not_capped_by_a_small_limit_on_the_list_route(db_session_factory):
+    for i in range(3):
+        _seed(db_session_factory, escalated=True, customer_name=f"Caller {i}")
+
+    count_response = client.get("/api/dashboard/escalations/count")
+    list_response = client.get("/api/dashboard/escalations", params={"limit": 2})
+
+    assert count_response.json() == 3
+    assert len(list_response.json()) == 2

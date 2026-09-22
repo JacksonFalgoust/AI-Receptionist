@@ -124,3 +124,57 @@ def get_activity(
     range_from, range_to = _resolve_range(preset, from_, to)
     rows = dashboard_store.list_recent_activity(db, range_from, range_to, limit)
     return [_activity_out(row) for row in rows]
+
+
+class EscalationOut(BaseModel):
+    # Escalation extends TenantScoped (frontend/src/types/common.ts) --
+    # same organizationId/locationId convention as ActivityEventOut above.
+    id: str
+    organizationId: str
+    locationId: str | None = None
+    conversationId: str | None = None
+    customerName: str
+    reason: str
+    assignedTo: str | None = None
+    status: str
+    createdAt: str
+
+
+def _escalation_out(conversation: models.Conversation) -> EscalationOut:
+    return EscalationOut(
+        id=conversation.id,
+        organizationId=conversation.organization_id,
+        locationId=None,
+        conversationId=conversation.id,
+        customerName=conversation.customer_name or "Unknown caller",
+        reason=conversation.intent or "Escalated during the call",
+        assignedTo=None,
+        status="new",
+        createdAt=_to_iso(conversation.started_at),
+    )
+
+
+@router.get("/api/dashboard/escalations", response_model=list[EscalationOut])
+def get_escalations(
+    preset: DateRangePreset | None = None,
+    from_: str | None = Query(default=None, alias="from"),
+    to: str | None = None,
+    limit: int = Query(default=8, ge=1, le=100),
+    db: Session = Depends(get_db),
+    _auth: models.AuthSession = Depends(auth.require_auth),
+) -> list[EscalationOut]:
+    range_from, range_to = _resolve_range(preset, from_, to)
+    rows = dashboard_store.list_recent_escalations(db, range_from, range_to, limit)
+    return [_escalation_out(row) for row in rows]
+
+
+@router.get("/api/dashboard/escalations/count", response_model=int)
+def get_escalations_count(
+    preset: DateRangePreset | None = None,
+    from_: str | None = Query(default=None, alias="from"),
+    to: str | None = None,
+    db: Session = Depends(get_db),
+    _auth: models.AuthSession = Depends(auth.require_auth),
+) -> int:
+    range_from, range_to = _resolve_range(preset, from_, to)
+    return dashboard_store.count_escalations(db, range_from, range_to)
