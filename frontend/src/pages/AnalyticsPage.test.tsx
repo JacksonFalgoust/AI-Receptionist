@@ -42,7 +42,14 @@ describe('AnalyticsPage', () => {
 
     await user.click(screen.getByRole('radio', { name: 'Today' }))
 
-    expect(await screen.findByText('14')).toBeInTheDocument()
+    // The 14 conversations seeded within the last ~19 hours are the only
+    // ones that could ever fall in "today" (since midnight, not a rolling
+    // 24h window) -- see AnalyticsParts.test.tsx for why this asserts a
+    // range rather than an exact count.
+    const label = await screen.findByText('Total conversations')
+    const today = Number(label.nextElementSibling!.textContent)
+    expect(today).toBeGreaterThanOrEqual(0)
+    expect(today).toBeLessThanOrEqual(14)
     expect(screen.queryByText('70')).not.toBeInTheDocument()
   })
 

@@ -8,8 +8,9 @@ app/dashboard_api.py. See docs/superpowers/specs/
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session, joinedload
@@ -19,10 +20,24 @@ from . import config, models
 DateRangePreset = Literal["today", "7d", "30d", "custom"]
 
 _WINDOWS: dict[str, timedelta] = {
-    "today": timedelta(hours=24),
     "7d": timedelta(days=7),
     "30d": timedelta(days=30),
 }
+
+
+def _today_start_utc() -> datetime:
+    """Midnight in config.BOOQABLE_TIMEZONE (the business's configured
+    timezone -- the same one reservation times are interpreted in, default
+    America/New_York), converted to a naive UTC datetime for comparison
+    against started_at/at: every stored timestamp in this table is a naive
+    datetime representing a UTC instant (see _to_iso's literal "Z" in
+    app/dashboard_api.py). Mirrored on the frontend by
+    frontend/src/lib/dateRange.ts's presetBounds -- keep both in sync if
+    the business timezone ever becomes configurable per-organization
+    instead of this shared hardcoded default."""
+    business_tz = ZoneInfo(config.BOOQABLE_TIMEZONE)
+    local_midnight = datetime.combine(datetime.now(business_tz).date(), time.min, tzinfo=business_tz)
+    return local_midnight.astimezone(UTC).replace(tzinfo=None)
 
 
 def range_bounds(
@@ -31,12 +46,17 @@ def range_bounds(
     to: datetime | None,
 ) -> tuple[datetime | None, datetime | None]:
     """Backend twin of frontend/src/lib/dateRange.ts's presetBounds --
-    `today` is a rolling 24-hour window, not since-midnight. No preset at
-    all means unbounded, matching the mock's rangeBounds(undefined)."""
+    `today` resets at midnight in the business timezone, not a rolling
+    24-hour window (a call from 6pm yesterday must not count as today).
+    `7d`/`30d` stay rolling windows -- only `today` has a "yesterday's call
+    shows up in today" problem to fix. No preset at all means unbounded,
+    matching the mock's rangeBounds(undefined)."""
     if preset is None:
         return None, None
     if preset == "custom":
         return from_, to
+    if preset == "today":
+        return _today_start_utc(), None
     return datetime.utcnow() - _WINDOWS[preset], None
 
 

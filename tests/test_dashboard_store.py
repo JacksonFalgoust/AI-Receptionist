@@ -3,7 +3,7 @@ derivation, range resolution, and org-scoping for the Overview page
 (E6 dashboard slice). See docs/superpowers/specs/
 2026-09-22-e6-dashboard-design.md."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -18,20 +18,51 @@ def _session():
     return sessionmaker(bind=engine)()
 
 
-def test_range_bounds_today_is_a_rolling_24_hour_window(monkeypatch):
-    fixed_now = datetime(2026, 9, 20, 12, 0, 0)
+def test_range_bounds_today_resets_at_midnight_in_the_business_timezone(monkeypatch):
+    monkeypatch.setattr(dashboard_store.config, "BOOQABLE_TIMEZONE", "America/New_York")
+    # 2026-09-22 23:30 UTC == 2026-09-22 19:30 America/New_York (EDT, UTC-4
+    # in late September -- DST doesn't end until November).
+    fixed_utc_now = datetime(2026, 9, 22, 23, 30, tzinfo=UTC)
 
     class _FixedDatetime(datetime):
         @classmethod
-        def utcnow(cls):
-            return fixed_now
+        def now(cls, tz=None):
+            return fixed_utc_now.astimezone(tz) if tz else fixed_utc_now
 
     monkeypatch.setattr(dashboard_store, "datetime", _FixedDatetime)
 
     from_, to = dashboard_store.range_bounds("today", None, None)
 
-    assert from_ == fixed_now - timedelta(hours=24)
+    # Midnight America/New_York on 2026-09-22 is 04:00 UTC the same day
+    # (EDT is UTC-4) -- not 23:30 - 24h = the previous day's 23:30 UTC,
+    # which is what the old rolling-window behavior would have returned.
+    assert from_ == datetime(2026, 9, 22, 4, 0)
     assert to is None
+
+
+def test_range_bounds_today_a_call_from_last_night_is_excluded(monkeypatch):
+    """The exact scenario this fix is for: a call at 6pm the business's
+    previous calendar day must not count as today, even though it's well
+    within a rolling 24 hours of a query made this morning."""
+    monkeypatch.setattr(dashboard_store.config, "BOOQABLE_TIMEZONE", "America/New_York")
+    # 2026-09-23 13:00 UTC == 2026-09-23 09:00 America/New_York (EDT) --
+    # mid-morning "today".
+    fixed_utc_now = datetime(2026, 9, 23, 13, 0, tzinfo=UTC)
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_utc_now.astimezone(tz) if tz else fixed_utc_now
+
+    monkeypatch.setattr(dashboard_store, "datetime", _FixedDatetime)
+
+    from_, _to = dashboard_store.range_bounds("today", None, None)
+
+    # 2026-09-22 18:00 America/New_York (6pm "yesterday") is 22:00 UTC the
+    # same calendar day -- well within a rolling 24h of 2026-09-23 13:00 UTC
+    # (19 hours ago), but before this business day's midnight boundary.
+    last_nights_call = datetime(2026, 9, 22, 22, 0)
+    assert last_nights_call < from_
 
 
 def test_range_bounds_7d_and_30d_are_rolling_day_windows(monkeypatch):

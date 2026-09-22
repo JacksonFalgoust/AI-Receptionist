@@ -34,8 +34,18 @@ describe('AnalyticsKpiRow', () => {
   it('narrows to the range it is given', async () => {
     renderWithProviders(<AnalyticsKpiRow range={{ preset: 'today' }} />)
 
-    // Only the first 14 conversations fall inside the last 24 hours.
-    expect(await screen.findByText('14')).toBeInTheDocument()
+    // The 14 conversations seeded within the last ~19 hours are the only
+    // ones that could ever fall in "today" (since midnight, not a rolling
+    // 24h window) -- the other 56 are all seeded 31+ hours in the past.
+    // Asserting a range rather than an exact count keeps this independent
+    // of what wall-clock hour the suite happens to run at: how many of
+    // those 14 have actually happened since the most recent midnight
+    // depends on the time of day, from 0 (just after midnight) up to all
+    // 14 (just before the next one).
+    const label = await screen.findByText('Total conversations')
+    const today = Number(label.nextElementSibling!.textContent)
+    expect(today).toBeGreaterThanOrEqual(0)
+    expect(today).toBeLessThanOrEqual(14)
   })
 
   it('reports zero rather than nothing when a range contains no conversations', async () => {
