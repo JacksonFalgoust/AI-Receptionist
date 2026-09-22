@@ -38,3 +38,53 @@ def range_bounds(
     if preset == "custom":
         return from_, to
     return datetime.utcnow() - _WINDOWS[preset], None
+
+
+def _conversations_in_range(from_: datetime | None, to: datetime | None) -> Select:
+    query = select(models.Conversation).where(
+        models.Conversation.organization_id == config.DEFAULT_ORGANIZATION_ID
+    )
+    if from_:
+        query = query.where(models.Conversation.started_at >= from_)
+    if to:
+        query = query.where(models.Conversation.started_at <= to)
+    return query
+
+
+def _count(db: Session, query: Select) -> int:
+    return db.scalar(select(func.count()).select_from(query.subquery())) or 0
+
+
+def get_overview_kpis(
+    db: Session, from_: datetime | None, to: datetime | None
+) -> list[dict]:
+    """The five KPIs US-2.2 requires, label and value only -- five simple
+    SQL counts, not loaded into Python or combined into one clever query."""
+    base = _conversations_in_range(from_, to)
+
+    conversations_count = _count(db, base)
+    voice_count = _count(db, base.where(models.Conversation.channel == "voice"))
+    completed_count = _count(db, base.where(models.Conversation.outcome == "completed"))
+    escalated_count = _count(db, base.where(models.Conversation.escalated.is_(True)))
+
+    transactions_query = (
+        select(func.count())
+        .select_from(models.ConversationAction)
+        .join(models.Conversation, models.ConversationAction.conversation_id == models.Conversation.id)
+        .where(models.Conversation.organization_id == config.DEFAULT_ORGANIZATION_ID)
+        .where(models.ConversationAction.status == "success")
+        .where(models.ConversationAction.action.startswith("Create "))
+    )
+    if from_:
+        transactions_query = transactions_query.where(models.Conversation.started_at >= from_)
+    if to:
+        transactions_query = transactions_query.where(models.Conversation.started_at <= to)
+    transactions_count = db.scalar(transactions_query) or 0
+
+    return [
+        {"id": "conversations_today", "label": "Conversations Today", "value": conversations_count},
+        {"id": "calls_answered", "label": "Calls Answered", "value": voice_count},
+        {"id": "requests_completed", "label": "Requests Completed", "value": completed_count},
+        {"id": "human_escalations", "label": "Human Escalations", "value": escalated_count},
+        {"id": "transactions_created", "label": "Transactions Created", "value": transactions_count},
+    ]
