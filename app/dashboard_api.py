@@ -77,3 +77,50 @@ def get_overview(
     range_from, range_to = _resolve_range(preset, from_, to)
     kpis = dashboard_store.get_overview_kpis(db, range_from, range_to)
     return OverviewOut(kpis=[KpiOut(**kpi) for kpi in kpis])
+
+
+class ActivityEventOut(BaseModel):
+    # ActivityEvent extends TenantScoped (frontend/src/types/common.ts) --
+    # organizationId is required, locationId is optional but included
+    # explicitly (None), matching ConversationOut's own TenantScoped fields
+    # in app/conversations_api.py.
+    id: str
+    organizationId: str
+    locationId: str | None = None
+    at: str
+    title: str
+    customerRef: str | None = None
+    channel: str | None = None
+    system: str | None = None
+    status: str
+    conversationId: str | None = None
+
+
+def _activity_out(action: models.ConversationAction) -> ActivityEventOut:
+    conversation = action.conversation
+    return ActivityEventOut(
+        id=action.id,
+        organizationId=conversation.organization_id if conversation else config.DEFAULT_ORGANIZATION_ID,
+        locationId=None,
+        at=_to_iso(action.at),
+        title=action.action,
+        customerRef=conversation.customer_name if conversation else None,
+        channel=conversation.channel if conversation else None,
+        system=action.system,
+        status=action.status,
+        conversationId=action.conversation_id,
+    )
+
+
+@router.get("/api/dashboard/activity", response_model=list[ActivityEventOut])
+def get_activity(
+    preset: DateRangePreset | None = None,
+    from_: str | None = Query(default=None, alias="from"),
+    to: str | None = None,
+    limit: int = Query(default=8, ge=1, le=100),
+    db: Session = Depends(get_db),
+    _auth: models.AuthSession = Depends(auth.require_auth),
+) -> list[ActivityEventOut]:
+    range_from, range_to = _resolve_range(preset, from_, to)
+    rows = dashboard_store.list_recent_activity(db, range_from, range_to, limit)
+    return [_activity_out(row) for row in rows]

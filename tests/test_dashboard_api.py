@@ -99,3 +99,48 @@ def test_overview_returns_five_kpis(db_session_factory):
         "human_escalations",
         "transactions_created",
     ]
+
+
+def test_activity_returns_camelcase_fields_from_the_conversation_action(db_session_factory):
+    conversation_id = _seed(db_session_factory)
+
+    response = client.get("/api/dashboard/activity")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert isinstance(body, list)
+    assert len(body) == 1
+    event = body[0]
+    assert event["title"] == "Create reservation"
+    assert event["system"] == "Booqable"
+    assert event["status"] == "success"
+    assert event["customerRef"] == "Jane Doe"
+    assert event["channel"] == "voice"
+    assert event["conversationId"] == conversation_id
+    assert event["organizationId"] == "org_default"
+    assert event["at"].endswith("Z")
+
+
+def test_activity_respects_limit(db_session_factory):
+    for i in range(3):
+        _seed(db_session_factory, customer_name=f"Customer {i}")
+
+    response = client.get("/api/dashboard/activity", params={"limit": 2})
+
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+
+
+def test_activity_rejects_limit_outside_1_to_100(db_session_factory):
+    assert client.get("/api/dashboard/activity", params={"limit": 0}).status_code == 422
+    assert client.get("/api/dashboard/activity", params={"limit": 101}).status_code == 422
+
+
+def test_activity_rejects_unknown_preset(db_session_factory):
+    response = client.get("/api/dashboard/activity", params={"preset": "yesterday"})
+    assert response.status_code == 422
+
+
+def test_activity_rejects_malformed_from_date(db_session_factory):
+    response = client.get("/api/dashboard/activity", params={"from": "not-a-date"})
+    assert response.status_code == 422
