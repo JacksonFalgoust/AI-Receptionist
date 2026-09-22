@@ -8,7 +8,7 @@ import type {
   OverviewSummary,
 } from '@/types'
 
-import { delay, USE_MOCKS } from './config'
+import { delay, isLive } from './config'
 import { http } from './http'
 import { toQueryString } from './queryString'
 
@@ -138,6 +138,6 @@ const httpDashboardService: DashboardService = {
     ),
 }
 
-export const dashboardService: DashboardService = USE_MOCKS
-  ? mockDashboardService
-  : httpDashboardService
+export const dashboardService: DashboardService = isLive('dashboard')
+  ? httpDashboardService
+  : mockDashboardService
