@@ -38,5 +38,18 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     css: true,
     restoreMocks: true,
+    env: {
+      // .env lists live-backed services in VITE_LIVE_SERVICES so the app
+      // talks to the real API in dev/prod. isLive() (services/config.ts)
+      // honors that list even when VITE_USE_MOCKS=true, so without this
+      // override, tests for "live" services (auth, conversations, knowledge,
+      // workflows, configuration) skip their mocks and call the real
+      // backend with fetch('/api/...'). There is no backend in test runs, so
+      // those calls fail -- and on CI the failed fetch hangs rather than
+      // rejecting quickly, stalling the whole suite instead of failing it.
+      // Tests must never depend on a live backend, so force every service
+      // back to its mock here regardless of what .env lists.
+      VITE_LIVE_SERVICES: '',
+    },
   },
 })

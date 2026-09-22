@@ -1,31 +1,39 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { AppShell } from '@/components/layout/AppShell'
-import { ActivityPage } from '@/pages/ActivityPage'
-import { AnalyticsPage } from '@/pages/AnalyticsPage'
-import { BillingPage } from '@/pages/BillingPage'
+import { useAuth } from '@/features/auth/useAuth'
+import { can } from '@/lib/permissions'
 import { ConfigurationPage } from '@/pages/ConfigurationPage'
 import { ConversationDetailPage } from '@/pages/ConversationDetailPage'
 import { ConversationsPage } from '@/pages/ConversationsPage'
-import { FeaturesPage } from '@/pages/FeaturesPage'
 import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage'
 import { HelpPage } from '@/pages/HelpPage'
-import { IntegrationsPage } from '@/pages/IntegrationsPage'
 import { InvitePage } from '@/pages/InvitePage'
 import { KnowledgeEditorPage } from '@/pages/KnowledgeEditorPage'
 import { KnowledgePage } from '@/pages/KnowledgePage'
 import { LoginPage } from '@/pages/LoginPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
-import { OverviewPage } from '@/pages/OverviewPage'
-import { RoutingPage } from '@/pages/RoutingPage'
-import { SecurityPage } from '@/pages/SecurityPage'
 import { TestPage } from '@/pages/TestPage'
-import { UsersPage } from '@/pages/UsersPage'
 import { WorkflowDetailPage } from '@/pages/WorkflowDetailPage'
 import { WorkflowsPage } from '@/pages/WorkflowsPage'
 
 import { paths } from './paths'
 import { ProtectedRoute } from './ProtectedRoute'
+
+/**
+ * Overview is mock-data only, so it is not routed to a page. LoginPage,
+ * ForgotPasswordPage, and ProtectedRoute's permission guard all still send
+ * users to `paths.overview` as their default landing spot, so this is where
+ * that lands instead: Conversations for roles that can see it, Help (US-14.1,
+ * ungated for every role) for the one role that can't -- analyst. A fixed
+ * target of Conversations would bounce analyst straight back here from the
+ * `view:conversations` guard below and loop forever.
+ */
+function OverviewRedirect() {
+  const { user } = useAuth()
+  const canViewConversations = !!user && can(user.role, 'view:conversations')
+  return <Navigate to={canViewConversations ? paths.conversations : paths.help} replace />
+}
 
 export function AppRoutes() {
   return (
@@ -38,7 +46,7 @@ export function AppRoutes() {
       {/* Authenticated */}
       <Route element={<ProtectedRoute />}>
         <Route element={<AppShell />}>
-          <Route path={paths.overview} element={<OverviewPage />} />
+          <Route path={paths.overview} element={<OverviewRedirect />} />
           {/* US-13.1 / PRD §40. use:test already existed in lib/permissions.ts
               (owner, administrator, manager) but nothing enforced it until
               now. IMPORTANT: this is a navigation guard only — E6 must
@@ -53,14 +61,6 @@ export function AppRoutes() {
             <Route path={paths.conversation()} element={<ConversationDetailPage />} />
           </Route>
 
-          <Route element={<ProtectedRoute permission="view:activity" />}>
-            <Route path={paths.activity} element={<ActivityPage />} />
-          </Route>
-
-          <Route element={<ProtectedRoute permission="view:analytics" />}>
-            <Route path={paths.analytics} element={<AnalyticsPage />} />
-          </Route>
-
           <Route element={<ProtectedRoute permission="manage:knowledge" />}>
             <Route path={paths.knowledge} element={<KnowledgePage />} />
             {/* Static `new` outranks `:id`, so the add route is never read as
@@ -73,33 +73,9 @@ export function AppRoutes() {
             <Route path={paths.configuration} element={<ConfigurationPage />} />
           </Route>
 
-          <Route element={<ProtectedRoute permission="manage:features" />}>
-            <Route path={paths.features} element={<FeaturesPage />} />
-          </Route>
-
           <Route element={<ProtectedRoute permission="manage:workflows" />}>
             <Route path={paths.workflows} element={<WorkflowsPage />} />
             <Route path={paths.workflow()} element={<WorkflowDetailPage />} />
-          </Route>
-
-          <Route element={<ProtectedRoute permission="manage:integrations" />}>
-            <Route path={paths.integrations} element={<IntegrationsPage />} />
-          </Route>
-
-          <Route element={<ProtectedRoute permission="manage:routing" />}>
-            <Route path={paths.routing} element={<RoutingPage />} />
-          </Route>
-
-          <Route element={<ProtectedRoute permission="manage:users" />}>
-            <Route path={paths.users} element={<UsersPage />} />
-          </Route>
-
-          <Route element={<ProtectedRoute permission="view:security" />}>
-            <Route path={paths.security} element={<SecurityPage />} />
-          </Route>
-
-          <Route element={<ProtectedRoute permission="manage:billing" />}>
-            <Route path={paths.billing} element={<BillingPage />} />
           </Route>
 
           <Route path="*" element={<NotFoundPage />} />

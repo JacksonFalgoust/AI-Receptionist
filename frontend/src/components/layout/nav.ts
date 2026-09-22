@@ -1,18 +1,11 @@
 import {
   Activity,
   BookOpen,
-  ChartColumn,
   CircleHelp,
-  CreditCard,
   GitBranch,
-  House,
-  LayoutGrid,
   MessageSquare,
-  Plug,
-  Route,
   ShieldCheck,
   SlidersHorizontal,
-  Users,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -35,23 +28,18 @@ export interface NavGroup {
 
 /**
  * Sidebar structure from PRD §5, with the Concierge group ordered
- * Knowledge → Configuration → Features → Workflows per USER_STORIES.
+ * Knowledge → Configuration → Workflows per USER_STORIES.
+ *
+ * This branch lists only pages backed by live services (auth, conversations,
+ * knowledge, configuration, workflows). Mock-data pages (Overview, Analytics,
+ * Features, Integrations, Routing, Users, Billing) are unrouted; the full
+ * version lives on feature/full-demo-sidebar.
  *
  * Live Activity (`paths.activity`) and Security & Audit (`paths.security`) are
  * deliberately absent: both are out of MVP scope. Their routes exist, so
  * adding them here is all that Phase F requires.
  */
 export const NAV_GROUPS: NavGroup[] = [
-  {
-    items: [
-      {
-        label: 'Overview',
-        to: paths.overview,
-        icon: House,
-        permission: 'view:overview',
-      },
-    ],
-  },
   {
     label: 'Operations',
     items: [
@@ -60,12 +48,6 @@ export const NAV_GROUPS: NavGroup[] = [
         to: paths.conversations,
         icon: MessageSquare,
         permission: 'view:conversations',
-      },
-      {
-        label: 'Analytics',
-        to: paths.analytics,
-        icon: ChartColumn,
-        permission: 'view:analytics',
       },
     ],
   },
@@ -85,50 +67,10 @@ export const NAV_GROUPS: NavGroup[] = [
         permission: 'manage:configuration',
       },
       {
-        label: 'Features',
-        to: paths.features,
-        icon: LayoutGrid,
-        permission: 'manage:features',
-      },
-      {
         label: 'Workflows',
         to: paths.workflows,
         icon: GitBranch,
         permission: 'manage:workflows',
-      },
-    ],
-  },
-  {
-    label: 'Connect',
-    items: [
-      {
-        label: 'Integrations',
-        to: paths.integrations,
-        icon: Plug,
-        permission: 'manage:integrations',
-      },
-      {
-        label: 'Escalation & Routing',
-        to: paths.routing,
-        icon: Route,
-        permission: 'manage:routing',
-      },
-    ],
-  },
-  {
-    label: 'Administration',
-    items: [
-      {
-        label: 'Users & Roles',
-        to: paths.users,
-        icon: Users,
-        permission: 'manage:users',
-      },
-      {
-        label: 'Billing',
-        to: paths.billing,
-        icon: CreditCard,
-        permission: 'manage:billing',
       },
     ],
   },
