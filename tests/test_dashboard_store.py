@@ -262,3 +262,64 @@ def test_recent_activity_org_scoping_excludes_other_organizations():
     rows = dashboard_store.list_recent_activity(db, None, None, limit=8)
 
     assert rows == []
+
+
+def test_recent_escalations_returns_only_escalated_conversations():
+    db = _session()
+    _seed_conversation(db, escalated=True, customer_name="Escalated Caller")
+    _seed_conversation(db, escalated=False, customer_name="Fine Caller")
+
+    rows = dashboard_store.list_recent_escalations(db, None, None, limit=8)
+
+    assert [r.customer_name for r in rows] == ["Escalated Caller"]
+
+
+def test_recent_escalations_orders_newest_started_at_first_and_respects_limit():
+    db = _session()
+    for day in (1, 2, 3):
+        _seed_conversation(
+            db,
+            escalated=True,
+            customer_name=f"Caller {day}",
+            started_at=datetime(2026, 9, day, 9, 0),
+            ended_at=datetime(2026, 9, day, 9, 5),
+        )
+
+    rows = dashboard_store.list_recent_escalations(db, None, None, limit=2)
+
+    assert [r.customer_name for r in rows] == ["Caller 3", "Caller 2"]
+
+
+def test_recent_escalations_filters_on_started_at_in_range():
+    db = _session()
+    _seed_conversation(
+        db, escalated=True, started_at=datetime(2026, 8, 1, 9, 0), ended_at=datetime(2026, 8, 1, 9, 5)
+    )
+
+    rows = dashboard_store.list_recent_escalations(db, datetime(2026, 9, 1), None, limit=8)
+
+    assert rows == []
+
+
+def test_count_escalations_matches_full_list_length_when_not_truncated():
+    db = _session()
+    _seed_conversation(db, escalated=True, customer_name="A")
+    _seed_conversation(db, escalated=True, customer_name="B")
+    _seed_conversation(db, escalated=False, customer_name="C")
+
+    count = dashboard_store.count_escalations(db, None, None)
+
+    assert count == 2
+    assert count == len(dashboard_store.list_recent_escalations(db, None, None, limit=100))
+
+
+def test_count_escalations_exceeds_a_truncated_list_length():
+    db = _session()
+    for i in range(3):
+        _seed_conversation(db, escalated=True, customer_name=f"Caller {i}")
+
+    count = dashboard_store.count_escalations(db, None, None)
+    truncated = dashboard_store.list_recent_escalations(db, None, None, limit=2)
+
+    assert count == 3
+    assert len(truncated) == 2

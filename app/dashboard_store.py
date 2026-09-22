@@ -109,3 +109,21 @@ def list_recent_activity(
         query = query.where(models.ConversationAction.at <= to)
     query = query.order_by(models.ConversationAction.at.desc()).limit(limit)
     return list(db.scalars(query))
+
+
+def list_recent_escalations(
+    db: Session, from_: datetime | None, to: datetime | None, limit: int
+) -> list[models.Conversation]:
+    """One row per escalated conversation, newest started_at first. Escalation
+    status/assignedTo are synthesized at the API layer (app/dashboard_api.py)
+    -- there is no persisted escalation lifecycle in this slice."""
+    query = _conversations_in_range(from_, to).where(models.Conversation.escalated.is_(True))
+    query = query.order_by(models.Conversation.started_at.desc()).limit(limit)
+    return list(db.scalars(query))
+
+
+def count_escalations(db: Session, from_: datetime | None, to: datetime | None) -> int:
+    """A separate query, not len(list_recent_escalations(...)) -- the list
+    is capped at `limit` and counting it would silently cap the count too."""
+    query = _conversations_in_range(from_, to).where(models.Conversation.escalated.is_(True))
+    return _count(db, query)
