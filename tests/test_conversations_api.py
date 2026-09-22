@@ -146,3 +146,14 @@ def test_list_requires_auth():
 def test_list_rejects_malformed_from_date_with_422(db_session_factory):
     response = client.get("/api/conversations", params={"from": "not-a-date"})
     assert response.status_code == 422
+
+
+def test_escalated_conversation_reports_new_escalation_status(db_session_factory):
+    escalated_id = _seed(db_session_factory, escalated=True, customer_name="Escalated Caller")
+    fine_id = _seed(db_session_factory, escalated=False, customer_name="Fine Caller")
+
+    response = client.get("/api/conversations")
+
+    body = {item["id"]: item for item in response.json()["items"]}
+    assert body[escalated_id]["escalationStatus"] == "new"
+    assert body[fine_id]["escalationStatus"] is None
