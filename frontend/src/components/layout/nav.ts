@@ -3,6 +3,7 @@ import {
   BookOpen,
   CircleHelp,
   GitBranch,
+  House,
   MessageSquare,
   ShieldCheck,
   SlidersHorizontal,
@@ -31,7 +32,7 @@ export interface NavGroup {
  * Knowledge → Configuration → Workflows per USER_STORIES.
  *
  * This branch lists only pages backed by live services (auth, conversations,
- * knowledge, configuration, workflows). Mock-data pages (Overview, Analytics,
+ * dashboard, knowledge, configuration, workflows). Mock-data pages (Analytics,
  * Features, Integrations, Routing, Users, Billing) are unrouted; the full
  * version lives on feature/full-demo-sidebar.
  *
@@ -40,6 +41,16 @@ export interface NavGroup {
  * adding them here is all that Phase F requires.
  */
 export const NAV_GROUPS: NavGroup[] = [
+  {
+    items: [
+      {
+        label: 'Overview',
+        to: paths.overview,
+        icon: House,
+        permission: 'view:overview',
+      },
+    ],
+  },
   {
     label: 'Operations',
     items: [
