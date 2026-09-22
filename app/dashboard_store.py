@@ -88,3 +88,24 @@ def get_overview_kpis(
         {"id": "human_escalations", "label": "Human Escalations", "value": escalated_count},
         {"id": "transactions_created", "label": "Transactions Created", "value": transactions_count},
     ]
+
+
+def list_recent_activity(
+    db: Session, from_: datetime | None, to: datetime | None, limit: int
+) -> list[models.ConversationAction]:
+    """Newest-`at`-first, joined to the parent conversation (eager-loaded
+    so the API layer never issues an N+1 query for customer_name/channel).
+    Filtered on the action's own `at` -- not the conversation's
+    started_at."""
+    query = (
+        select(models.ConversationAction)
+        .join(models.Conversation, models.ConversationAction.conversation_id == models.Conversation.id)
+        .where(models.Conversation.organization_id == config.DEFAULT_ORGANIZATION_ID)
+        .options(joinedload(models.ConversationAction.conversation))
+    )
+    if from_:
+        query = query.where(models.ConversationAction.at >= from_)
+    if to:
+        query = query.where(models.ConversationAction.at <= to)
+    query = query.order_by(models.ConversationAction.at.desc()).limit(limit)
+    return list(db.scalars(query))

@@ -188,3 +188,77 @@ def test_overview_kpis_org_scoping_excludes_other_organizations():
     kpis = dashboard_store.get_overview_kpis(db, None, None)
 
     assert _kpi(kpis, "conversations_today")["value"] == 1
+
+
+def test_recent_activity_orders_newest_first_and_respects_limit():
+    db = _session()
+    for minute in (1, 2, 3):
+        _seed_conversation(
+            db,
+            customer_name=f"Customer {minute}",
+            actions=[
+                {
+                    "action": "Create reservation",
+                    "system": "Booqable",
+                    "result": "ok",
+                    "status": "success",
+                    "at": datetime(2026, 9, 20, 9, minute, 0),
+                }
+            ],
+        )
+
+    rows = dashboard_store.list_recent_activity(db, None, None, limit=2)
+
+    assert [r.conversation.customer_name for r in rows] == ["Customer 3", "Customer 2"]
+
+
+def test_recent_activity_filters_on_the_actions_own_at_not_conversation_started_at():
+    db = _session()
+    _seed_conversation(
+        db,
+        started_at=datetime(2026, 8, 1, 9, 0),
+        ended_at=datetime(2026, 8, 1, 9, 5),
+        actions=[
+            {
+                "action": "Create reservation",
+                "system": "Booqable",
+                "result": "ok",
+                "status": "success",
+                "at": datetime(2026, 9, 20, 9, 0, 0),
+            }
+        ],
+    )
+
+    rows = dashboard_store.list_recent_activity(db, datetime(2026, 9, 1), None, limit=8)
+
+    assert len(rows) == 1
+
+
+def test_recent_activity_org_scoping_excludes_other_organizations():
+    db = _session()
+    other = models.Conversation(
+        organization_id="org_other",
+        customer_name="Foreign Customer",
+        channel="voice",
+        started_at=datetime(2026, 9, 20, 9, 0),
+        ended_at=datetime(2026, 9, 20, 9, 5),
+        outcome="completed",
+        escalated=False,
+    )
+    db.add(other)
+    db.flush()
+    db.add(
+        models.ConversationAction(
+            conversation_id=other.id,
+            action="Create reservation",
+            system="Booqable",
+            at=datetime(2026, 9, 20, 9, 0),
+            result="ok",
+            status="success",
+        )
+    )
+    db.commit()
+
+    rows = dashboard_store.list_recent_activity(db, None, None, limit=8)
+
+    assert rows == []
