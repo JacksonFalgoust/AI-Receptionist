@@ -15,7 +15,10 @@ Twilio Conversation Relay's WebSocket protocol and GuideAnts' OpenAI-compatible
 Responses API. As of E6 slice 1, though, the app also persists conversation
 history to a local SQLite database (`app/db.py`/`app/models.py`): a finished
 call's transcript, tool actions, and wrap-up classification are written as a
-`Conversation` record by `app/call_recording.py` at `/ws` disconnect.
+`Conversation` record by `app/call_recording.py` at `/ws` disconnect —
+skipped entirely if the session had no dialogue and triggered no tool
+action, so a bare connect/disconnect (a probe, a hang-up before speaking)
+never becomes a row.
 
 As of E6 slice 2 the same database also holds the admin console's knowledge
 items (`app/knowledge_store.py`, served by `app/knowledge_api.py`). Those
