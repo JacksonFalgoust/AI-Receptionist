@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   matchesSearch,
@@ -113,10 +113,19 @@ describe('rangeBounds', () => {
     expect(rangeBounds()).toEqual({})
   })
 
-  it('returns a rolling 24-hour window for today', () => {
+  it('returns the business day so far for today', () => {
+    // 2026-09-22T23:30:00Z is 2026-09-22 19:30 America/New_York (EDT) --
+    // see dateRange.test.ts for the full presetBounds coverage this
+    // delegates to.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-22T23:30:00.000Z'))
+
     const { from, to } = rangeBounds({ preset: 'today' })
+
     expect(to).toBeUndefined()
-    expect(Date.now() - new Date(from!).getTime()).toBeCloseTo(24 * 60 * 60 * 1000, -4)
+    expect(from).toBe('2026-09-22T04:00:00.000Z')
+
+    vi.useRealTimers()
   })
 
   it('returns a 30-day window for the 30d preset', () => {

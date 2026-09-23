@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resetStore, store } from '@/mocks/store'
 
@@ -207,5 +207,84 @@ describe('countEscalations', () => {
   it('counts every escalation when no range is given', async () => {
     resetStore()
     await expect(dashboardService.countEscalations()).resolves.toBe(store.escalations.length)
+  })
+})
+
+describe('httpDashboardService (VITE_LIVE_SERVICES=dashboard)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+    vi.resetModules()
+  })
+
+  async function loadLive(response: { status: number; ok: boolean; json: () => Promise<unknown> }) {
+    // Mocks stay on globally; only dashboard is named live.
+    vi.stubEnv('VITE_USE_MOCKS', 'true')
+    vi.stubEnv('VITE_LIVE_SERVICES', 'dashboard')
+    vi.resetModules()
+    const fetchMock = vi.fn().mockResolvedValue(response)
+    vi.stubGlobal('fetch', fetchMock)
+    const { dashboardService: service } = await import('./dashboardService')
+    return { service, fetchMock }
+  }
+
+  it('fetches overview with a bare GET', async () => {
+    const { service, fetchMock } = await loadLive({
+      status: 200,
+      ok: true,
+      json: async () => ({ kpis: [] }),
+    })
+
+    await service.getOverview({ preset: 'today' })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/dashboard/overview'),
+      expect.anything(),
+    )
+  })
+
+  it('serializes preset/from/to/limit into the activity query string', async () => {
+    const { service, fetchMock } = await loadLive({
+      status: 200,
+      ok: true,
+      json: async () => [],
+    })
+
+    await service.getRecentActivity({ preset: 'custom', from: '2026-01-01', to: '2026-01-31' }, 5)
+
+    const [url] = fetchMock.mock.calls[0]
+    expect(url).toContain('/api/dashboard/activity')
+    expect(url).toContain('preset=custom')
+    expect(url).toContain('from=2026-01-01')
+    expect(url).toContain('to=2026-01-31')
+    expect(url).toContain('limit=5')
+  })
+
+  it('fetches escalations with the range and limit', async () => {
+    const { service, fetchMock } = await loadLive({
+      status: 200,
+      ok: true,
+      json: async () => [],
+    })
+
+    await service.getRecentEscalations({ preset: '7d' })
+
+    const [url] = fetchMock.mock.calls[0]
+    expect(url).toContain('/api/dashboard/escalations')
+    expect(url).toContain('preset=7d')
+  })
+
+  it('fetches the escalation count as a bare number', async () => {
+    const { service, fetchMock } = await loadLive({
+      status: 200,
+      ok: true,
+      json: async () => 3,
+    })
+
+    const count = await service.countEscalations({ preset: 'today' })
+
+    expect(count).toBe(3)
+    const [url] = fetchMock.mock.calls[0]
+    expect(url).toContain('/api/dashboard/escalations/count')
   })
 })

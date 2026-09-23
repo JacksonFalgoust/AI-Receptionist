@@ -49,7 +49,7 @@ describe('application routing', () => {
     expect(screen.getByText('Manage your AI Concierge')).toBeInTheDocument()
   })
 
-  it('signs a user in and lands them on Conversations', async () => {
+  it('signs a user in and lands them on Overview', async () => {
     const user = userEvent.setup()
     renderApp('/login')
 
@@ -57,7 +57,7 @@ describe('application routing', () => {
     await user.type(screen.getByLabelText('Password'), MOCK_PASSWORD)
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
-    expect(await screen.findByRole('heading', { name: 'Conversations' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Overview' })).toBeInTheDocument()
     // Shell rendered too, not just the page.
     expect(screen.getByLabelText(/Organization: Horizon Partners/)).toBeInTheDocument()
   })
@@ -80,17 +80,18 @@ describe('application routing', () => {
     renderApp('/login')
 
     // The mock signs in as the role named in the email local-part. An
-    // analyst lacks view:conversations, so they land on Help instead (see
-    // AppRoutes' OverviewRedirect) and see none of the other nav items,
-    // every one of which requires a permission analyst does not hold.
+    // analyst lacks view:conversations, so they land on Overview (the one
+    // page every role can view) and see none of the other nav items, every
+    // one of which requires a permission analyst does not hold.
     await user.type(await screen.findByLabelText('Email'), 'analyst@horizonpartners.com')
     await user.type(screen.getByLabelText('Password'), MOCK_PASSWORD)
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
-    await screen.findByRole('heading', { name: 'Help' })
+    await screen.findByRole('heading', { name: 'Overview' })
     expect(screen.queryByRole('link', { name: 'Users & Roles' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Billing' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Conversations' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Overview' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Help' })).toBeInTheDocument()
   })
 
@@ -113,9 +114,8 @@ describe('application routing', () => {
     renderApp('/concierge/knowledge/new')
 
     // An analyst has no manage:knowledge — the guard must send them away
-    // rather than render the editor. They also lack view:conversations, so
-    // the redirect's own fallback lands them on Help, not Conversations.
-    expect(await screen.findByRole('heading', { name: 'Help' })).toBeInTheDocument()
+    // rather than render the editor.
+    expect(await screen.findByRole('heading', { name: 'Overview' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Add knowledge' })).not.toBeInTheDocument()
   })
 
@@ -125,9 +125,8 @@ describe('application routing', () => {
     renderApp('/test')
 
     // An analyst has no use:test — the guard must send them away rather than
-    // render the drawer's page destination. They also lack
-    // view:conversations, so the redirect's own fallback lands them on Help.
-    expect(await screen.findByRole('heading', { name: 'Help' })).toBeInTheDocument()
+    // render the drawer's page destination.
+    expect(await screen.findByRole('heading', { name: 'Overview' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Test Concierge' })).not.toBeInTheDocument()
   })
 })

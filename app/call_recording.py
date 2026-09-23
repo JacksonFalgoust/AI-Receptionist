@@ -49,6 +49,18 @@ def _customer_name(session: guide_client.GuideSession) -> str | None:
 
 
 async def record_call(st: "CallState") -> None:
+    # A session that authenticated (setup arrived) but had no dialogue and
+    # triggered no tool action isn't a call worth recording -- it's a bare
+    # connect/disconnect (a probe, a hang-up before speaking, a retry).
+    # Recording these unconditionally is what let hundreds of empty rows
+    # accumulate in the conversations table with no real content behind
+    # them. Messages alone aren't the full signal: get_caller_phone_number
+    # and the reservation tools populate guide.actions without ever
+    # appending to st.messages, so a real call can legitimately have empty
+    # messages as long as it did something.
+    if not st.messages and not st.guide.actions:
+        return
+
     ended_at = datetime.utcnow()
     started_at = st.started_at
 

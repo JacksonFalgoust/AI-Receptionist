@@ -1,8 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { AppShell } from '@/components/layout/AppShell'
-import { useAuth } from '@/features/auth/useAuth'
-import { can } from '@/lib/permissions'
 import { ConfigurationPage } from '@/pages/ConfigurationPage'
 import { ConversationDetailPage } from '@/pages/ConversationDetailPage'
 import { ConversationsPage } from '@/pages/ConversationsPage'
@@ -13,27 +11,13 @@ import { KnowledgeEditorPage } from '@/pages/KnowledgeEditorPage'
 import { KnowledgePage } from '@/pages/KnowledgePage'
 import { LoginPage } from '@/pages/LoginPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
+import { OverviewPage } from '@/pages/OverviewPage'
 import { TestPage } from '@/pages/TestPage'
 import { WorkflowDetailPage } from '@/pages/WorkflowDetailPage'
 import { WorkflowsPage } from '@/pages/WorkflowsPage'
 
 import { paths } from './paths'
 import { ProtectedRoute } from './ProtectedRoute'
-
-/**
- * Overview is mock-data only, so it is not routed to a page. LoginPage,
- * ForgotPasswordPage, and ProtectedRoute's permission guard all still send
- * users to `paths.overview` as their default landing spot, so this is where
- * that lands instead: Conversations for roles that can see it, Help (US-14.1,
- * ungated for every role) for the one role that can't -- analyst. A fixed
- * target of Conversations would bounce analyst straight back here from the
- * `view:conversations` guard below and loop forever.
- */
-function OverviewRedirect() {
-  const { user } = useAuth()
-  const canViewConversations = !!user && can(user.role, 'view:conversations')
-  return <Navigate to={canViewConversations ? paths.conversations : paths.help} replace />
-}
 
 export function AppRoutes() {
   return (
@@ -46,7 +30,7 @@ export function AppRoutes() {
       {/* Authenticated */}
       <Route element={<ProtectedRoute />}>
         <Route element={<AppShell />}>
-          <Route path={paths.overview} element={<OverviewRedirect />} />
+          <Route path={paths.overview} element={<OverviewPage />} />
           {/* US-13.1 / PRD §40. use:test already existed in lib/permissions.ts
               (owner, administrator, manager) but nothing enforced it until
               now. IMPORTANT: this is a navigation guard only — E6 must
