@@ -17,7 +17,7 @@ from typing import Any
 from sqlalchemy import String, cast, func, select
 from sqlalchemy.orm import Session
 
-from . import config, models
+from app import config, models
 
 
 def _resolve_status(status: str) -> str:

@@ -9,8 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from . import auth, config
-from .db import get_db
+from app import config
+from app.db import get_db
+
+from . import sessions as auth
 
 router = APIRouter()
 

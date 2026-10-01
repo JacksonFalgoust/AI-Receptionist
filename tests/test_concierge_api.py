@@ -9,7 +9,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app import auth, models
+from app import models
+from app.console.auth import sessions as auth
 from app.db import Base, get_db
 from app.guide.publish import guideants_admin
 from app.main import app

@@ -6,7 +6,8 @@ from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app import config, knowledge_store, models
+from app import config, models
+from app.console.knowledge import store as knowledge_store
 from app.db import Base
 
 # frontend/src/types/knowledge.ts's KnowledgeType, mirrored in

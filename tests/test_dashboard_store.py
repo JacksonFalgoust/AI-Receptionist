@@ -8,7 +8,9 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app import conversation_store, dashboard_store, models
+from app import models
+from app.console.conversations import store as conversation_store
+from app.console.dashboard import store as dashboard_store
 from app.db import Base
 
 

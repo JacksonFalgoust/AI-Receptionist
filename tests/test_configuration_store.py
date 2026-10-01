@@ -8,7 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app import configuration_store
+from app.console.concierge import store as configuration_store
 from app.db import Base
 
 

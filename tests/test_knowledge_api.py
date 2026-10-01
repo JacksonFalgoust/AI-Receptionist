@@ -9,7 +9,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app import auth, knowledge_store, models
+from app import models
+from app.console.auth import sessions as auth
+from app.console.knowledge import store as knowledge_store
 from app.db import Base, get_db
 from app.main import app
 

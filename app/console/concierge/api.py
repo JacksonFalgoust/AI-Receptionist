@@ -21,10 +21,13 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import auth, config, configuration_store, models
-from .db import get_db
+from app import config, models
+from app.console.auth import sessions as auth
+from app.db import get_db
 from app.guide.publish import bundle as bundle_module
 from app.guide.publish import guideants_admin, publisher, template
+
+from . import store as configuration_store
 
 router = APIRouter(prefix="/api/concierge")
 

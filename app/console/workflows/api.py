@@ -19,8 +19,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
 from sqlalchemy.orm import Session
 
-from . import auth, models, workflow_store
-from .db import get_db
+from app import models
+from app.console.auth import sessions as auth
+from app.db import get_db
+
+from . import store as workflow_store
 
 router = APIRouter()
 

@@ -9,7 +9,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app import auth, models, workflow_store
+from app import models
+from app.console.auth import sessions as auth
+from app.console.workflows import store as workflow_store
 from app.db import Base, get_db
 from app.main import app
 

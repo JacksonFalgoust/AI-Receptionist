@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session, joinedload
 
-from . import config, models
+from app import config, models
 
 DateRangePreset = Literal["today", "7d", "30d", "custom"]
 

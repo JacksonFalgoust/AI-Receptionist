@@ -17,7 +17,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import config, models
+from app import config, models
 
 # The only keys a PATCH may carry. Tenancy and publishing markers are set by
 # this module, never by a caller -- mirroring the frontend's

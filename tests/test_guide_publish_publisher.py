@@ -18,7 +18,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app import config, configuration_store, models
+from app import config, models
+from app.console.concierge import store as configuration_store
 from app.db import Base
 from app.guide.publish import guideants_admin, publisher, render
 

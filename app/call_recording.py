@@ -12,7 +12,9 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from . import conversation_store, guide_client
+from app.console.conversations import store as conversation_store
+
+from . import guide_client
 from app.booking.booqable_client import BooqableClient
 from .db import session_scope
 

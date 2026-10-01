@@ -4,7 +4,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app import auth, config
+from app import config
+from app.console.auth import sessions as auth
 from app.db import Base
 
 

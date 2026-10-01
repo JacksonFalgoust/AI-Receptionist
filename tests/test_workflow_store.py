@@ -5,7 +5,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app import models, workflow_store
+from app import models
+from app.console.workflows import store as workflow_store
 from app.db import Base
 
 

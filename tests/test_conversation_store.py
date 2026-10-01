@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app import conversation_store
+from app.console.conversations import store as conversation_store
 from app.db import Base
 
 

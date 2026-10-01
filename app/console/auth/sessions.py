@@ -20,8 +20,8 @@ from datetime import datetime, timedelta
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
-from . import config, models
-from .db import get_db
+from app import config, models
+from app.db import get_db
 
 _PBKDF2_ITERATIONS = 200_000
 

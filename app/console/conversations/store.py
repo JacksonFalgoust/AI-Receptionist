@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import config, models
+from app import config, models
 
 _VALID_OUTCOMES = {"completed", "escalated", "abandoned", "failed", "follow_up_required"}
 
