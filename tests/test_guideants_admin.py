@@ -31,7 +31,7 @@ import pathlib
 import pytest
 
 from app import config
-from app.guide_publish import guide_dto, guideants_admin, template
+from app.guide.publish import guide_dto, guideants_admin, template
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "guide_detail.json"
 GUIDE_ID = "fb9d753f-f61a-406a-9748-d90864d7acb2"

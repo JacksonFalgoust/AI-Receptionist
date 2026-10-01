@@ -58,7 +58,7 @@ import logging
 
 import httpx
 
-from .. import config
+from app import config
 from . import guide_dto, template
 
 logger = logging.getLogger(__name__)

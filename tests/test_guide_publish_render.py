@@ -11,7 +11,7 @@ from datetime import date, datetime
 import pytest
 
 from app import config, models
-from app.guide_publish import render, template
+from app.guide.publish import render, template
 
 
 def _configuration(**overrides):

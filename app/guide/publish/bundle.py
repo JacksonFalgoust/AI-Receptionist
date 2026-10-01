@@ -18,7 +18,7 @@ import io
 import json
 import zipfile
 
-from .. import config
+from app import config
 
 # The guide's entire tool surface, matching what app/guide_client.py
 # dispatches. Pinned as a constant so a truncated or stale schema fails

@@ -13,7 +13,7 @@ import zipfile
 import pytest
 
 from app import config
-from app.guide_publish import bundle, template
+from app.guide.publish import bundle, template
 
 GOOD_INSTRUCTIONS = "You are the phone receptionist.\nDeclare victory.\n"
 

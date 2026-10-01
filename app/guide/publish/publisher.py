@@ -35,7 +35,7 @@ from datetime import date, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import config, configuration_store, knowledge_store, models
+from app import config, configuration_store, knowledge_store, models
 from . import bundle as bundle_module
 from . import guideants_admin, render, template
 

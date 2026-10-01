@@ -15,7 +15,7 @@ import pathlib
 
 import pytest
 
-from app.guide_publish import guide_dto
+from app.guide.publish import guide_dto
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "guide_detail.json"
 

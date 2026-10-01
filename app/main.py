@@ -140,8 +140,8 @@ def _published_greeting() -> str:
     sits in the call-answering path, and a database problem must never
     delay answering the phone."""
     try:
-        from . import db as db_module
-        from .guide_publish import publisher
+        from app import db as db_module
+        from app.guide.publish import publisher
 
         session = db_module.SessionLocal()
         try:

@@ -20,7 +20,7 @@ from sqlalchemy.pool import StaticPool
 
 from app import config, configuration_store, models
 from app.db import Base
-from app.guide_publish import guideants_admin, publisher, render
+from app.guide.publish import guideants_admin, publisher, render
 
 
 @pytest.fixture
@@ -417,7 +417,7 @@ def test_an_instructions_change_pushes_exactly_the_new_instructions(db, push_ok)
 def test_a_knowledge_title_appears_in_the_instructions_publish_sends(db, push_ok):
     asyncio.run(publisher.publish(db, published_by="admin@example.com"))
     sent = push_ok.instructions[0]
-    from app.guide_publish import render as render_module
+    from app.guide.publish import render as render_module
 
     titles = render_module.knowledge_topics(
         publisher._knowledge_items(db), __import__("datetime").date.today()

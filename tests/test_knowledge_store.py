@@ -183,7 +183,7 @@ def test_first_read_seeds_the_shops_knowledge_and_renders_to_files():
     publish."""
     from datetime import date
 
-    from app.guide_publish import render
+    from app.guide.publish import render
 
     db = _session()
 

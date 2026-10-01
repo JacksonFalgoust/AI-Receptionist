@@ -19,7 +19,7 @@ from pathlib import Path
 
 from app import config
 
-TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "guide-demo" / "template"
+TEMPLATE_DIR = Path(__file__).resolve().parents[3] / "guide-demo" / "template"
 INSTRUCTIONS_PATH = TEMPLATE_DIR / "instructions.template.md"
 
 # Everything in the template that is NOT instructions.template.md. Each is

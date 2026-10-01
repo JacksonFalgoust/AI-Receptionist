@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from app import auth, models
 from app.db import Base, get_db
-from app.guide_publish import guideants_admin
+from app.guide.publish import guideants_admin
 from app.main import app
 
 client = TestClient(app)

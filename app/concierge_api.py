@@ -23,8 +23,8 @@ from sqlalchemy.orm import Session
 
 from . import auth, config, configuration_store, models
 from .db import get_db
-from .guide_publish import bundle as bundle_module
-from .guide_publish import guideants_admin, publisher, template
+from app.guide.publish import bundle as bundle_module
+from app.guide.publish import guideants_admin, publisher, template
 
 router = APIRouter(prefix="/api/concierge")
 

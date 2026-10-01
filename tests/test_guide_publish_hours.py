@@ -4,7 +4,7 @@ never about a display format."""
 
 import pytest
 
-from app.guide_publish.hours import hours_prose, time_prose
+from app.guide.publish.hours import hours_prose, time_prose
 
 
 def _day(day, open_=None, close=None, closed=False):
