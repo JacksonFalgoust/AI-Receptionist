@@ -14,7 +14,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from . import config
+from app import config
 from .booqable_client import BooqableClient, BooqableError
 
 router = APIRouter()

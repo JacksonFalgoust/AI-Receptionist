@@ -3,8 +3,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app import config, payments
-from app.booqable_client import BooqableError
+from app import config
+from app.booking import payments
+from app.booking.booqable_client import BooqableError
 
 
 def test_build_test_payment_link(monkeypatch):

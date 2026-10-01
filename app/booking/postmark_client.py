@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from . import config
+from app import config
 
 
 class PostmarkError(Exception):

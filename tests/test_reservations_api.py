@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
-from app import reservations_api
-from app.booqable_client import BooqableError
+from app.booking import api as reservations_api
+from app.booking.booqable_client import BooqableError
 from app.main import app
 
 client = TestClient(app)

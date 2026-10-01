@@ -4,8 +4,9 @@ from unittest.mock import MagicMock
 import pytest
 from twilio.base.exceptions import TwilioRestException
 
-from app import config, twilio_client
-from app.twilio_client import TwilioSmsClient, TwilioSmsError
+from app import config
+from app.booking import twilio_client
+from app.booking.twilio_client import TwilioSmsClient, TwilioSmsError
 
 
 def test_raises_when_unconfigured(monkeypatch):

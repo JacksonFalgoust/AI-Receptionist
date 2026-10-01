@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from . import conversation_store, guide_client
-from .booqable_client import BooqableClient
+from app.booking.booqable_client import BooqableClient
 from .db import session_scope
 
 if TYPE_CHECKING:

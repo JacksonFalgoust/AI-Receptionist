@@ -6,7 +6,7 @@ from typing import Any
 from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client
 
-from . import config
+from app import config
 
 
 class TwilioSmsError(Exception):

@@ -79,17 +79,19 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 from twilio.twiml.voice_response import Connect, VoiceResponse
 
-from . import barge_in, config, fillers, reservations, speaker_events, speech_timing, twilio_auth
+from app.booking import reservations
+from app.booking.api import router as reservations_router
+from app.booking.booqable_client import BooqableClient, BooqableError
+
+from . import barge_in, config, fillers, speaker_events, speech_timing, twilio_auth
 from . import call_recording
 from .auth_api import router as auth_router
-from .booqable_client import BooqableClient, BooqableError
 from .concierge_api import router as concierge_router
 from .conversations_api import router as conversations_router
 from .dashboard_api import router as dashboard_router
 from .db import init_db
 from .guide_client import Delta, GuideSession, ToolCallStarted, build_input, stream_reply
 from .knowledge_api import router as knowledge_router
-from .reservations_api import router as reservations_router
 from .workflow_api import router as workflow_router
 
 logging.basicConfig(level=logging.INFO)

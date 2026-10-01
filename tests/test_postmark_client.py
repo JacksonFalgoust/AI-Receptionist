@@ -2,8 +2,9 @@ import asyncio
 
 import pytest
 
-from app import config, postmark_client
-from app.postmark_client import PostmarkClient, PostmarkError
+from app import config
+from app.booking import postmark_client
+from app.booking.postmark_client import PostmarkClient, PostmarkError
 
 
 class FakeResponse:

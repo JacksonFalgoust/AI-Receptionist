@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.booqable_client import BooqableClient, BooqableError
-from app.reservations import (
+from app.booking.booqable_client import BooqableClient, BooqableError
+from app.booking.reservations import (
     add_customer_note,
     find_or_create_customer,
     get_order_contact,

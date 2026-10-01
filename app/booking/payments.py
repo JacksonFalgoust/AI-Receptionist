@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import config, reservations
+from app import config
+from . import reservations
 from .booqable_client import BooqableClient, BooqableError
 from .postmark_client import PostmarkClient
 from .twilio_client import TwilioSmsClient
