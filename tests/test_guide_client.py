@@ -7,8 +7,9 @@ import httpx
 import openai
 import pytest
 
-from app.guide import guide_client
-from app.guide.guide_client import GuideSession, build_input
+from app import config
+from app.guide import classify, connection, sentinel, streaming, tools
+from app.guide.session import GuideSession, build_input
 
 
 @pytest.fixture(autouse=True)
@@ -20,8 +21,8 @@ def _no_sentinel_gating(monkeypatch):
     config.FINAL_ANSWER_SENTINEL (the app's control/no-op mode) -- the
     compiled patterns are module globals set once at import, so they're
     monkeypatched directly rather than through config."""
-    monkeypatch.setattr(guide_client, "_SENTINEL_STRICT", None)
-    monkeypatch.setattr(guide_client, "_SENTINEL_LOOSE", None)
+    monkeypatch.setattr(sentinel, "SENTINEL_STRICT", None)
+    monkeypatch.setattr(sentinel, "SENTINEL_LOOSE", None)
 
 
 async def _collect(aiter):
@@ -29,11 +30,11 @@ async def _collect(aiter):
 
 
 def _texts(events) -> list[str]:
-    return [e.text for e in events if isinstance(e, guide_client.Delta)]
+    return [e.text for e in events if isinstance(e, streaming.Delta)]
 
 
-def _tool_events(events) -> list["guide_client.ToolCallStarted"]:
-    return [e for e in events if isinstance(e, guide_client.ToolCallStarted)]
+def _tool_events(events) -> list["streaming.ToolCallStarted"]:
+    return [e for e in events if isinstance(e, streaming.ToolCallStarted)]
 
 
 class _FakeClient(SimpleNamespace):
@@ -97,10 +98,10 @@ def test_first_turn_streams_and_captures_conversation_from_created_event(monkeyp
     stream = FakeStream(events)
     create = AsyncMock(return_value=stream)
     fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     session = GuideSession()
-    reply_events = asyncio.run(_collect(guide_client.stream_reply("hi", session)))
+    reply_events = asyncio.run(_collect(streaming.stream_reply("hi", session)))
 
     assert _texts(reply_events) == ["Hel", "lo"]
     assert session.conversation_id == "conv_abc"
@@ -120,10 +121,10 @@ def test_first_turn_accepts_object_shaped_conversation(monkeypatch):
     stream = FakeStream(events)
     create = AsyncMock(return_value=stream)
     fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     session = GuideSession()
-    asyncio.run(_collect(guide_client.stream_reply("hi", session)))
+    asyncio.run(_collect(streaming.stream_reply("hi", session)))
 
     assert session.conversation_id == "conv_abc"
 
@@ -137,10 +138,10 @@ def test_conversation_captured_from_completed_when_created_lacks_it(monkeypatch)
     stream = FakeStream(events)
     create = AsyncMock(return_value=stream)
     fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     session = GuideSession()
-    reply_events = asyncio.run(_collect(guide_client.stream_reply("hi", session)))
+    reply_events = asyncio.run(_collect(streaming.stream_reply("hi", session)))
 
     assert _texts(reply_events) == ["Hi"]
     assert session.conversation_id == "conv_late"
@@ -158,10 +159,10 @@ def test_continuation_turn_streams_with_conversation_param(monkeypatch):
     stream = FakeStream(events)
     create = AsyncMock(return_value=stream)
     fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc")
-    reply_events = asyncio.run(_collect(guide_client.stream_reply("what did I say?", session)))
+    reply_events = asyncio.run(_collect(streaming.stream_reply("what did I say?", session)))
 
     assert _texts(reply_events) == ["Hel", "lo"]
     assert stream.closed
@@ -181,10 +182,10 @@ def test_lost_conversation_recovers_with_fresh_streaming_call(monkeypatch):
     retry_stream = FakeStream(retry_events)
     create = AsyncMock(side_effect=[_bad_request_error("conversation_not_found"), retry_stream])
     fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_stale")
-    reply_events = asyncio.run(_collect(guide_client.stream_reply("hi again", session)))
+    reply_events = asyncio.run(_collect(streaming.stream_reply("hi again", session)))
 
     assert _texts(reply_events) == ["Fresh reply"]
     assert session.conversation_id == "conv_new"
@@ -216,11 +217,11 @@ def test_lost_conversation_does_not_retry_once_text_was_already_spoken(monkeypat
         side_effect=[FakeStream(tool_call_events), _bad_request_error("tool_results_not_pending")]
     )
     fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
     with pytest.raises(openai.BadRequestError):
-        asyncio.run(_collect(guide_client.stream_reply("what's my number?", session)))
+        asyncio.run(_collect(streaming.stream_reply("what's my number?", session)))
 
     assert session.conversation_id is None
     assert create.call_count == 2
@@ -230,7 +231,7 @@ def test_stale_tool_result_recovers_with_fresh_conversation(monkeypatch):
     # A tool round-trip whose output submission is rejected as no longer
     # pending (the turn was cancelled/completed server-side, e.g. a mid-stream
     # disconnect) must recover like a lost conversation rather than crash.
-    monkeypatch.setattr(guide_client.config, "BOOQABLE_API_KEY", "test-booqable-key")
+    monkeypatch.setattr(config, "BOOQABLE_API_KEY", "test-booqable-key")
     tool_call_events = [
         SimpleNamespace(type="response.created", response=SimpleNamespace(conversation="conv_abc")),
         SimpleNamespace(type="response.output_item.done", item=_function_call_item("call_1")),
@@ -253,10 +254,10 @@ def test_stale_tool_result_recovers_with_fresh_conversation(monkeypatch):
         ]
     )
     fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
-    reply_events = asyncio.run(_collect(guide_client.stream_reply("what's my number?", session)))
+    reply_events = asyncio.run(_collect(streaming.stream_reply("what's my number?", session)))
 
     assert _texts(reply_events) == ["Fresh reply"]
     assert session.conversation_id == "conv_new"
@@ -274,7 +275,7 @@ def test_stale_tool_result_retries_on_a_fresh_conversation_only_once(monkeypatch
     # If the fresh-conversation retry is itself rejected (e.g. GuideAnts
     # rejects every tool result), the turn must fail instead of opening
     # fresh conversations forever.
-    monkeypatch.setattr(guide_client.config, "BOOQABLE_API_KEY", "test-booqable-key")
+    monkeypatch.setattr(config, "BOOQABLE_API_KEY", "test-booqable-key")
 
     def tool_call_stream(conv):
         return FakeStream([
@@ -297,11 +298,11 @@ def test_stale_tool_result_retries_on_a_fresh_conversation_only_once(monkeypatch
         ]
     )
     fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
     with pytest.raises(openai.BadRequestError):
-        asyncio.run(_collect(guide_client.stream_reply("what's my number?", session)))
+        asyncio.run(_collect(streaming.stream_reply("what's my number?", session)))
 
     assert create.call_count == 4
     assert session.conversation_id is None
@@ -328,10 +329,10 @@ def test_tool_output_submission_disables_sdk_retries(monkeypatch):
     ]
     create = AsyncMock(side_effect=[FakeStream(tool_call_events), FakeStream(text_events)])
     fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
-    asyncio.run(_collect(guide_client.stream_reply("what's my number?", session)))
+    asyncio.run(_collect(streaming.stream_reply("what's my number?", session)))
 
     # Exactly the submission (the 2nd create) went through with_options; the
     # first turn did not.
@@ -341,11 +342,11 @@ def test_tool_output_submission_disables_sdk_retries(monkeypatch):
 def test_other_bad_request_errors_propagate(monkeypatch):
     create = AsyncMock(side_effect=_bad_request_error("endpoint_disabled"))
     fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc")
     with pytest.raises(openai.BadRequestError):
-        asyncio.run(_collect(guide_client.stream_reply("hi", session)))
+        asyncio.run(_collect(streaming.stream_reply("hi", session)))
     assert create.call_count == 1
 
 
@@ -355,11 +356,11 @@ def test_cancellation_closes_stream(monkeypatch):
     stream = FakeStream(events, gate=gate)
     create = AsyncMock(return_value=stream)
     fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     async def scenario():
         session = GuideSession(conversation_id="conv_abc")
-        gen = guide_client.stream_reply("hi", session)
+        gen = streaming.stream_reply("hi", session)
         task = asyncio.ensure_future(gen.__anext__())
         await asyncio.sleep(0)  # let the task reach the blocked __anext__
         task.cancel()
@@ -384,17 +385,17 @@ def test_aclose_after_first_delta_closes_underlying_stream(monkeypatch):
     stream = FakeStream(events)
     create = AsyncMock(return_value=stream)
     fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     async def scenario():
         session = GuideSession(conversation_id="conv_abc")
-        gen = guide_client.stream_reply("hi", session)
+        gen = streaming.stream_reply("hi", session)
         first = await gen.__anext__()
         await gen.aclose()
         return first
 
     first = asyncio.run(scenario())
-    assert first == guide_client.Delta("Hel")
+    assert first == streaming.Delta("Hel")
     assert stream.closed
 
 
@@ -408,17 +409,17 @@ def test_missing_conversation_falls_back_to_non_streaming_next_turn(monkeypatch)
     turn2_response = SimpleNamespace(id="resp_x", conversation="conv_new", output_text="ok again")
     create = AsyncMock(side_effect=[turn1_stream, turn2_response])
     fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     session = GuideSession()
-    reply_events = asyncio.run(_collect(guide_client.stream_reply("hi", session)))
+    reply_events = asyncio.run(_collect(streaming.stream_reply("hi", session)))
 
     assert _texts(reply_events) == ["ok"]
     assert session.conversation_id is None
     assert session.stream_missing_conversation is True
 
     # Next turn falls back to the non-streaming path to obtain an id.
-    reply_events2 = asyncio.run(_collect(guide_client.stream_reply("hi again", session)))
+    reply_events2 = asyncio.run(_collect(streaming.stream_reply("hi again", session)))
     assert _texts(reply_events2) == ["ok again"]
     assert session.conversation_id == "conv_new"
     assert create.call_count == 2
@@ -433,34 +434,34 @@ def _function_call_item(call_id: str, name: str = "get_caller_phone_number", arg
 
 
 def test_execute_tool_returns_caller_phone(monkeypatch):
-    monkeypatch.setattr(guide_client.config, "BOOQABLE_API_KEY", "test-booqable-key")
+    monkeypatch.setattr(config, "BOOQABLE_API_KEY", "test-booqable-key")
 
     async def fake_find_customer(client, *, email=None, phone=None):
         return None
 
-    monkeypatch.setattr(guide_client.reservations, "find_customer", fake_find_customer)
+    monkeypatch.setattr(tools.reservations, "find_customer", fake_find_customer)
 
     session = GuideSession(caller_phone="+15551234567")
-    result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
+    result = asyncio.run(tools.execute_tool("get_caller_phone_number", "{}", session))
     assert json.loads(result) == {"phone_number": "+15551234567"}
 
 
 def test_execute_tool_returns_null_when_caller_phone_unknown():
     session = GuideSession(caller_phone=None)
-    result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
+    result = asyncio.run(tools.execute_tool("get_caller_phone_number", "{}", session))
     assert json.loads(result) == {"phone_number": None}
 
 
 def test_execute_tool_caller_phone_includes_known_customer_info(monkeypatch):
-    monkeypatch.setattr(guide_client.config, "BOOQABLE_API_KEY", "test-booqable-key")
+    monkeypatch.setattr(config, "BOOQABLE_API_KEY", "test-booqable-key")
 
     async def fake_find_customer(client, *, email=None, phone=None):
         return {"id": "cust_1", "attributes": {"name": "Jane Doe", "email": "jane@example.com"}}
 
-    monkeypatch.setattr(guide_client.reservations, "find_customer", fake_find_customer)
+    monkeypatch.setattr(tools.reservations, "find_customer", fake_find_customer)
 
     session = GuideSession(caller_phone="+15551234567")
-    result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
+    result = asyncio.run(tools.execute_tool("get_caller_phone_number", "{}", session))
     assert json.loads(result) == {
         "phone_number": "+15551234567",
         "customer_name": "Jane Doe",
@@ -469,44 +470,44 @@ def test_execute_tool_caller_phone_includes_known_customer_info(monkeypatch):
 
 
 def test_execute_tool_caller_phone_lookup_raises_falls_back_gracefully(monkeypatch):
-    monkeypatch.setattr(guide_client.config, "BOOQABLE_API_KEY", "test-booqable-key")
+    monkeypatch.setattr(config, "BOOQABLE_API_KEY", "test-booqable-key")
 
     async def fake_find_customer(client, *, email=None, phone=None):
         raise RuntimeError("Booqable is down")
 
-    monkeypatch.setattr(guide_client.reservations, "find_customer", fake_find_customer)
+    monkeypatch.setattr(tools.reservations, "find_customer", fake_find_customer)
 
     session = GuideSession(caller_phone="+15551234567")
-    result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
+    result = asyncio.run(tools.execute_tool("get_caller_phone_number", "{}", session))
     assert json.loads(result) == {"phone_number": "+15551234567"}
 
 
 def test_execute_tool_caller_phone_lookup_timeout_falls_back_gracefully(monkeypatch):
-    monkeypatch.setattr(guide_client.config, "BOOQABLE_API_KEY", "test-booqable-key")
-    monkeypatch.setattr(guide_client.config, "CALLER_LOOKUP_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(config, "BOOQABLE_API_KEY", "test-booqable-key")
+    monkeypatch.setattr(config, "CALLER_LOOKUP_TIMEOUT_SECONDS", 0.01)
 
     async def fake_find_customer(client, *, email=None, phone=None):
         await asyncio.sleep(0.5)
         return {"id": "cust_1", "attributes": {"name": "Jane Doe"}}
 
-    monkeypatch.setattr(guide_client.reservations, "find_customer", fake_find_customer)
+    monkeypatch.setattr(tools.reservations, "find_customer", fake_find_customer)
 
     session = GuideSession(caller_phone="+15551234567")
-    result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
+    result = asyncio.run(tools.execute_tool("get_caller_phone_number", "{}", session))
     assert json.loads(result) == {"phone_number": "+15551234567"}
 
 
 def test_execute_tool_caller_phone_caches_lookup_across_calls(monkeypatch):
-    monkeypatch.setattr(guide_client.config, "BOOQABLE_API_KEY", "test-booqable-key")
+    monkeypatch.setattr(config, "BOOQABLE_API_KEY", "test-booqable-key")
 
     find_customer_mock = AsyncMock(
         return_value={"id": "cust_1", "attributes": {"name": "Jane Doe"}}
     )
-    monkeypatch.setattr(guide_client.reservations, "find_customer", find_customer_mock)
+    monkeypatch.setattr(tools.reservations, "find_customer", find_customer_mock)
 
     session = GuideSession(caller_phone="+15551234567")
-    first = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
-    second = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
+    first = asyncio.run(tools.execute_tool("get_caller_phone_number", "{}", session))
+    second = asyncio.run(tools.execute_tool("get_caller_phone_number", "{}", session))
 
     assert json.loads(first)["customer_name"] == "Jane Doe"
     assert json.loads(second)["customer_name"] == "Jane Doe"
@@ -514,33 +515,33 @@ def test_execute_tool_caller_phone_caches_lookup_across_calls(monkeypatch):
 
 
 def test_execute_tool_unknown_tool_returns_error():
-    result = asyncio.run(guide_client._execute_tool("mystery_tool", "{}", GuideSession()))
+    result = asyncio.run(tools.execute_tool("mystery_tool", "{}", GuideSession()))
     assert "error" in json.loads(result)
 
 
 def test_execute_tool_list_catalog(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
     fake_catalog = [{"product_id": "prod_1", "name": "E-Bike"}]
-    monkeypatch.setattr(guide_client.reservations, "list_catalog", AsyncMock(return_value=fake_catalog))
+    monkeypatch.setattr(tools.reservations, "list_catalog", AsyncMock(return_value=fake_catalog))
 
-    result = asyncio.run(guide_client._execute_tool("listCatalog", "{}", GuideSession()))
+    result = asyncio.run(tools.execute_tool("listCatalog", "{}", GuideSession()))
 
     assert json.loads(result) == {"products": fake_catalog}
 
 
 def test_execute_tool_check_availability(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
     monkeypatch.setattr(
-        guide_client.reservations, "resolve_location", AsyncMock(return_value={"id": "loc_1"})
+        tools.reservations, "resolve_location", AsyncMock(return_value={"id": "loc_1"})
     )
     monkeypatch.setattr(
-        guide_client.reservations,
+        tools.reservations,
         "check_product_availability",
         AsyncMock(return_value={"status": "available", "available": 3, "requested": 1}),
     )
 
     result = asyncio.run(
-        guide_client._execute_tool(
+        tools.execute_tool(
             "checkAvailability",
             json.dumps(
                 {"product_id": "prod_1", "starts_at": "2026-08-01T09:00:00", "stops_at": "2026-08-02T17:00:00"}
@@ -555,12 +556,12 @@ def test_execute_tool_check_availability(monkeypatch):
 
 
 def test_execute_tool_create_reservation_requires_email_or_phone(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
     create_mock = AsyncMock()
-    monkeypatch.setattr(guide_client.reservations, "create_reservation", create_mock)
+    monkeypatch.setattr(tools.reservations, "create_reservation", create_mock)
 
     result = asyncio.run(
-        guide_client._execute_tool(
+        tools.execute_tool(
             "createReservation",
             json.dumps(
                 {
@@ -579,13 +580,13 @@ def test_execute_tool_create_reservation_requires_email_or_phone(monkeypatch):
 
 
 def test_execute_tool_create_reservation_happy_path(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
     fake_result = {"order_id": "order_1", "status": "reserved", "reserved": True}
     create_mock = AsyncMock(return_value=fake_result)
-    monkeypatch.setattr(guide_client.reservations, "create_reservation", create_mock)
+    monkeypatch.setattr(tools.reservations, "create_reservation", create_mock)
 
     result = asyncio.run(
-        guide_client._execute_tool(
+        tools.execute_tool(
             "createReservation",
             json.dumps(
                 {
@@ -609,17 +610,17 @@ def test_execute_tool_create_reservation_happy_path(monkeypatch):
 
 
 def test_execute_tool_list_customers(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
     fake_customers = [{"customer_id": "cust_1", "name": "Jane Doe", "email": None, "phone": "+15551234567"}]
-    monkeypatch.setattr(guide_client.reservations, "list_customers", AsyncMock(return_value=fake_customers))
+    monkeypatch.setattr(tools.reservations, "list_customers", AsyncMock(return_value=fake_customers))
 
-    result = asyncio.run(guide_client._execute_tool("listCustomers", "{}", GuideSession()))
+    result = asyncio.run(tools.execute_tool("listCustomers", "{}", GuideSession()))
 
     assert json.loads(result) == {"customers": fake_customers}
 
 
 def test_execute_tool_create_customer(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
     fake_result = {
         "customer_id": "cust_1",
         "name": "Jane Doe",
@@ -628,10 +629,10 @@ def test_execute_tool_create_customer(monkeypatch):
         "note_recorded": True,
     }
     register_mock = AsyncMock(return_value=fake_result)
-    monkeypatch.setattr(guide_client.reservations, "register_customer", register_mock)
+    monkeypatch.setattr(tools.reservations, "register_customer", register_mock)
 
     result = asyncio.run(
-        guide_client._execute_tool(
+        tools.execute_tool(
             "createCustomer",
             json.dumps(
                 {"customer_name": "Jane Doe", "customer_phone": "+15551234567", "note": "wants to buy an e-bike"}
@@ -645,17 +646,17 @@ def test_execute_tool_create_customer(monkeypatch):
 
 
 def test_execute_tool_find_reservations(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
     fake_result = {
         "customer_found": True,
         "customer_name": "Jane Doe",
         "reservations": [{"order_id": "order_1", "status": "reserved", "items": [{"name": "Cruiser", "quantity": 1}]}],
     }
     find_mock = AsyncMock(return_value=fake_result)
-    monkeypatch.setattr(guide_client.reservations, "find_reservations", find_mock)
+    monkeypatch.setattr(tools.reservations, "find_reservations", find_mock)
 
     result = asyncio.run(
-        guide_client._execute_tool("findReservations", json.dumps({"customer_phone": "+15551234567"}), GuideSession())
+        tools.execute_tool("findReservations", json.dumps({"customer_phone": "+15551234567"}), GuideSession())
     )
 
     assert json.loads(result) == fake_result
@@ -663,41 +664,41 @@ def test_execute_tool_find_reservations(monkeypatch):
 
 
 def test_execute_tool_cancel_reservation(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
     fake_result = {"order_id": "order_1", "previous_status": "reserved", "status": "canceled"}
-    monkeypatch.setattr(guide_client.reservations, "cancel_reservation", AsyncMock(return_value=fake_result))
+    monkeypatch.setattr(tools.reservations, "cancel_reservation", AsyncMock(return_value=fake_result))
 
     result = asyncio.run(
-        guide_client._execute_tool("cancelReservation", json.dumps({"order_id": "order_1"}), GuideSession())
+        tools.execute_tool("cancelReservation", json.dumps({"order_id": "order_1"}), GuideSession())
     )
 
     assert json.loads(result) == fake_result
 
 
 def test_execute_tool_send_payment_link(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
     fake_result = {
         "order_id": "order_1",
         "channel": "email",
         "sent_to": "jane@example.com",
         "payment_link": "https://example.com/pay/order_1",
     }
-    monkeypatch.setattr(guide_client.payments, "send_payment_link", AsyncMock(return_value=fake_result))
+    monkeypatch.setattr(tools.payments, "send_payment_link", AsyncMock(return_value=fake_result))
 
     result = asyncio.run(
-        guide_client._execute_tool("sendPaymentLink", json.dumps({"order_id": "order_1"}), GuideSession())
+        tools.execute_tool("sendPaymentLink", json.dumps({"order_id": "order_1"}), GuideSession())
     )
 
     assert json.loads(result) == fake_result
 
 
 def test_execute_tool_send_payment_link_passes_phone_override(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
     send_mock = AsyncMock(return_value={"order_id": "order_1", "sent_to": "+15559998888", "payment_link": "x"})
-    monkeypatch.setattr(guide_client.payments, "send_payment_link", send_mock)
+    monkeypatch.setattr(tools.payments, "send_payment_link", send_mock)
 
     asyncio.run(
-        guide_client._execute_tool(
+        tools.execute_tool(
             "sendPaymentLink", json.dumps({"order_id": "order_1", "phone": "+15559998888"}), GuideSession()
         )
     )
@@ -706,12 +707,12 @@ def test_execute_tool_send_payment_link_passes_phone_override(monkeypatch):
 
 
 def test_execute_tool_send_payment_link_passes_channel_and_email(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
     send_mock = AsyncMock(return_value={"order_id": "order_1", "sent_to": "jane@example.com", "payment_link": "x"})
-    monkeypatch.setattr(guide_client.payments, "send_payment_link", send_mock)
+    monkeypatch.setattr(tools.payments, "send_payment_link", send_mock)
 
     asyncio.run(
-        guide_client._execute_tool(
+        tools.execute_tool(
             "sendPaymentLink",
             json.dumps({"order_id": "order_1", "channel": "email", "email": "jane@example.com"}),
             GuideSession(),
@@ -724,67 +725,67 @@ def test_execute_tool_send_payment_link_passes_channel_and_email(monkeypatch):
 
 def test_execute_tool_booqable_error_returns_error_json(monkeypatch):
     def raise_error():
-        raise guide_client.BooqableError("BOOQABLE_API_KEY is not configured")
+        raise tools.BooqableError("BOOQABLE_API_KEY is not configured")
 
-    monkeypatch.setattr(guide_client, "BooqableClient", raise_error)
+    monkeypatch.setattr(tools, "BooqableClient", raise_error)
 
-    result = asyncio.run(guide_client._execute_tool("listCatalog", "{}", GuideSession()))
+    result = asyncio.run(tools.execute_tool("listCatalog", "{}", GuideSession()))
 
     assert "error" in json.loads(result)
 
 
 def test_execute_tool_twilio_error_returns_error_json(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
     monkeypatch.setattr(
-        guide_client.payments,
+        tools.payments,
         "send_payment_link",
-        AsyncMock(side_effect=guide_client.TwilioSmsError("Invalid 'To' Phone Number", status_code=400)),
+        AsyncMock(side_effect=tools.TwilioSmsError("Invalid 'To' Phone Number", status_code=400)),
     )
 
     result = asyncio.run(
-        guide_client._execute_tool("sendPaymentLink", json.dumps({"order_id": "order_1"}), GuideSession())
+        tools.execute_tool("sendPaymentLink", json.dumps({"order_id": "order_1"}), GuideSession())
     )
 
     assert "error" in json.loads(result)
 
 
 def test_execute_tool_postmark_error_returns_error_json(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
     monkeypatch.setattr(
-        guide_client.payments,
+        tools.payments,
         "send_payment_link",
-        AsyncMock(side_effect=guide_client.PostmarkError("Inactive recipient", status_code=200, error_code=406)),
+        AsyncMock(side_effect=tools.PostmarkError("Inactive recipient", status_code=200, error_code=406)),
     )
 
     result = asyncio.run(
-        guide_client._execute_tool("sendPaymentLink", json.dumps({"order_id": "order_1"}), GuideSession())
+        tools.execute_tool("sendPaymentLink", json.dumps({"order_id": "order_1"}), GuideSession())
     )
 
     assert "error" in json.loads(result)
 
 
 def test_execute_tool_malformed_arguments_returns_error(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
 
-    result = asyncio.run(guide_client._execute_tool("listCatalog", "not json", GuideSession()))
+    result = asyncio.run(tools.execute_tool("listCatalog", "not json", GuideSession()))
 
     assert "error" in json.loads(result)
 
 
 def test_execute_tool_missing_required_argument_returns_error(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
 
-    result = asyncio.run(guide_client._execute_tool("cancelReservation", "{}", GuideSession()))
+    result = asyncio.run(tools.execute_tool("cancelReservation", "{}", GuideSession()))
 
     assert "error" in json.loads(result)
 
 
 def test_execute_tool_list_catalog_logs_action(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
-    monkeypatch.setattr(guide_client.reservations, "list_catalog", AsyncMock(return_value=[]))
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools.reservations, "list_catalog", AsyncMock(return_value=[]))
     session = GuideSession()
 
-    asyncio.run(guide_client._execute_tool("listCatalog", "{}", session))
+    asyncio.run(tools.execute_tool("listCatalog", "{}", session))
 
     assert len(session.actions) == 1
     action = session.actions[0]
@@ -793,15 +794,15 @@ def test_execute_tool_list_catalog_logs_action(monkeypatch):
     assert action["result"] == "Completed successfully"
     assert action["status"] == "success"
     assert action["details"] == {}
-    assert isinstance(action["at"], guide_client.datetime)
+    assert isinstance(action["at"], tools.datetime)
 
 
 def test_execute_tool_reservation_error_logs_action_as_error(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
     session = GuideSession()
 
     asyncio.run(
-        guide_client._execute_tool(
+        tools.execute_tool(
             "createReservation",
             json.dumps(
                 {
@@ -824,15 +825,15 @@ def test_execute_tool_flattens_nested_details_to_strings(monkeypatch):
     # persisted and rendered by the frontend as Record<str, str>, so any
     # non-string value must be flattened (via json.dumps) rather than stored
     # as a nested object/array. See finding #2 of the E6 final review.
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
     fake_result = {"order_id": "order_1", "status": "reserved", "reserved": True}
     monkeypatch.setattr(
-        guide_client.reservations, "create_reservation", AsyncMock(return_value=fake_result)
+        tools.reservations, "create_reservation", AsyncMock(return_value=fake_result)
     )
     session = GuideSession()
 
     asyncio.run(
-        guide_client._execute_tool(
+        tools.execute_tool(
             "createReservation",
             json.dumps(
                 {
@@ -855,10 +856,10 @@ def test_execute_tool_flattens_nested_details_to_strings(monkeypatch):
 
 
 def test_execute_tool_malformed_arguments_logs_action_as_error(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
+    monkeypatch.setattr(tools, "BooqableClient", lambda: object())
     session = GuideSession()
 
-    result = asyncio.run(guide_client._execute_tool("createReservation", "{not json", session))
+    result = asyncio.run(tools.execute_tool("createReservation", "{not json", session))
 
     assert "error" in json.loads(result)
     assert session.actions[0]["status"] == "error"
@@ -868,7 +869,7 @@ def test_execute_tool_malformed_arguments_logs_action_as_error(monkeypatch):
 def test_execute_tool_get_caller_phone_number_does_not_log_an_action():
     session = GuideSession(caller_phone="+15551234567")
 
-    asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
+    asyncio.run(tools.execute_tool("get_caller_phone_number", "{}", session))
 
     assert session.actions == []
 
@@ -894,17 +895,17 @@ def test_streamed_tool_call_round_trip_yields_tool_call_started_then_text(monkey
     text_stream = FakeStream(text_events)
     create = AsyncMock(side_effect=[tool_call_stream, text_stream])
     fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc", caller_phone="+15551234567")
-    reply_events = asyncio.run(_collect(guide_client.stream_reply("what's my number?", session)))
+    reply_events = asyncio.run(_collect(streaming.stream_reply("what's my number?", session)))
 
     assert _texts(reply_events) == ["Your number is ", "555-1234."]
     tool_events = _tool_events(reply_events)
     assert len(tool_events) == 1
     assert tool_events[0].names == ("get_caller_phone_number",)
     # The ToolCallStarted event precedes the answer's text.
-    assert reply_events.index(tool_events[0]) < reply_events.index(guide_client.Delta("Your number is "))
+    assert reply_events.index(tool_events[0]) < reply_events.index(streaming.Delta("Your number is "))
     assert create.call_count == 2
     first_kwargs = create.call_args_list[0].kwargs
     second_kwargs = create.call_args_list[1].kwargs
@@ -945,10 +946,10 @@ def test_function_call_backstop_from_completed_output(monkeypatch):
     ]
     create = AsyncMock(side_effect=[FakeStream(tool_call_events), FakeStream(text_events)])
     fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc", caller_phone="555")
-    reply_events = asyncio.run(_collect(guide_client.stream_reply("ok", session)))
+    reply_events = asyncio.run(_collect(streaming.stream_reply("ok", session)))
 
     assert _texts(reply_events) == ["Sure."]
     assert create.call_count == 2
@@ -970,13 +971,13 @@ def test_tool_loop_stops_at_iteration_bound(monkeypatch):
 
     create = AsyncMock(side_effect=[tool_call_stream(f"call_{i}") for i in range(10)])
     fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     session = GuideSession(conversation_id="conv_abc")
-    reply_events = asyncio.run(_collect(guide_client.stream_reply("hi", session)))
+    reply_events = asyncio.run(_collect(streaming.stream_reply("hi", session)))
 
     assert _texts(reply_events) == []
-    assert create.call_count == guide_client._MAX_TOOL_ITERATIONS
+    assert create.call_count == streaming._MAX_TOOL_ITERATIONS
 
 
 def test_no_tools_kwarg_sent_on_any_turn(monkeypatch):
@@ -990,20 +991,20 @@ def test_no_tools_kwarg_sent_on_any_turn(monkeypatch):
     ]
     create = AsyncMock(return_value=FakeStream(events))
     fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     session = GuideSession()
-    asyncio.run(_collect(guide_client.stream_reply("hi", session)))
+    asyncio.run(_collect(streaming.stream_reply("hi", session)))
     assert "tools" not in create.call_args.kwargs
 
     session2 = GuideSession(conversation_id="conv_abc")
-    asyncio.run(_collect(guide_client.stream_reply("hi", session2)))
+    asyncio.run(_collect(streaming.stream_reply("hi", session2)))
     assert "tools" not in create.call_args.kwargs
 
     non_streaming_response = SimpleNamespace(id="resp_x", conversation="conv_new", output_text="ok", output=[])
     create.side_effect = [non_streaming_response]
     session3 = GuideSession(stream_missing_conversation=True)
-    reply_events = asyncio.run(_collect(guide_client.stream_reply("hi", session3)))
+    reply_events = asyncio.run(_collect(streaming.stream_reply("hi", session3)))
     assert _texts(reply_events) == ["ok"]
     assert "tools" not in create.call_args.kwargs
 
@@ -1021,11 +1022,11 @@ def test_aclose_during_tool_round_trip_closes_active_stream(monkeypatch):
     text_stream = FakeStream([SimpleNamespace(type="response.output_text.delta", delta="Sure")], gate=gate)
     create = AsyncMock(side_effect=[tool_call_stream, text_stream])
     fake_client = _fake_client(create)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     async def scenario():
         session = GuideSession(conversation_id="conv_abc")
-        gen = guide_client.stream_reply("what's my number", session)
+        gen = streaming.stream_reply("what's my number", session)
         # First __anext__() returns promptly with the ToolCallStarted event
         # from round 1 (a pure tool call, no text) -- it doesn't touch the
         # gated second stream at all.
@@ -1039,7 +1040,7 @@ def test_aclose_during_tool_round_trip_closes_active_stream(monkeypatch):
         return first
 
     first = asyncio.run(scenario())
-    assert isinstance(first, guide_client.ToolCallStarted)
+    assert isinstance(first, streaming.ToolCallStarted)
     assert tool_call_stream.closed
     assert text_stream.closed
 
@@ -1079,21 +1080,21 @@ def test_classify_conversation_parses_structured_reply(monkeypatch):
     fake_client = SimpleNamespace(
         responses=SimpleNamespace(create=AsyncMock(return_value=fake_response))
     )
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
-    result = asyncio.run(guide_client.classify_conversation(session))
+    result = asyncio.run(classify.classify_conversation(session))
 
     assert result["intent"] == "Book a rental"
     assert result["outcome"] == "completed"
     assert result["escalated"] is False
     fake_client.responses.create.assert_awaited_once_with(
-        conversation="conv_123", input=guide_client._CLASSIFICATION_PROMPT, stream=False
+        conversation="conv_123", input=classify._CLASSIFICATION_PROMPT, stream=False
     )
 
 
 def test_classify_conversation_raises_when_no_conversation_id():
     with pytest.raises(ValueError):
-        asyncio.run(guide_client.classify_conversation(GuideSession(conversation_id=None)))
+        asyncio.run(classify.classify_conversation(GuideSession(conversation_id=None)))
 
 
 def test_classify_conversation_raises_on_malformed_json(monkeypatch):
@@ -1103,10 +1104,10 @@ def test_classify_conversation_raises_on_malformed_json(monkeypatch):
             create=AsyncMock(return_value=SimpleNamespace(output_text="not json"))
         )
     )
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     with pytest.raises(ValueError):
-        asyncio.run(guide_client.classify_conversation(session))
+        asyncio.run(classify.classify_conversation(session))
 
 
 def test_classify_conversation_raises_on_invalid_outcome(monkeypatch):
@@ -1117,10 +1118,10 @@ def test_classify_conversation_raises_on_invalid_outcome(monkeypatch):
     fake_client = SimpleNamespace(
         responses=SimpleNamespace(create=AsyncMock(return_value=fake_response))
     )
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     with pytest.raises(ValueError):
-        asyncio.run(guide_client.classify_conversation(session))
+        asyncio.run(classify.classify_conversation(session))
 
 
 def test_classify_conversation_raises_when_request_fails(monkeypatch):
@@ -1128,7 +1129,7 @@ def test_classify_conversation_raises_when_request_fails(monkeypatch):
     fake_client = SimpleNamespace(
         responses=SimpleNamespace(create=AsyncMock(side_effect=RuntimeError("network down")))
     )
-    monkeypatch.setattr(guide_client, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(connection, "get_client", lambda: fake_client)
 
     with pytest.raises(ValueError):
-        asyncio.run(guide_client.classify_conversation(session))
+        asyncio.run(classify.classify_conversation(session))

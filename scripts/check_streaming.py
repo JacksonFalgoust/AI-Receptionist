@@ -44,7 +44,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.guide import guide_client
+from app.guide import streaming
+from app.guide.session import GuideSession
 
 # Below this, a run of deltas is treated as having arrived in one burst
 # (this app's internal yield loop, not real GuideAnts pacing) rather than
@@ -52,7 +53,7 @@ from app.guide import guide_client
 _INCREMENTAL_SPAN_THRESHOLD_SECONDS = 0.05
 
 
-async def run_turn(label: str, user_text: str, session: guide_client.GuideSession) -> None:
+async def run_turn(label: str, user_text: str, session: GuideSession) -> None:
     """Drive one turn through the real guide_client.stream_reply path (the
     same function app/main.py calls) and report per-event timing, so it's
     visible whether *this* turn reached Twilio incrementally or as one
@@ -75,9 +76,9 @@ async def run_turn(label: str, user_text: str, session: guide_client.GuideSessio
     print(f"=== {label}: {user_text!r} ===")
     request_sent = time.monotonic()
     delta_times = []
-    async for event in guide_client.stream_reply(user_text, session):
+    async for event in streaming.stream_reply(user_text, session):
         t = time.monotonic() - request_sent
-        if isinstance(event, guide_client.ToolCallStarted):
+        if isinstance(event, streaming.ToolCallStarted):
             print(f"{t:6.3f}s  TOOL CALL: {', '.join(event.names)}")
             continue
         delta_times.append(t)
@@ -113,7 +114,7 @@ async def main():
         "Do you have any mountain bikes available this Saturday from ten AM to two PM?"
     )
 
-    session = guide_client.GuideSession()
+    session = GuideSession()
     await run_turn("turn 1", "What bikes do you have available to rent?", session)
 
     if session.conversation_id is None:

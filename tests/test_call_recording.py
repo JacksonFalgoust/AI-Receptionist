@@ -12,7 +12,7 @@ from app import models
 from app.calls import call_recording
 from app import db as db_module
 from app.db import Base
-from app.guide.guide_client import GuideSession
+from app.guide.session import GuideSession
 
 
 class _FakeState:
@@ -43,7 +43,7 @@ def test_record_call_persists_transcript_and_classification(monkeypatch):
             "summary": "Booked an e-bike.",
         }
 
-    monkeypatch.setattr(call_recording.guide_client, "classify_conversation", fake_classify)
+    monkeypatch.setattr(call_recording.classify, "classify_conversation", fake_classify)
 
     guide = GuideSession(conversation_id="conv_1", caller_phone="+15551234567")
     st = _FakeState(
@@ -76,7 +76,7 @@ def test_record_call_falls_back_to_defaults_when_classification_fails(monkeypatc
     async def failing_classify(session):
         raise ValueError("no conversation id")
 
-    monkeypatch.setattr(call_recording.guide_client, "classify_conversation", failing_classify)
+    monkeypatch.setattr(call_recording.classify, "classify_conversation", failing_classify)
 
     guide = GuideSession(conversation_id=None)
     st = _FakeState(
@@ -104,7 +104,7 @@ def test_record_call_includes_tool_actions(monkeypatch):
     async def fake_classify(session):
         return {"intent": None, "outcome": "completed", "escalated": False, "summary": None}
 
-    monkeypatch.setattr(call_recording.guide_client, "classify_conversation", fake_classify)
+    monkeypatch.setattr(call_recording.classify, "classify_conversation", fake_classify)
 
     guide = GuideSession(conversation_id="conv_1")
     guide.actions.append(
@@ -136,7 +136,7 @@ def test_record_call_customer_name_from_known_customer(monkeypatch):
     async def fake_classify(session):
         return {"intent": None, "outcome": "completed", "escalated": False, "summary": None}
 
-    monkeypatch.setattr(call_recording.guide_client, "classify_conversation", fake_classify)
+    monkeypatch.setattr(call_recording.classify, "classify_conversation", fake_classify)
 
     guide = GuideSession(
         conversation_id="conv_1",
@@ -171,7 +171,7 @@ def test_record_call_skips_persistence_when_nothing_happened(monkeypatch):
         classify_called = True
         return {"intent": None, "outcome": "completed", "escalated": False, "summary": None}
 
-    monkeypatch.setattr(call_recording.guide_client, "classify_conversation", fake_classify)
+    monkeypatch.setattr(call_recording.classify, "classify_conversation", fake_classify)
 
     guide = GuideSession(conversation_id="conv_1")
     st = _FakeState(guide=guide, messages=[], started_at=datetime(2026, 9, 14, 9, 0, 0))
@@ -196,7 +196,7 @@ def test_record_call_persists_when_only_a_tool_action_happened(monkeypatch):
     async def fake_classify(session):
         return {"intent": None, "outcome": "completed", "escalated": False, "summary": None}
 
-    monkeypatch.setattr(call_recording.guide_client, "classify_conversation", fake_classify)
+    monkeypatch.setattr(call_recording.classify, "classify_conversation", fake_classify)
 
     guide = GuideSession(conversation_id="conv_1")
     guide.actions.append(

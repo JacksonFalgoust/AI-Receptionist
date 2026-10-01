@@ -39,6 +39,7 @@ import statistics
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 # Fixed 3-turn script driven against every branch, so the comparison holds
 # the caller's side of the conversation constant. Turn 2 exercises a single
@@ -144,17 +145,18 @@ def _load_existing(path: Path, label: str) -> dict:
 
 
 def _load_guide():
-    """The guide client module from whichever layout the target worktree
+    """The stream_reply/GuideSession pair from whichever layout the target worktree
     uses: app/guide/ (after the backend reorganization) or the flat
     app/guide_client.py (every branch before it). Must run after sys.path
     and the cwd point at that worktree."""
     try:
-        from app.guide import guide_client
+        from app.guide import session, streaming
     except ModuleNotFoundError as exc:
         if exc.name != "app.guide":
             raise
         from app import guide_client  # pre-reorganization layout
-    return guide_client
+        return guide_client
+    return SimpleNamespace(stream_reply=streaming.stream_reply, GuideSession=session.GuideSession)
 
 
 def main() -> None:

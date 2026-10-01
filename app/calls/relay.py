@@ -78,7 +78,8 @@ from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app import config
-from app.guide.guide_client import GuideSession, ToolCallStarted, build_input, stream_reply
+from app.guide.session import GuideSession, build_input
+from app.guide.streaming import ToolCallStarted, stream_reply
 
 from . import barge_in, call_recording, fillers, speaker_events, speech_timing, twilio_auth
 

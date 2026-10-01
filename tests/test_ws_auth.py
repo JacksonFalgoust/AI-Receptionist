@@ -20,7 +20,7 @@ from starlette.websockets import WebSocketDisconnect
 from app import config
 from app.calls import twilio_auth
 from app.calls import relay
-from app.guide.guide_client import Delta
+from app.guide.streaming import Delta
 from app.main import app
 
 client = TestClient(app)

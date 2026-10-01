@@ -15,7 +15,8 @@ from typing import TYPE_CHECKING, Any
 from app.booking.booqable_client import BooqableClient
 from app.console.conversations import store as conversation_store
 from app.db import session_scope
-from app.guide import guide_client
+from app.guide import classify
+from app.guide.session import GuideSession
 
 if TYPE_CHECKING:
     from .relay import CallState
@@ -43,7 +44,7 @@ def _spread_timestamps(started_at: datetime, ended_at: datetime, count: int) -> 
     return [started_at + span * (i / (count - 1)) for i in range(count)]
 
 
-def _customer_name(session: guide_client.GuideSession) -> str | None:
+def _customer_name(session: GuideSession) -> str | None:
     if not session.known_customer:
         return None
     return BooqableClient.attrs(session.known_customer).get("name")
@@ -66,7 +67,7 @@ async def record_call(st: "CallState") -> None:
     started_at = st.started_at
 
     try:
-        classification = await guide_client.classify_conversation(st.guide)
+        classification = await classify.classify_conversation(st.guide)
     except Exception:  # noqa: BLE001 -- any failure (bad conversation id, network error,
         # invalid JSON) just means "can't classify"; fall back to safe defaults instead.
         logger.warning("Wrap-up classification failed; saving with defaults", exc_info=True)

@@ -19,8 +19,8 @@ import httpx
 import openai
 import pytest
 
-from app.guide import guide_client
-from app.guide.guide_client import GuideSession
+from app.guide import connection, sentinel, streaming
+from app.guide.session import GuideSession
 
 
 async def _collect(aiter):
@@ -28,11 +28,11 @@ async def _collect(aiter):
 
 
 def _texts(events) -> list[str]:
-    return [e.text for e in events if isinstance(e, guide_client.Delta)]
+    return [e.text for e in events if isinstance(e, streaming.Delta)]
 
 
-def _tool_events(events) -> list["guide_client.ToolCallStarted"]:
-    return [e for e in events if isinstance(e, guide_client.ToolCallStarted)]
+def _tool_events(events) -> list["streaming.ToolCallStarted"]:
+    return [e for e in events if isinstance(e, streaming.ToolCallStarted)]
 
 
 class _FakeClient(SimpleNamespace):
@@ -95,9 +95,9 @@ def _real_sentinel_patterns(monkeypatch):
     """Every test in this file exercises real gating -- rebuild the compiled
     patterns from the default phrase regardless of what other test files (or
     a local .env) may have set config.FINAL_ANSWER_SENTINEL to."""
-    strict, loose = guide_client._compile_sentinel_patterns("declare victory")
-    monkeypatch.setattr(guide_client, "_SENTINEL_STRICT", strict)
-    monkeypatch.setattr(guide_client, "_SENTINEL_LOOSE", loose)
+    strict, loose = sentinel._compile_sentinel_patterns("declare victory")
+    monkeypatch.setattr(sentinel, "SENTINEL_STRICT", strict)
+    monkeypatch.setattr(sentinel, "SENTINEL_LOOSE", loose)
 
 
 def test_phrase_split_across_deltas_opens_gate_and_phrase_is_never_emitted(monkeypatch):
@@ -107,10 +107,10 @@ def test_phrase_split_across_deltas_opens_gate_and_phrase_is_never_emitted(monke
         SimpleNamespace(type="response.completed", response=SimpleNamespace(conversation="conv_abc")),
     ]
     create = AsyncMock(return_value=FakeStream(events))
-    monkeypatch.setattr(guide_client, "_get_client", lambda: _fake_client(create))
+    monkeypatch.setattr(connection, "get_client", lambda: _fake_client(create))
 
     session = GuideSession()
-    reply_events = asyncio.run(_collect(guide_client.stream_reply("is the cruiser free", session)))
+    reply_events = asyncio.run(_collect(streaming.stream_reply("is the cruiser free", session)))
 
     assert "".join(_texts(reply_events)) == "The bike is available."
     assert "declare" not in "".join(_texts(reply_events)).lower()
@@ -133,10 +133,10 @@ def test_marker_punctuation_split_into_its_own_delta_is_still_stripped(monkeypat
         SimpleNamespace(type="response.completed", response=SimpleNamespace(conversation="conv_abc")),
     ]
     create = AsyncMock(return_value=FakeStream(events))
-    monkeypatch.setattr(guide_client, "_get_client", lambda: _fake_client(create))
+    monkeypatch.setattr(connection, "get_client", lambda: _fake_client(create))
 
     session = GuideSession()
-    reply_events = asyncio.run(_collect(guide_client.stream_reply("what bikes do you have", session)))
+    reply_events = asyncio.run(_collect(streaming.stream_reply("what bikes do you have", session)))
 
     assert _texts(reply_events) == ["We have a great selection."]
 
@@ -151,10 +151,10 @@ def test_text_before_phrase_is_dropped_remainder_of_matching_delta_is_emitted(mo
         SimpleNamespace(type="response.completed", response=SimpleNamespace(conversation="conv_abc")),
     ]
     create = AsyncMock(return_value=FakeStream(events))
-    monkeypatch.setattr(guide_client, "_get_client", lambda: _fake_client(create))
+    monkeypatch.setattr(connection, "get_client", lambda: _fake_client(create))
 
     session = GuideSession()
-    reply_events = asyncio.run(_collect(guide_client.stream_reply("what's the price", session)))
+    reply_events = asyncio.run(_collect(streaming.stream_reply("what's the price", session)))
 
     assert _texts(reply_events) == ["Your total is twenty five dollars."]
 
@@ -174,11 +174,11 @@ def test_no_hold_back_text_forwarded_mid_round_not_flushed_at_round_end(monkeypa
     ]
     stream = FakeStream(events, gate=gate)
     create = AsyncMock(return_value=stream)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: _fake_client(create))
+    monkeypatch.setattr(connection, "get_client", lambda: _fake_client(create))
 
     async def scenario():
         session = GuideSession()
-        gen = guide_client.stream_reply("hi", session)
+        gen = streaming.stream_reply("hi", session)
         # response.created: not gated in this harness (gate only affects
         # __anext__ on the stream), consumed to reach the first delta.
         gate.set()
@@ -193,8 +193,8 @@ def test_no_hold_back_text_forwarded_mid_round_not_flushed_at_round_end(monkeypa
         return first_text, second_text
 
     first_text, second_text = asyncio.run(scenario())
-    assert first_text == guide_client.Delta("Hi")
-    assert second_text == guide_client.Delta(" there.")
+    assert first_text == streaming.Delta("Hi")
+    assert second_text == streaming.Delta(" there.")
     assert stream.closed
 
 
@@ -205,10 +205,10 @@ def test_trailing_punctuation_and_whitespace_after_phrase_not_spoken(monkeypatch
         SimpleNamespace(type="response.completed", response=SimpleNamespace(conversation="conv_abc")),
     ]
     create = AsyncMock(return_value=FakeStream(events))
-    monkeypatch.setattr(guide_client, "_get_client", lambda: _fake_client(create))
+    monkeypatch.setattr(connection, "get_client", lambda: _fake_client(create))
 
     session = GuideSession()
-    reply_events = asyncio.run(_collect(guide_client.stream_reply("in stock?", session)))
+    reply_events = asyncio.run(_collect(streaming.stream_reply("in stock?", session)))
 
     assert _texts(reply_events) == ["Great news, it's in stock."]
 
@@ -220,15 +220,15 @@ def test_final_round_with_no_phrase_flushes_as_one_burst_failsafe(monkeypatch, c
         SimpleNamespace(type="response.completed", response=SimpleNamespace(conversation="conv_abc")),
     ]
     create = AsyncMock(return_value=FakeStream(events))
-    monkeypatch.setattr(guide_client, "_get_client", lambda: _fake_client(create))
+    monkeypatch.setattr(connection, "get_client", lambda: _fake_client(create))
 
     session = GuideSession()
     with caplog.at_level("WARNING", logger="voice_receptionist.guide"):
-        reply_events = asyncio.run(_collect(guide_client.stream_reply("what are your hours", session)))
+        reply_events = asyncio.run(_collect(streaming.stream_reply("what are your hours", session)))
 
     # Exactly one Delta -- the whole round arrived in a single un-gated burst.
     assert _texts(reply_events) == ["We're open nine to six every day."]
-    assert sum(1 for e in reply_events if isinstance(e, guide_client.Delta)) == 1
+    assert sum(1 for e in reply_events if isinstance(e, streaming.Delta)) == 1
     assert any("No trigger phrase this turn" in r.message for r in caplog.records)
 
 
@@ -243,10 +243,10 @@ def test_failsafe_strips_a_near_miss_prefix(monkeypatch):
         SimpleNamespace(type="response.completed", response=SimpleNamespace(conversation="conv_abc")),
     ]
     create = AsyncMock(return_value=FakeStream(events))
-    monkeypatch.setattr(guide_client, "_get_client", lambda: _fake_client(create))
+    monkeypatch.setattr(connection, "get_client", lambda: _fake_client(create))
 
     session = GuideSession()
-    reply_events = asyncio.run(_collect(guide_client.stream_reply("total?", session)))
+    reply_events = asyncio.run(_collect(streaming.stream_reply("total?", session)))
 
     texts = _texts(reply_events)
     assert len(texts) == 1
@@ -273,11 +273,11 @@ def test_intermediate_round_without_phrase_is_discarded_tool_call_started_still_
         ),
     ]
     create = AsyncMock(side_effect=[FakeStream(round1_events), FakeStream(round2_events)])
-    monkeypatch.setattr(guide_client, "_get_client", lambda: _fake_client(create))
+    monkeypatch.setattr(connection, "get_client", lambda: _fake_client(create))
 
     session = GuideSession(conversation_id="conv_abc")
     with caplog.at_level("INFO", logger="voice_receptionist.guide"):
-        reply_events = asyncio.run(_collect(guide_client.stream_reply("book me a bike and a helmet", session)))
+        reply_events = asyncio.run(_collect(streaming.stream_reply("book me a bike and a helmet", session)))
 
     assert _texts(reply_events) == ["You're all set."]
     tool_events = _tool_events(reply_events)
@@ -306,11 +306,11 @@ def test_intermediate_round_with_phrase_streams_and_logs_mis_bet_warning(monkeyp
         ),
     ]
     create = AsyncMock(side_effect=[FakeStream(round1_events), FakeStream(round2_events)])
-    monkeypatch.setattr(guide_client, "_get_client", lambda: _fake_client(create))
+    monkeypatch.setattr(connection, "get_client", lambda: _fake_client(create))
 
     session = GuideSession(conversation_id="conv_abc")
     with caplog.at_level("WARNING", logger="voice_receptionist.guide"):
-        reply_events = asyncio.run(_collect(guide_client.stream_reply("book me a bike and a helmet", session)))
+        reply_events = asyncio.run(_collect(streaming.stream_reply("book me a bike and a helmet", session)))
 
     texts = _texts(reply_events)
     assert "Checking the helmet now." in texts
@@ -343,16 +343,16 @@ def test_max_tool_iterations_bound_speaks_last_round_instead_of_silence(monkeypa
             ),
         ]
     )
-    streams = [tool_call_stream(f"call_{i}") for i in range(guide_client._MAX_TOOL_ITERATIONS - 1)]
+    streams = [tool_call_stream(f"call_{i}") for i in range(streaming._MAX_TOOL_ITERATIONS - 1)]
     streams.append(last_round)
     create = AsyncMock(side_effect=streams)
-    monkeypatch.setattr(guide_client, "_get_client", lambda: _fake_client(create))
+    monkeypatch.setattr(connection, "get_client", lambda: _fake_client(create))
 
     session = GuideSession(conversation_id="conv_abc")
-    reply_events = asyncio.run(_collect(guide_client.stream_reply("hi", session)))
+    reply_events = asyncio.run(_collect(streaming.stream_reply("hi", session)))
 
     assert _texts(reply_events) == ["Here's what I found."]
-    assert create.call_count == guide_client._MAX_TOOL_ITERATIONS
+    assert create.call_count == streaming._MAX_TOOL_ITERATIONS
 
 
 def test_start_conversation_strips_phrase_and_discards_pre_tool_call_round(monkeypatch, caplog):
@@ -370,11 +370,11 @@ def test_start_conversation_strips_phrase_and_discards_pre_tool_call_round(monke
         output=[],
     )
     create = AsyncMock(side_effect=[round1_response, round2_response])
-    monkeypatch.setattr(guide_client, "_get_client", lambda: _fake_client(create))
+    monkeypatch.setattr(connection, "get_client", lambda: _fake_client(create))
 
     session = GuideSession(stream_missing_conversation=True)
     with caplog.at_level("INFO", logger="voice_receptionist.guide"):
-        reply_events = asyncio.run(_collect(guide_client.stream_reply("is it in stock", session)))
+        reply_events = asyncio.run(_collect(streaming.stream_reply("is it in stock", session)))
 
     assert _texts(reply_events) == ["It's available."]
     tool_events = _tool_events(reply_events)
@@ -383,8 +383,8 @@ def test_start_conversation_strips_phrase_and_discards_pre_tool_call_round(monke
 
 
 def test_empty_sentinel_disables_gating_control_mode(monkeypatch):
-    monkeypatch.setattr(guide_client, "_SENTINEL_STRICT", None)
-    monkeypatch.setattr(guide_client, "_SENTINEL_LOOSE", None)
+    monkeypatch.setattr(sentinel, "SENTINEL_STRICT", None)
+    monkeypatch.setattr(sentinel, "SENTINEL_LOOSE", None)
 
     events = [
         SimpleNamespace(type="response.created", response=SimpleNamespace(conversation="conv_abc")),
@@ -392,10 +392,10 @@ def test_empty_sentinel_disables_gating_control_mode(monkeypatch):
         SimpleNamespace(type="response.completed", response=SimpleNamespace(conversation="conv_abc")),
     ]
     create = AsyncMock(return_value=FakeStream(events))
-    monkeypatch.setattr(guide_client, "_get_client", lambda: _fake_client(create))
+    monkeypatch.setattr(connection, "get_client", lambda: _fake_client(create))
 
     session = GuideSession()
-    reply_events = asyncio.run(_collect(guide_client.stream_reply("hi", session)))
+    reply_events = asyncio.run(_collect(streaming.stream_reply("hi", session)))
 
     # Every delta streams live -- 3 separate Delta events, not one burst.
     assert _texts(reply_events) == ["Hi ", "there, ", "no marker needed."]
@@ -414,11 +414,11 @@ def test_bad_request_error_after_a_delta_reraises_instead_of_retrying(monkeypatc
     create = AsyncMock(
         side_effect=[FakeStream(round1_events), _bad_request_error("tool_results_not_pending")]
     )
-    monkeypatch.setattr(guide_client, "_get_client", lambda: _fake_client(create))
+    monkeypatch.setattr(connection, "get_client", lambda: _fake_client(create))
 
     session = GuideSession(conversation_id="conv_abc")
     with pytest.raises(openai.BadRequestError):
-        asyncio.run(_collect(guide_client.stream_reply("book it", session)))
+        asyncio.run(_collect(streaming.stream_reply("book it", session)))
 
     # The id is still cleared so the *next* turn recovers fresh.
     assert session.conversation_id is None
