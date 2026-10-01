@@ -1,4 +1,4 @@
-from app import barge_in
+from app.calls import barge_in
 
 
 def test_is_stop_command_matches_bare_phrase():

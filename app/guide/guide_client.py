@@ -30,12 +30,11 @@ from typing import Any, AsyncIterator
 import openai
 from openai import AsyncOpenAI
 
+from app import config
 from app.booking import payments, reservations
 from app.booking.booqable_client import BooqableClient, BooqableError
 from app.booking.postmark_client import PostmarkError
 from app.booking.twilio_client import TwilioSmsError
-
-from . import config
 
 logger = logging.getLogger("voice_receptionist.guide")
 

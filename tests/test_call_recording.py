@@ -8,10 +8,11 @@ from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app import call_recording, models
+from app import models
+from app.calls import call_recording
 from app import db as db_module
 from app.db import Base
-from app.guide_client import GuideSession
+from app.guide.guide_client import GuideSession
 
 
 class _FakeState:

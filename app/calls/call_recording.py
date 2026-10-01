@@ -12,14 +12,13 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from app.console.conversations import store as conversation_store
-
-from . import guide_client
 from app.booking.booqable_client import BooqableClient
-from .db import session_scope
+from app.console.conversations import store as conversation_store
+from app.db import session_scope
+from app.guide import guide_client
 
 if TYPE_CHECKING:
-    from .main import CallState
+    from app.main import CallState
 
 logger = logging.getLogger("voice_receptionist.call_recording")
 

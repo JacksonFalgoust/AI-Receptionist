@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from twilio.request_validator import RequestValidator
 
-from . import config
+from app import config
 
 if TYPE_CHECKING:
     from fastapi import Request

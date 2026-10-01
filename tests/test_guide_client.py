@@ -7,8 +7,8 @@ import httpx
 import openai
 import pytest
 
-from app import guide_client
-from app.guide_client import GuideSession, build_input
+from app.guide import guide_client
+from app.guide.guide_client import GuideSession, build_input
 
 
 @pytest.fixture(autouse=True)

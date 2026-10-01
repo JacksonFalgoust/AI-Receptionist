@@ -14,9 +14,10 @@ import threading
 
 from fastapi.testclient import TestClient
 
-from app import config, twilio_auth
+from app import config
+from app.calls import twilio_auth
 from app import main
-from app.guide_client import Delta, ToolCallStarted
+from app.guide.guide_client import Delta, ToolCallStarted
 from app.main import app
 
 client = TestClient(app)

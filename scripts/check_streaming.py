@@ -44,7 +44,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app import guide_client
+from app.guide import guide_client
 
 # Below this, a run of deltas is treated as having arrived in one burst
 # (this app's internal yield loop, not real GuideAnts pacing) rather than

@@ -19,8 +19,8 @@ import httpx
 import openai
 import pytest
 
-from app import guide_client
-from app.guide_client import GuideSession
+from app.guide import guide_client
+from app.guide.guide_client import GuideSession
 
 
 async def _collect(aiter):

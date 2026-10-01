@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from twilio.request_validator import RequestValidator
 
-from app import config, twilio_auth
+from app import config
+from app.calls import twilio_auth
 
 
 def test_enforcement_enabled_true(monkeypatch):
