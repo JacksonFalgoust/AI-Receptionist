@@ -1,6 +1,6 @@
 """Twilio Conversation Relay <-> GuideAnts voice receptionist middleware.
 
-POST /twiml   Twilio calls this when a call comes in; returns TwiML that opens
+POST /twiml   (served by app/calls/twiml.py) Twilio calls this when a call comes in; returns TwiML that opens
               a Conversation Relay WebSocket back to this server.
 WS   /ws      Conversation Relay's WebSocket bridge: receives transcribed
               caller speech and streams the GuideAnts guide's reply back as

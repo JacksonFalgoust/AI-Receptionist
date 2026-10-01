@@ -59,7 +59,7 @@ non-zero Postmark `ErrorCode` in an otherwise-200 response (e.g. `406`
 inactive recipient, `401` unconfirmed sender signature — `POSTMARK_FROM_EMAIL`
 must be a confirmed Sender Signature in the Postmark account).
 
-It plugs into `app/payments.send_payment_link` alongside `TwilioSmsClient` —
+It plugs into `app/booking/payments.py`'s `send_payment_link` alongside `TwilioSmsClient` —
 the contact lookup (`get_order_contact`) already returns `email` alongside
 `phone`; `send_payment_link` picks whichever channel is requested (or
 falls back to `config.PAYMENT_LINK_DEFAULT_CHANNEL`, `"email"` today) and

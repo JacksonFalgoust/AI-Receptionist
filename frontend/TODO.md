@@ -87,7 +87,7 @@ Replace mock implementations with live calls behind `VITE_USE_MOCKS=false`.
 - Define the API contract against the FastAPI app in `../app`; the HTTP impls
   currently assume endpoints that do not exist yet.
 - Conversation history is the natural first real feed — Conversation Relay
-  calls already flow through `app/main.py`.
+  calls already flow through `app/calls/relay.py`.
 - **Enforce every permission in `src/lib/permissions.ts` server-side** (PRD §40). This includes `src/lib/userGuards.ts`'s two lockout rules (self-protection, last active Owner) — both are currently enforced only in the mock `userService`, documented there and in `userGuards.ts` as client-side-only.
 - `TestConciergeDrawerContext` (E3) is mounted above `AppRoutes` and never resets on sign-out/session expiry — decide whether a real backend's 401-mid-`send()` path should clear it on auth transitions or leave the transcript to a full reload, same as every other client-only state in this app.
 - **Slice 1 shipped:** conversation history and login/logout are real,
