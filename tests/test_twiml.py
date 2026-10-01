@@ -4,7 +4,8 @@ from fastapi.testclient import TestClient
 from twilio.request_validator import RequestValidator
 
 from app import config
-from app.main import app, reservations
+from app.main import app
+from app.booking import reservations
 
 client = TestClient(app)
 

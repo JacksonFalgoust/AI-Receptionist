@@ -18,7 +18,7 @@ from app.db import session_scope
 from app.guide import guide_client
 
 if TYPE_CHECKING:
-    from app.main import CallState
+    from .relay import CallState
 
 logger = logging.getLogger("voice_receptionist.call_recording")
 

@@ -19,7 +19,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from app import config
 from app.calls import twilio_auth
-from app import main
+from app.calls import relay
 from app.guide.guide_client import Delta
 from app.main import app
 
@@ -182,7 +182,7 @@ def test_ws_prompt_before_setup_is_rejected_and_never_reaches_guide(monkeypatch)
 
         return _gen()
 
-    monkeypatch.setattr(main, "stream_reply", _fake_stream_reply)
+    monkeypatch.setattr(relay, "stream_reply", _fake_stream_reply)
 
     with client.websocket_connect("/ws") as websocket:  # no token, no setup
         websocket.send_json({"type": "prompt", "voicePrompt": "cancel my reservation"})
@@ -211,7 +211,7 @@ def test_ws_prompt_after_valid_setup_gets_a_real_reply(monkeypatch):
     async def _fake_stream_reply(input_text, guide):
         yield Delta("Hello from the guide")
 
-    monkeypatch.setattr(main, "stream_reply", _fake_stream_reply)
+    monkeypatch.setattr(relay, "stream_reply", _fake_stream_reply)
 
     call_sid = "CA_prompt_after_setup"
     token = twilio_auth.mint_ws_token(call_sid)

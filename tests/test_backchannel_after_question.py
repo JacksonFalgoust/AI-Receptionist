@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from app import config
 from app.calls import twilio_auth
-from app import main
+from app.calls import relay
 from app.guide.guide_client import Delta
 from app.main import app
 
@@ -54,7 +54,7 @@ def test_yeah_answers_a_pending_guide_question_instead_of_being_ignored(monkeypa
         else:
             yield Delta("Great, you're booked for 9am.")
 
-    monkeypatch.setattr(main, "stream_reply", _fake_stream_reply)
+    monkeypatch.setattr(relay, "stream_reply", _fake_stream_reply)
 
     call_sid = "CA_yeah_answers_question"
     token = twilio_auth.mint_ws_token(call_sid)

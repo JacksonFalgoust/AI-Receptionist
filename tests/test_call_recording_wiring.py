@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app import config
 from app.calls import twilio_auth
-from app import main
+from app.calls import relay
 from app.guide.guide_client import Delta
 from app.main import app
 
@@ -45,9 +45,9 @@ def test_disconnect_persists_the_call(monkeypatch):
     async def _fake_stream_reply(input_text, guide):
         yield Delta("Sure, how can I help?")
 
-    monkeypatch.setattr(main, "stream_reply", _fake_stream_reply)
+    monkeypatch.setattr(relay, "stream_reply", _fake_stream_reply)
     record_call = AsyncMock()
-    monkeypatch.setattr(main.call_recording, "record_call", record_call)
+    monkeypatch.setattr(relay.call_recording, "record_call", record_call)
 
     call_sid = "CA_disconnect_persists"
     token = twilio_auth.mint_ws_token(call_sid)
@@ -69,9 +69,9 @@ def test_persistence_failure_does_not_crash_teardown(monkeypatch):
     async def _fake_stream_reply(input_text, guide):
         yield Delta("Sure, how can I help?")
 
-    monkeypatch.setattr(main, "stream_reply", _fake_stream_reply)
+    monkeypatch.setattr(relay, "stream_reply", _fake_stream_reply)
     monkeypatch.setattr(
-        main.call_recording, "record_call", AsyncMock(side_effect=RuntimeError("db is down"))
+        relay.call_recording, "record_call", AsyncMock(side_effect=RuntimeError("db is down"))
     )
 
     call_sid = "CA_persistence_failure"
@@ -94,7 +94,7 @@ def test_unauthenticated_connection_does_not_persist_a_call(monkeypatch):
     monkeypatch.setattr(config, "TWILIO_AUTH_TOKEN", "test-ws-secret")
 
     record_call = AsyncMock()
-    monkeypatch.setattr(main.call_recording, "record_call", record_call)
+    monkeypatch.setattr(relay.call_recording, "record_call", record_call)
 
     call_sid = "CA_unauthenticated"
 

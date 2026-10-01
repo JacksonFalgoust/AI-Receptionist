@@ -4,7 +4,7 @@ means a client-side tool call can leave the caller hearing silence mid-turn
 while it runs. These tests prove app.py's defenses around that gap --
 softened barge-in while a tool call is in flight, and the filler phrase not
 stacking on top of narration that's already playing -- using the same
-TestClient + monkeypatch.setattr(main, "stream_reply", ...) harness as
+TestClient + monkeypatch.setattr(relay, "stream_reply", ...) harness as
 tests/test_backchannel_after_question.py.
 """
 
@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from app import config
 from app.calls import twilio_auth
-from app import main
+from app.calls import relay
 from app.guide.guide_client import Delta, ToolCallStarted
 from app.main import app
 
@@ -70,7 +70,7 @@ def test_question_during_tool_call_does_not_cancel_the_turn(monkeypatch):
             await asyncio.sleep(0.01)
         yield Delta("It's available.")
 
-    monkeypatch.setattr(main, "stream_reply", _fake_stream_reply)
+    monkeypatch.setattr(relay, "stream_reply", _fake_stream_reply)
 
     call_sid = "CA_question_during_tool_call"
     token = twilio_auth.mint_ws_token(call_sid)
@@ -111,7 +111,7 @@ def test_stop_command_during_tool_call_still_cancels(monkeypatch):
         await asyncio.sleep(10)  # cancelled well before this would fire
         yield Delta("It's available.")
 
-    monkeypatch.setattr(main, "stream_reply", _fake_stream_reply)
+    monkeypatch.setattr(relay, "stream_reply", _fake_stream_reply)
 
     call_sid = "CA_stop_during_tool_call"
     token = twilio_auth.mint_ws_token(call_sid)
@@ -150,7 +150,7 @@ def test_tool_call_grace_expires_and_barge_in_works_again(monkeypatch):
         else:
             yield Delta("Second turn reply.")
 
-    monkeypatch.setattr(main, "stream_reply", _fake_stream_reply)
+    monkeypatch.setattr(relay, "stream_reply", _fake_stream_reply)
 
     call_sid = "CA_grace_expires"
     token = twilio_auth.mint_ws_token(call_sid)
@@ -196,7 +196,7 @@ def test_filler_is_not_stacked_on_narration_already_playing(monkeypatch):
         await asyncio.sleep(0.3)
         yield Delta(" It's available.")
 
-    monkeypatch.setattr(main, "stream_reply", _fake_stream_reply)
+    monkeypatch.setattr(relay, "stream_reply", _fake_stream_reply)
 
     call_sid = "CA_no_filler_stack"
     token = twilio_auth.mint_ws_token(call_sid)
@@ -224,7 +224,7 @@ def test_filler_still_spoken_when_nothing_has_been_sent_yet(monkeypatch):
         await asyncio.sleep(0.2)  # slower than FILLER_DELAY_SECONDS
         yield Delta("Here you go.")
 
-    monkeypatch.setattr(main, "stream_reply", _fake_stream_reply)
+    monkeypatch.setattr(relay, "stream_reply", _fake_stream_reply)
 
     call_sid = "CA_filler_still_spoken"
     token = twilio_auth.mint_ws_token(call_sid)
@@ -251,7 +251,7 @@ def test_round_boundary_inserts_a_separating_space(monkeypatch):
         yield ToolCallStarted(("checkAvailability",))
         yield Delta("It's available.")
 
-    monkeypatch.setattr(main, "stream_reply", _fake_stream_reply)
+    monkeypatch.setattr(relay, "stream_reply", _fake_stream_reply)
 
     call_sid = "CA_round_boundary_space"
     token = twilio_auth.mint_ws_token(call_sid)
