@@ -40,7 +40,7 @@ def _tool_events(events) -> list["streaming.ToolCallStarted"]:
 class _FakeClient(SimpleNamespace):
     """Stand-in for AsyncOpenAI: exposes `.responses.create` and a
     `.with_options()` that returns the same client (the real SDK returns a
-    reconfigured copy; sharing one is fine for assertions here). guide_client
+    reconfigured copy; sharing one is fine for assertions here). app/guide/streaming.py
     calls with_options(max_retries=0) on tool-output submissions; each such
     call's kwargs are recorded in `with_options_calls` for assertions."""
 

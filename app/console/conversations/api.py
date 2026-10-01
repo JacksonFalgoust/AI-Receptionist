@@ -114,7 +114,7 @@ def _conversation_out(conversation: models.Conversation) -> ConversationOut:
         escalated=conversation.escalated,
         summary=conversation.summary,
         assignedEmployee=conversation.assigned_employee,
-        # Matches app/dashboard_api.py's synthesized Escalation.status --
+        # Matches app/console/dashboard/api.py's synthesized Escalation.status --
         # both are fixed at "new" for an escalated conversation; neither is
         # backed by a persisted lifecycle. See docs/superpowers/specs/
         # 2026-09-22-e6-dashboard-design.md.

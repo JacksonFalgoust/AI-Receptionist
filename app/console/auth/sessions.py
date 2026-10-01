@@ -7,7 +7,7 @@ A real multi-user Users & Roles backend (frontend/TODO.md's own future E6
 slice) replaces ADMIN_EMAIL/ADMIN_PASSWORD_HASH with a real users table --
 login()/verify_token()'s shape is designed so that slice only has to change
 where the credential/role come from, not this module's callers
-(app/auth_api.py, app/conversations_api.py's require_auth dependency).
+(app/console/auth/api.py, app/console/conversations/api.py's require_auth dependency).
 """
 
 from __future__ import annotations
@@ -82,7 +82,7 @@ def require_auth(
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ) -> models.AuthSession:
-    """FastAPI dependency: every protected route (Task 4's conversations_api.py)
+    """FastAPI dependency: every protected route (Task 4's app/console/conversations/api.py)
     takes `Depends(require_auth)`. Matches frontend/src/services/http.ts's
     `Authorization: Bearer <token>` header and its 401 handling exactly."""
     if not authorization or not authorization.startswith("Bearer "):

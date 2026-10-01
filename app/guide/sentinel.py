@@ -11,14 +11,14 @@ from app import config
 # follows a phrase match -- the marker's own sentence-ending "." (or ":",
 # extra spaces, ...) belongs to the marker, never to the caller's actual
 # answer. Not phrase-dependent, so it's a single module-level pattern shared
-# by `_SentinelGate._trim` and `_start_conversation`.
+# by `SentinelGate._trim` and `_start_conversation`.
 LEAD_PUNCT_RE = re.compile(r"^[\s.,:;!?—-]+")
 
 
 def _compile_sentinel_patterns(phrase: str) -> tuple["re.Pattern | None", "re.Pattern | None"]:
     """Build the core (gating) and loose (failsafe cleanup) patterns for
     `phrase`. Returns `(None, None)` for an empty phrase -- the signal
-    `_SentinelGate` and `_strip_sentinel` use for "gating disabled, every
+    `SentinelGate` and `strip_sentinel` use for "gating disabled, every
     delta streams live".
 
     The core pattern matches only the bare words, in order, separated by
@@ -27,8 +27,8 @@ def _compile_sentinel_patterns(phrase: str) -> tuple["re.Pattern | None", "re.Pa
     delta from the phrase itself (observed live: "Declare victory" arrives
     whole, then ". " arrives in the next delta) -- a pattern that only
     absorbs trailing punctuation already present in the same accumulated
-    match can't consume characters that haven't arrived yet. `_LEAD_PUNCT_RE`
-    (via `_SentinelGate._trim`) handles that punctuation instead, as its own
+    match can't consume characters that haven't arrived yet. `LEAD_PUNCT_RE`
+    (via `SentinelGate._trim`) handles that punctuation instead, as its own
     persistent step that survives a delta boundary."""
     if not phrase:
         return None, None
@@ -49,8 +49,8 @@ SENTINEL_STRICT, SENTINEL_LOOSE = _compile_sentinel_patterns(config.FINAL_ANSWER
 
 
 def strip_sentinel(text: str) -> str:
-    """Best-effort cleanup for the failsafe path (see `_SentinelGate`): if
-    the sentinel phrase is present in `text` but `_SENTINEL_STRICT` never
+    """Best-effort cleanup for the failsafe path (see `SentinelGate`): if
+    the sentinel phrase is present in `text` but `SENTINEL_STRICT` never
     matched it while streaming, strip it here so it's never spoken as part
     of the failsafe burst. A no-op when gating is disabled."""
     if SENTINEL_LOOSE is None:
@@ -74,7 +74,7 @@ class SentinelGate:
     - `"closed"`: searching `retained` for the phrase. No output.
     - `"trimming"`: the phrase itself has been found; now stripping the
       leading run of whitespace/sentence punctuation that belongs to the
-      marker's own sentence end (`_LEAD_PUNCT_RE`), one delta at a time if
+      marker's own sentence end (`LEAD_PUNCT_RE`), one delta at a time if
       necessary -- this is what makes trimming survive a delta boundary
       (GuideAnts can stream "Declare victory" and its trailing ". "
       separately; a one-shot strip against a single delta would miss that).
@@ -87,7 +87,7 @@ class SentinelGate:
     about, not whether trimming has finished.
 
     `retained` accumulates only the pre-match text, purely so the caller can
-    fall back to speaking it (via `_strip_sentinel`) if the round ends still
+    fall back to speaking it (via `strip_sentinel`) if the round ends still
     `"closed"` -- the failsafe for a turn where the guide forgot the phrase.
 
     `emitted_any` is distinct from `open`: with gating disabled

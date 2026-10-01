@@ -1,5 +1,5 @@
-"""Covers app/main.py's call into call_recording.record_call() in the /ws
-handler's disconnect teardown (see app/call_recording.py)."""
+"""Covers app/calls/relay.py's call into call_recording.record_call() in the /ws
+handler's disconnect teardown (see app/calls/call_recording.py)."""
 
 import queue
 import threading

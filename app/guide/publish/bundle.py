@@ -20,7 +20,7 @@ import zipfile
 
 from app import config
 
-# The guide's entire tool surface, matching what app/guide_client.py
+# The guide's entire tool surface, matching what app/guide/tools.py
 # dispatches. Pinned as a constant so a truncated or stale schema fails
 # loudly instead of quietly removing a capability.
 EXPECTED_OPERATION_IDS = frozenset(

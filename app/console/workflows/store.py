@@ -1,5 +1,5 @@
 """SQLAlchemy-backed CRUD for console workflows (E6 slice 3). Called only
-by app/workflow_api.py. Same conventions as app/knowledge_store.py: every
+by app/console/workflows/api.py. Same conventions as app/console/knowledge/store.py: every
 function takes a Session and none commit, so the caller owns the
 transaction boundary.
 
@@ -60,7 +60,7 @@ def save_draft(
     """Applies only the keys present in `patch` -- name/description/steps.
     `steps`, when present, replaces the entire column value wholesale; this
     is never a per-step merge. status/version are never touched here --
-    the API layer (app/workflow_api.py) never puts them in a patch dict."""
+    the API layer (app/console/workflows/api.py) never puts them in a patch dict."""
     for key, value in patch.items():
         setattr(workflow, key, value)
     workflow.last_updated_at = datetime.utcnow()

@@ -1,5 +1,5 @@
 """SQLAlchemy-backed CRUD for console knowledge items (E6 slice 2). Called
-only by app/knowledge_api.py. Same conventions as app/conversation_store.py:
+only by app/console/knowledge/api.py. Same conventions as app/console/conversations/store.py:
 every function takes a Session and none commit, so the caller owns the
 transaction boundary.
 
@@ -37,11 +37,11 @@ def _scoped():
 def seed_default_items(db: Session) -> None:
     """Populates an empty table from config.DEFAULT_KNOWLEDGE_ITEMS.
 
-    Seed-on-first-read, exactly as app/configuration_store.py does and for
+    Seed-on-first-read, exactly as app/console/concierge/store.py does and for
     the same reason: app/db.py's create_all() is the real runtime schema
     path, so a migration's data step would never run for most checkouts.
 
-    This runs on the publish path too (app/guide_publish/publisher.py), not
+    This runs on the publish path too (app/guide/publish/publisher.py), not
     only when the console's Knowledge page is opened. A publish replaces the
     live guide's vector store wholesale, so publishing from an empty table
     would DELETE the shop's entire policy knowledge -- and an admin who goes

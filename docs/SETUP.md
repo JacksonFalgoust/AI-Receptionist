@@ -49,7 +49,7 @@ from creating the GuideAnts guide through placing a real phone call.
    Both are **Client Actions** tool sources — meaning GuideAnts never calls
    them itself over HTTP; it hands each one back, unresolved, to whichever
    client (this app) is on the call, which answers it in
-   `app/guide_client.py`. See ARCHITECTURE.md's "Client-side tool calls"
+   `app/guide/tools.py`. See ARCHITECTURE.md's "Client-side tool calls"
    section for the full mechanism and why this is more secure than the
    Web API tool source this demo used to use: there's no HTTP endpoint or
    shared API key that anyone (or anything) other than an active call
@@ -93,7 +93,7 @@ from creating the GuideAnts guide through placing a real phone call.
       re-paste it the same way.
    8. Both tools are only answered on a real call through this app — testing
       the guide directly in GuideAnts' own chat UI won't resolve either one,
-      since that path doesn't go through `app/guide_client.py`. The guide's
+      since that path doesn't go through `app/guide/tools.py`. The guide's
       instructions already account for the phone-number tool specifically
       (they fall back to just asking the caller for a number); the
       reservation tools will simply appear to hang or error in that UI.
@@ -174,7 +174,7 @@ FILLER_DELAY_SECONDS=1.0
   reply arrives before this elapses, no filler is spoken at all. Defaults to
   `1.0`.
 - `EXTRA_BACKCHANNEL_PHRASES` — comma-separated list of extra phrases (beyond
-  the built-in list in `fillers.py`) that count as pure acknowledgment noise
+  the built-in list in `app/calls/fillers.py`) that count as pure acknowledgment noise
   ("ok", "yeah", "got it", ...) and should never get a guide reply, whether
   heard mid-reply or just after it finishes. Optional.
 
@@ -187,7 +187,7 @@ BOOQABLE_TIMEZONE=America/New_York
 ```
 
 `BOOQABLE_API_KEY` is only ever read by this app's own process
-(`app/booqable_client.py`, constructed inside `app/guide_client.py`'s
+(`app/booking/booqable_client.py`, constructed inside `app/guide/tools.py`'s
 reservation tool handlers) — the LLM never sees it, and since the reservation
 tools are Client Actions rather than a Web API source, there's no separate
 shared secret to configure for GuideAnts either. Verify the Booqable side is
@@ -323,7 +323,7 @@ until a `setup` message has passed that check: a client that sends `prompt`
 (or anything else) before a valid `setup` gets the connection closed the
 same way. If `TWILIO_AUTH_TOKEN` is left unset, both checks are skipped
 (with a logged warning) so local/dev use without a token still works as
-before. See `app/twilio_auth.py` for the implementation.
+before. See `app/calls/twilio_auth.py` for the implementation.
 
 ## Optional hardening (not implemented, not required for the demo)
 

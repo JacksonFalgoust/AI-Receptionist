@@ -1,11 +1,11 @@
-"""Covers the live-token-streaming change: guide_client now yields every
-delta live (see app/guide_client.py's Delta/ToolCallStarted contract), which
+"""Covers the live-token-streaming change: the guide now yields every
+delta live (see app/guide/streaming.py's Delta/ToolCallStarted contract), which
 means a client-side tool call can leave the caller hearing silence mid-turn
-while it runs. These tests prove app.py's defenses around that gap --
+while it runs. These tests prove app/calls/relay.py's defenses around that gap --
 softened barge-in while a tool call is in flight, and the filler phrase not
 stacking on top of narration that's already playing -- using the same
 TestClient + monkeypatch.setattr(relay, "stream_reply", ...) harness as
-tests/test_backchannel_after_question.py.
+tests/calls/test_backchannel_after_question.py.
 """
 
 import asyncio

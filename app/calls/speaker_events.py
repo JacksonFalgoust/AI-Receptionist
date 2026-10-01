@@ -1,19 +1,19 @@
 """Loose classifier for Conversation Relay speaker-event WS messages.
 
 Subscribing with `events="speaker-events"` in the <ConversationRelay> TwiML
-(see app.py's /twiml) makes Twilio notify this app when the agent (TTS
+(see app/calls/twiml.py's /twiml) makes Twilio notify this app when the agent (TTS
 playback) and the client (caller) start and stop speaking. Twilio's
 reference docs document the subscription attribute but not (yet) the exact
 JSON shape of the resulting messages, so `classify` matches loosely instead
 of pattern-matching one exact schema: it scans the message's string values
 for the documented event names ("agentSpeaking" / "clientSpeaking") and for
-start/stop-flavored words. app.py acts on "agent-stop" (the playback hold in
+start/stop-flavored words. app/calls/relay.py acts on "agent-stop" (the playback hold in
 respond_to(), and only after at least one agent-stop has already been
 recognized on the call) and on "client-start"/"client-stop" (holding a
 buffered turn open while the caller is still speaking -- see
 schedule_turn()); both degrade gracefully if a wire shape this parser can't
 recognize stops these events being seen -- estimate-based pacing and a plain
-TURN_PAUSE_SECONDS debounce respectively, rather than misbehaving. Only called for message types app.py doesn't already handle,
+TURN_PAUSE_SECONDS debounce respectively, rather than misbehaving. Only called for message types app/calls/relay.py doesn't already handle,
 so a caller's prompt whose transcript happens to mention "agent speaking"
 never reaches it. Pure functions only, no I/O -- mirrors the role
 fillers.py and barge_in.py play for their features.

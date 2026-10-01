@@ -1,5 +1,5 @@
 """SQLAlchemy-backed CRUD for conversation history (E6 slice 1). Called by
-app/conversations_api.py (reads) and app/call_recording.py (the one write,
+app/console/conversations/api.py (reads) and app/calls/call_recording.py (the one write,
 at call end). Every function takes a Session rather than opening its own,
 so callers control the transaction boundary (see app/db.py's
 get_db/session_scope) -- none of these functions commit.

@@ -14,17 +14,20 @@ Caller ⇄ Twilio number ⇄ Conversation Relay ⇄ this app (/twiml, /ws) ⇄ G
 
 | File | Purpose |
 |---|---|
-| `app/main.py` | FastAPI server: `POST /twiml` returns the TwiML that opens the relay; `WS /ws` is the Conversation Relay message loop. |
-| `app/guide_client.py` | Fetches replies from the GuideAnts guide using the `openai` SDK pointed at GuideAnts' OpenAI-compatible Responses endpoint. Every turn streams, including the first — the conversation id is captured directly off the stream (see below). |
-| `app/fillers.py` | Pure logic for the filler-phrase feature: `looks_like_question` decides whether a caller's utterance looks like a question or request that warrants a short filler phrase before the real reply; `pick` returns a random filler phrase from a list; `is_backchannel` decides whether an utterance (e.g. "ok", "yeah") is pure acknowledgment noise that should never get a guide reply. |
-| `app/barge_in.py` | Pure logic for selective barge-in: `should_interrupt` decides whether a caller's utterance heard mid-reply (a stop/wait phrase, or a new question) should cancel the in-flight reply; a stop/wait phrase then gets a local acknowledgment, a new question starts a fresh reply. |
-| `app/speech_timing.py` | Pure logic: `estimate_seconds` estimates how long Twilio's TTS will take to speak a given text, from its word count — the fallback pacing signal when Twilio's speaker events aren't available. |
-| `app/speaker_events.py` | Pure logic: `classify` recognizes Twilio's speaker-event messages (`agentSpeaking`/`clientSpeaking` start/stop) — the agent-stopped event is the real "reply finished playing" signal. |
+| `app/main.py` | FastAPI app: creates it, runs `init_db()` on startup, and registers every router. |
+| `app/calls/twiml.py` | `POST /twiml` returns the TwiML that opens the relay. |
+| `app/calls/relay.py` | `WS /ws` is the Conversation Relay message loop (the call-flow state machine). |
+| `app/calls/greeting.py` | Picks the spoken greeting (first-time vs. returning caller, published greeting). |
+| `app/guide/` | (`connection`, `session`, `streaming`, `sentinel`, `tools`, `classify`) Fetches replies from the GuideAnts guide using the `openai` SDK pointed at GuideAnts' OpenAI-compatible Responses endpoint. Every turn streams, including the first — the conversation id is captured directly off the stream (see below). |
+| `app/calls/fillers.py` | Pure logic for the filler-phrase feature: `looks_like_question` decides whether a caller's utterance looks like a question or request that warrants a short filler phrase before the real reply; `pick` returns a random filler phrase from a list; `is_backchannel` decides whether an utterance (e.g. "ok", "yeah") is pure acknowledgment noise that should never get a guide reply. |
+| `app/calls/barge_in.py` | Pure logic for selective barge-in: `should_interrupt` decides whether a caller's utterance heard mid-reply (a stop/wait phrase, or a new question) should cancel the in-flight reply; a stop/wait phrase then gets a local acknowledgment, a new question starts a fresh reply. |
+| `app/calls/speech_timing.py` | Pure logic: `estimate_seconds` estimates how long Twilio's TTS will take to speak a given text, from its word count — the fallback pacing signal when Twilio's speaker events aren't available. |
+| `app/calls/speaker_events.py` | Pure logic: `classify` recognizes Twilio's speaker-event messages (`agentSpeaking`/`clientSpeaking` start/stop) — the agent-stopped event is the real "reply finished playing" signal. |
 | `app/config.py` | Loads settings from `.env`. |
 | `.env.example` | Template for required configuration — copy to `.env`. |
-| `app/reservations_api.py` | FastAPI router: just `/api/booqable/ping`, a manual connectivity check. |
-| `app/reservations.py` | Booqable business logic (catalog, availability, create/cancel order), called directly by `app/guide_client.py`'s reservation tool handlers. See "Reservation tools" below. |
-| `app/booqable_client.py` | Thin async HTTP client for Booqable's JSON:API v4, Bearer-token auth. |
+| `app/booking/api.py` | FastAPI router: just `/api/booqable/ping`, a manual connectivity check. |
+| `app/booking/reservations.py` | Booqable business logic (catalog, availability, create/cancel order), called directly by `app/guide/tools.py`'s reservation tool handlers. See "Reservation tools" below. |
+| `app/booking/booqable_client.py` | Thin async HTTP client for Booqable's JSON:API v4, Bearer-token auth. |
 | `tests/` | Unit tests for the pure-logic and API-router modules above. |
 | `scripts/check_streaming.py` | Diagnostic to check whether a GuideAnts guide streams incrementally (see below). |
 
@@ -56,7 +59,7 @@ this code. This app is just the phone/WebSocket bridge.
    - speaker events (`events="speaker-events"`) — notifications that the
      agent or caller started/stopped speaking; the agent-stopped event is
      how the app knows a reply actually finished playing (with a word-count
-     estimate as fallback and ceiling — see `speech_timing.py`), and the
+     estimate as fallback and ceiling — see `app/calls/speech_timing.py`), and the
      client started/stopped events are how it knows a caller who paused
      briefly has resumed talking (see step 4)
 4. Twilio finalizes a `prompt` at each pause in caller speech, so one spoken
@@ -67,7 +70,7 @@ this code. This app is just the phone/WebSocket bridge.
    just took a breath mid-sentence, and the continuation is merged into the
    same turn instead of the first half being answered alone. The committed
    turn is sent as just the caller's latest utterance to the GuideAnts guide
-   (`guide_client.stream_reply`) — never a resent transcript. Every turn,
+   (`streaming.stream_reply`) — never a resent transcript. Every turn,
    including the call's first, streams the reply token-by-token; the
    `conversation` id this app holds for the rest of the call is captured
    directly off the stream's `response.created`/`response.completed` events
@@ -81,7 +84,7 @@ this code. This app is just the phone/WebSocket bridge.
    ```
    A short filler phrase (e.g. "Let me look that up for you.") is spoken
    first, before the real reply, whenever the caller's utterance looks like a
-   question or request (see `app/fillers.py`) *and* GuideAnts hasn't replied
+   question or request (see `app/calls/fillers.py`) *and* GuideAnts hasn't replied
    within `FILLER_DELAY_SECONDS` (default 1s) — this masks GuideAnts lookup
    latency without adding a filler to fast replies, and covers the gap before
    the first token arrives on any turn, including the first. (If replies seem
@@ -118,9 +121,9 @@ so one running app (`uvicorn app.main:app --port 8080`) is enough for both the
 phone call and live availability/booking, instead of running a second
 project. Like `get_caller_phone_number`, GuideAnts never calls these itself
 over HTTP: it hands each `function_call` back to this app mid-call, and
-`app/guide_client.py` answers it directly. This means there is no
+`app/guide/tools.py` answers it directly. This means there is no
 `/api/reservations/*` HTTP endpoint at all — the only route left in
-`app/reservations_api.py` is a manual connectivity check:
+`app/booking/api.py` is a manual connectivity check:
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -139,10 +142,10 @@ over HTTP: it hands each `function_call` back to this app mid-call, and
 
 None of these need an API key of their own — since GuideAnts never dials out
 for them, there's no shared secret to configure or leak, unlike the earlier
-Web API tool source this demo used to use. `app/guide_client.py`'s
-`_run_reservation_tool` wraps `app/booqable_client.py`'s
-`BooqableClient`/`app/reservations.py`'s find/check/book/reserve workflow
-(plus `app/payments.py` for `sendPaymentLink`) so the guide never has to
+Web API tool source this demo used to use. `app/guide/tools.py`'s
+`_run_reservation_tool` wraps `app/booking/booqable_client.py`'s
+`BooqableClient`/`app/booking/reservations.py`'s find/check/book/reserve workflow
+(plus `app/booking/payments.py` for `sendPaymentLink`) so the guide never has to
 speak Booqable's JSON:API format directly, and the LLM never sees
 `BOOQABLE_API_KEY` either — only this app's own process reads it.
 
@@ -191,4 +194,4 @@ too. (If your GuideAnts build predates the streamed `conversation` field, the
 first curl above will stream fine but omit that field from the JSON payloads
 — in that case, drop `"stream":true` from the first call only to get the id
 from the non-streaming response body instead, same as this app's
-`stream_missing_conversation` fallback in `app/guide_client.py`.)
+`stream_missing_conversation` fallback in `app/guide/streaming.py`.)

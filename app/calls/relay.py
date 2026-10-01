@@ -24,10 +24,10 @@ holding the reply task open until Twilio's agent-stopped speaker event
 (`events="speaker-events"`, see speaker_events.py) reports playback
 finished, falling back to a word-count estimate of the speaking time
 (speech_timing.py) until the first such event is recognized on the call.
-Every `Delta` this module receives from guide_client.stream_reply() is already gated: the guide
+Every `Delta` this module receives from streaming.stream_reply() is already gated: the guide
 is instructed to open its final answer with a fixed trigger phrase
 (config.FINAL_ANSWER_SENTINEL, see guide-demo/template/instructions.template.md's "FINAL
-ANSWER MARKER" paragraph and guide_client._SentinelGate), and nothing reaches this module until
+ANSWER MARKER" paragraph and sentinel.SentinelGate), and nothing reaches this module until
 that phrase has been seen and stripped -- so respond_to() can forward every delta to Twilio the
 instant it arrives with no local buffering of its own. This is why a reply can go quiet for a
 while (narration ahead of a tool call, or the model's own "thinking" -- see
@@ -39,7 +39,7 @@ same in-flight call, to mask that gated silence -- but only if Twilio doesn't st
 unplayed audio queued from what's already been sent this turn, so a filler can't stack on top of
 speech the guide just produced. This isn't limited to the very first wait: every fetch of the
 next event races the same timeout, so a reply that runs a client-side tool call (which can go
-quiet for several seconds of real tool latency -- see guide_client.ToolCallStarted) may speak
+quiet for several seconds of real tool latency -- see streaming.ToolCallStarted) may speak
 more than one filler phrase in sequence rather than leaving the caller in true silence. A tool
 call in flight also softens barge-in for that gap (config.TOOL_CALL_BARGE_IN_GRACE_SECONDS):
 non-stop-command speech is ignored instead of being treated as a new question that cancels the
@@ -55,15 +55,15 @@ mid-sentence without the first half being answered and the second half
 ignored. Stop/wait phrases are exempt: they still cut playback immediately.
 
 Conversation memory lives server-side in GuideAnts, keyed by a conversation
-id captured on the call's first turn (see guide_client.GuideSession) and
+id captured on the call's first turn (see session.GuideSession) and
 passed back as the `conversation` parameter on every later turn -- so only
 the caller's latest utterance is ever sent, never a resent transcript.
 `st.messages` below is therefore just a local log of what was actually
 said; nothing about GuideAnts continuation depends on its contents. It is
-also, as of app/call_recording.py, the source /api/conversations persists
+also, as of app/calls/call_recording.py, the source /api/conversations persists
 as a call's transcript once the call ends. When a barge-in cuts a reply
 short, the text the caller actually heard is folded into the next turn's
-input (guide_client.build_input) so the guide knows not to repeat itself
+input (session.build_input) so the guide knows not to repeat itself
 -- see ARCHITECTURE.md's
 "Interruption notes" section for how that works and its known rough edges.
 """
@@ -162,7 +162,7 @@ class CallState:
     # reply has finished sending yet this call.
     last_reply_sent_at: float = 0.0
     # Event-loop time a client-side tool call started this turn, or 0.0 if
-    # none is currently pending. guide_client streams every round's text
+    # none is currently pending. app/guide/streaming.py streams every round's text
     # live, including narration ahead of a tool call, so the guide can go
     # quiet mid-turn while the tool runs -- sounding like a finished reply.
     # The `prompt` handler uses this (bounded by
@@ -223,7 +223,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         # wait; otherwise speak one and keep waiting on the same in-flight
         # fetch. This isn't limited to the first event -- a reply that runs
         # a client-side tool call can go quiet for several seconds of real
-        # tool latency (see guide_client.ToolCallStarted), and each
+        # tool latency (see streaming.ToolCallStarted), and each
         # sufficiently slow wait (with nothing already queued to cover it)
         # gets its own filler, so the caller is never sitting in true
         # silence for long.

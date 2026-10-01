@@ -49,9 +49,9 @@ def _to_iso(value: datetime) -> str:
 def _parse_dt(value: str | None, param_name: str) -> datetime | None:
     """Parses a `from`/`to` query param, raising a 422 (not FastAPI's
     default unhandled-500) on a malformed value. Duplicated from
-    app/conversations_api.py rather than imported -- this codebase's
-    convention (see _to_iso in conversations_api.py/knowledge_api.py/
-    workflow_api.py) is each *_api.py module owns its own small request
+    app/console/conversations/api.py rather than imported -- this codebase's
+    convention (see _to_iso in app/console/conversations/api.py, app/console/knowledge/api.py,
+    app/console/workflows/api.py) is each feature's api.py module owns its own small request
     helpers rather than cross-importing another module's private ones."""
     if value is None:
         return None
@@ -86,7 +86,7 @@ class ActivityEventOut(BaseModel):
     # ActivityEvent extends TenantScoped (frontend/src/types/common.ts) --
     # organizationId is required, locationId is optional but included
     # explicitly (None), matching ConversationOut's own TenantScoped fields
-    # in app/conversations_api.py.
+    # in app/console/conversations/api.py.
     id: str
     organizationId: str
     locationId: str | None = None

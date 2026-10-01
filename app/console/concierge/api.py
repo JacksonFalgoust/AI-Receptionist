@@ -2,14 +2,14 @@
 .../publish, GET /api/concierge/publications, GET /api/concierge/bundle --
 the live backing for frontend/src/services/configurationService.ts.
 
-Unlike app/workflow_api.py, these records are NOT console-only: a
+Unlike app/console/workflows/api.py, these records are NOT console-only: a
 successful publish rewrites the live GuideAnts guide's INSTRUCTIONS and
 replaces its KNOWLEDGE FILES, and changes what the next caller hears. The
 publish owns the guide's whole vector store -- see
-app/guide_publish/guideants_admin.py for what that deletes and why.
+app/guide/publish/guideants_admin.py for what that deletes and why.
 
 Wire shape is camelCase; the models are snake_case. The translation happens
-here, the same split app/conversations_api.py uses.
+here, the same split app/console/conversations/api.py uses.
 """
 
 from __future__ import annotations
@@ -227,7 +227,7 @@ def download_bundle(
 
     Note it is NOT a substitute for Publish: importing this zip by hand in
     the GuideAnts UI hits the same destructive import bug that Publish
-    avoids (see app/guide_publish/guideants_admin.py), on any guide that has
+    avoids (see app/guide/publish/guideants_admin.py), on any guide that has
     indexed knowledge files."""
     try:
         zip_bytes, _hash, _instructions, _count = publisher.build_zip(db)

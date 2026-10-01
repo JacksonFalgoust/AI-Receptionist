@@ -5,7 +5,7 @@ streaming should cancel and restart it (a stop/wait command, or a new
 question -- see `should_interrupt`) versus be ignored (backchannel,
 statement, noise). Pure functions only, no I/O, no Twilio/GuideAnts
 knowledge -- mirrors the role fillers.py plays for the filler-phrase
-feature. Used by app.py's `prompt` handler.
+feature. Used by app/calls/relay.py's `prompt` handler.
 """
 
 import re

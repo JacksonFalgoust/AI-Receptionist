@@ -1,6 +1,6 @@
 """Pure helpers for the read-modify-write update of a GuideAnts guide.
 
-No I/O -- unit-tested directly, in the fillers.py / speech_timing.py
+No I/O -- unit-tested directly, in the app/calls/fillers.py / app/calls/speech_timing.py
 tradition. `guideants_admin.py` supplies the HTTP.
 
 Why this exists at all: GuideAnts has no instructions-only endpoint.

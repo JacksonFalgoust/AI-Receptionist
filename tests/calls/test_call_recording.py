@@ -1,6 +1,6 @@
-"""Tests app/call_recording.py in isolation -- app/main.py's own wiring
+"""Tests app/calls/call_recording.py in isolation -- app/calls/relay.py's own wiring
 (the /ws handler actually calling this) is covered separately in
-tests/test_call_recording_wiring.py."""
+tests/calls/test_call_recording_wiring.py."""
 
 import asyncio
 from datetime import datetime
@@ -32,7 +32,7 @@ def test_record_call_persists_transcript_and_classification(monkeypatch):
     session_local = _memory_session_factory()
     # record_call now goes through app/db.py's session_scope(), which reads
     # the module-level SessionLocal in app/db.py itself -- not one imported
-    # into app/call_recording.py -- so that's what needs patching here.
+    # into app/calls/call_recording.py -- so that's what needs patching here.
     monkeypatch.setattr(db_module, "SessionLocal", session_local)
 
     async def fake_classify(session):
@@ -70,7 +70,7 @@ def test_record_call_falls_back_to_defaults_when_classification_fails(monkeypatc
     session_local = _memory_session_factory()
     # record_call now goes through app/db.py's session_scope(), which reads
     # the module-level SessionLocal in app/db.py itself -- not one imported
-    # into app/call_recording.py -- so that's what needs patching here.
+    # into app/calls/call_recording.py -- so that's what needs patching here.
     monkeypatch.setattr(db_module, "SessionLocal", session_local)
 
     async def failing_classify(session):
@@ -98,7 +98,7 @@ def test_record_call_includes_tool_actions(monkeypatch):
     session_local = _memory_session_factory()
     # record_call now goes through app/db.py's session_scope(), which reads
     # the module-level SessionLocal in app/db.py itself -- not one imported
-    # into app/call_recording.py -- so that's what needs patching here.
+    # into app/calls/call_recording.py -- so that's what needs patching here.
     monkeypatch.setattr(db_module, "SessionLocal", session_local)
 
     async def fake_classify(session):
@@ -130,7 +130,7 @@ def test_record_call_customer_name_from_known_customer(monkeypatch):
     session_local = _memory_session_factory()
     # record_call now goes through app/db.py's session_scope(), which reads
     # the module-level SessionLocal in app/db.py itself -- not one imported
-    # into app/call_recording.py -- so that's what needs patching here.
+    # into app/calls/call_recording.py -- so that's what needs patching here.
     monkeypatch.setattr(db_module, "SessionLocal", session_local)
 
     async def fake_classify(session):

@@ -1,4 +1,4 @@
-"""app/dashboard_store.py -- KPI counts, recent-activity/escalation
+"""app/console/dashboard/store.py -- KPI counts, recent-activity/escalation
 derivation, range resolution, and org-scoping for the Overview page
 (E6 dashboard slice). See docs/superpowers/specs/
 2026-09-22-e6-dashboard-design.md."""

@@ -1,7 +1,7 @@
 """Reproduces the bug where a caller's short affirmative ("yeah", "yep",
 etc.) answering a yes/no question the guide just asked and is waiting on
 gets swallowed by fillers.is_backchannel() instead of being treated as the
-caller's turn -- see app/main.py's `prompt` handler and app/fillers.py's
+caller's turn -- see app/calls/relay.py's `prompt` handler and app/calls/fillers.py's
 module docstring for the (deliberate, but overly broad) "late backchannel"
 handling this collides with.
 """

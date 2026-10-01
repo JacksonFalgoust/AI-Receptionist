@@ -1,5 +1,5 @@
-"""Tests for /ws token verification (app/twilio_auth.verify_ws_token wired
-into conversation_relay_ws's `setup` message branch, app/main.py).
+"""Tests for /ws token verification (app/calls/twilio_auth.verify_ws_token wired
+into conversation_relay_ws's `setup` message branch, app/calls/relay.py).
 
 TestClient.websocket_connect isn't used elsewhere in this repo yet. The
 server never replies to a `setup` message on its own, so "the connection
@@ -126,7 +126,7 @@ def test_ws_setup_with_no_enforcement_and_no_token_stays_open(monkeypatch):
 def test_ws_setup_missing_call_sid_requires_hmac_for_empty_string(monkeypatch):
     # Edge case flagged during Task 2 review: a /twiml request that passes
     # signature validation but has no CallSid in its form body mints a
-    # token bound to call_sid="" (see app/main.py's
+    # token bound to call_sid="" (see app/calls/twiml.py's
     # `call_sid = (await request.form()).get("CallSid", "")`). A `setup`
     # frame with a missing/empty callSid must NOT get a free pass just
     # because both sides happen to be empty strings -- the token still has
@@ -144,7 +144,7 @@ def test_ws_setup_missing_call_sid_requires_hmac_for_empty_string(monkeypatch):
 def test_ws_setup_missing_call_sid_with_correctly_minted_empty_token_stays_open(monkeypatch):
     monkeypatch.setattr(config, "TWILIO_AUTH_TOKEN", "test-ws-secret")
 
-    token = twilio_auth.mint_ws_token("")  # matches app/main.py's CallSid-less /twiml case
+    token = twilio_auth.mint_ws_token("")  # matches app/calls/twiml.py's CallSid-less /twiml case
 
     with client.websocket_connect(f"/ws?token={token}") as websocket:
         websocket.send_json({"type": "setup"})  # no callSid at all -> defaults to ""
@@ -198,13 +198,13 @@ def test_ws_prompt_after_valid_setup_gets_a_real_reply(monkeypatch):
     test_ws_setup_with_matching_token_stays_open, which only proves the
     server didn't close the socket within CLOSE_WAIT_SECONDS -- silence
     that a hung or silently-erroring server would also produce. This test
-    stubs guide_client.stream_reply (imported into app.main) and asserts an
+    stubs streaming.stream_reply (imported into app.calls.relay) and asserts an
     actual `text` reply frame comes back after a valid setup + prompt, a
     real positive signal instead of an absence-of-negative one.
     """
     monkeypatch.setattr(config, "TWILIO_AUTH_TOKEN", "test-ws-secret")
     # Turn buffering normally waits TURN_PAUSE_SECONDS of silence before
-    # committing a turn (see schedule_turn/_arm_commit in app/main.py); drop
+    # committing a turn (see schedule_turn/_arm_commit in app/calls/relay.py); drop
     # it to keep the test fast without changing the behavior under test.
     monkeypatch.setattr(config, "TURN_PAUSE_SECONDS", 0.01)
 

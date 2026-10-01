@@ -83,7 +83,7 @@ def _write_env(source_env: Path, dest_dir: Path, pub_id_override: str | None) ->
     if not source_env.exists():
         print(
             f"WARNING: {source_env} does not exist; {dest_dir} will have no .env -- "
-            "guide_client._get_client() will raise on GUIDEANTS_PUB_ID",
+            "the guide client's get_client() will raise on GUIDEANTS_PUB_ID",
             file=sys.stderr,
         )
         return

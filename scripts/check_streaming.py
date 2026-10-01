@@ -6,7 +6,7 @@ so both rounds of a tool-call turn are visible -- useful for confirming the
 guide obeys instructions.md's "FINAL ANSWER MARKER" paragraph (begin the
 real answer with the trigger phrase, only once it has nothing left to
 check), since any narration or tool-call preamble ahead of the phrase would
-show up as text this script prints but that guide_client.py never forwards
+show up as text this script prints but that app/guide/ never forwards
 to Twilio.
 
 Run from this repo root:
@@ -14,21 +14,21 @@ python -m scripts.check_streaming "some prompt that triggers a tool call"
 
 It also works run directly (python scripts/check_streaming.py ...) or from an
 IDE's "Run" button -- the sys.path fixup below adds the repo root so `from
-app import guide_client` resolves either way.
+app.guide import streaming` resolves either way.
 
 Not part of the app -- safe to delete once you're done comparing models.
 
-This drives guide_client.stream_reply -- the exact function app/main.py's
+This drives streaming.stream_reply -- the exact function app/calls/relay.py's
 respond_to() calls to get events to speak to the caller -- so the timings
 below are what actually reaches Twilio, not GuideAnts' raw SSE timing.
 Since the trigger-phrase change, _stream_reply_with_tools (which
-stream_reply wraps) withholds a round's text behind a `_SentinelGate` until
+stream_reply wraps) withholds a round's text behind a `SentinelGate` until
 config.FINAL_ANSWER_SENTINEL ("declare victory" by default) has been seen in
 that round's stream, then forwards every later delta live with no further
 delay -- unlike the pre-trigger-phrase branches, nothing is ever held back
 waiting to learn whether a round is complete. That means a delta can arrive
 mid-sentence, right after the phrase, rather than only ever at a round
-boundary; a `TOOL CALL` line (see guide_client.ToolCallStarted) marks when a
+boundary; a `TOOL CALL` line (see streaming.ToolCallStarted) marks when a
 client-side tool call is about to run. Delta lines *before* a `TOOL CALL`
 line mean that round's phrase appeared but the round still went on to call a
 tool -- the guide said the marker too early; text already printed there was
@@ -54,11 +54,11 @@ _INCREMENTAL_SPAN_THRESHOLD_SECONDS = 0.05
 
 
 async def run_turn(label: str, user_text: str, session: GuideSession) -> None:
-    """Drive one turn through the real guide_client.stream_reply path (the
-    same function app/main.py calls) and report per-event timing, so it's
+    """Drive one turn through the real streaming.stream_reply path (the
+    same function app/calls/relay.py calls) and report per-event timing, so it's
     visible whether *this* turn reached Twilio incrementally or as one
     burst -- and, separately, whether/when a client-side tool call happened
-    (see guide_client.ToolCallStarted).
+    (see streaming.ToolCallStarted).
 
     `request_sent` is stamped immediately before the first await on the
     stream_reply generator -- calling stream_reply() itself just builds the
@@ -121,7 +121,7 @@ async def main():
         print(
             "RESULT: streamed turn 1 carried no conversation id -- old "
             "GuideAnts build? (see stream_missing_conversation fallback in "
-            "guide_client.py)"
+            "app/guide/streaming.py)"
         )
         sys.exit(1)
 

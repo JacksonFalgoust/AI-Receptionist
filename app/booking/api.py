@@ -1,7 +1,7 @@
 """Booqable connectivity check for this app -- the actual reservation
 operations (catalog, availability, customers, create/cancel/pay) are no
 longer an HTTP surface at all. They're executed in-process by
-app/guide_client.py as GuideAnts Client Actions tool calls (see
+app/guide/tools.py as GuideAnts Client Actions tool calls (see
 guide-demo/reservations-client-tool.json and docs/ARCHITECTURE.md's
 "Client-side tool calls" section) instead of being called by GuideAnts over
 HTTP, so there's no `/api/reservations/*` endpoint left for anyone but this

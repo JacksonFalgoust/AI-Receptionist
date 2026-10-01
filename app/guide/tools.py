@@ -59,8 +59,8 @@ _TOOL_ACTION_LABELS: dict[str, tuple[str, str]] = {
 
 async def _run_reservation_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     """Execute one Booqable-backed reservation tool -- the same business
-    logic the old /api/reservations/* routes wrapped (app/reservations.py,
-    app/payments.py), called directly instead of over HTTP. Required
+    logic the old /api/reservations/* routes wrapped (app/booking/reservations.py,
+    app/booking/payments.py), called directly instead of over HTTP. Required
     arguments missing from `args` raise KeyError, caught by the caller."""
     client = BooqableClient()
     if name == "listCatalog":

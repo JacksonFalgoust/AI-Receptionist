@@ -102,7 +102,7 @@ its HTTP implementation already calls (paths below are relative to
 `API_BASE_URL`, `/api` by default), and scope every endpoint to the caller's
 organization.
 
-- [x] **auth** (`authService`): `POST /auth/login`, `POST /auth/logout`, `POST /auth/password-reset` (this last one is a no-op stub in `app/auth_api.py`; there is no real reset flow yet)
+- [x] **auth** (`authService`): `POST /auth/login`, `POST /auth/logout`, `POST /auth/password-reset` (this last one is a no-op stub in `app/console/auth/api.py`; there is no real reset flow yet)
 - [x] **conversations** (`conversationService`): `GET /conversations`, `GET /conversations/{id}`, `GET /conversations/filter-options`
 - [ ] **organizations** (`organizationService`): `GET /organizations`, `GET /organizations/current`
 - [ ] **users** (`userService`): `GET /users`, `POST /users/invite`, `PATCH /users/{id}/role`, `PATCH /users/{id}/status`, `DELETE /users/{id}`, `POST /users/{id}/resend-invitation`. The two `userGuards.ts` lockout rules must be enforced here on the server.

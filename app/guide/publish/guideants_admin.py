@@ -2,7 +2,7 @@
 
 Two credentials exist and they are easy to confuse:
   - config.GUIDEANTS_API_KEY  -> the PUBLISHED guide's key, used by
-    app/guide_client.py on calls.
+    app/guide/connection.py on calls.
   - the admin email/password here -> a GuideAnts user with the Admin role.
     /api/guides is RequireAuthorization("RequireAdmin").
 

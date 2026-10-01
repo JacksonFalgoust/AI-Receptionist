@@ -1,11 +1,11 @@
-"""Covers the trigger-phrase change: guide_client now withholds every
-round's text behind a `_SentinelGate` until config.FINAL_ANSWER_SENTINEL
+"""Covers the trigger-phrase change: the guide now withholds every
+round's text behind a `SentinelGate` until config.FINAL_ANSWER_SENTINEL
 ("declare victory" by default) has been seen in the stream, instead of
 buffering a whole round (main) or a fixed character threshold
-(feature/live-token-streaming). See app/guide_client.py's
+(feature/live-token-streaming). See app/guide/streaming.py's
 _stream_reply_with_tools docstring for the full rationale.
 
-Uses the same FakeStream/_fake_client harness as tests/test_guide_client.py,
+Uses the same FakeStream/_fake_client harness as tests/guide/test_streaming.py,
 duplicated locally rather than imported so this file's `monkeypatch`ing of
 the module-level compiled sentinel patterns can't be accidentally undone by
 that file's autouse fixture (which disables gating for its own tests).
@@ -49,7 +49,7 @@ def _fake_client(create) -> _FakeClient:
 
 
 class FakeStream:
-    """Same as tests/test_guide_client.py's FakeStream, but the gate can be
+    """Same as tests/guide/test_streaming.py's FakeStream, but the gate can be
     released per-event (an asyncio.Event that's `.set()` and `.clear()`ed
     between events by the test) rather than only all-or-nothing, so a test
     can prove text was forwarded mid-round rather than at round end."""
@@ -161,7 +161,7 @@ def test_text_before_phrase_is_dropped_remainder_of_matching_delta_is_emitted(mo
 
 def test_no_hold_back_text_forwarded_mid_round_not_flushed_at_round_end(monkeypatch):
     # Events are released one at a time by the test, not all-or-nothing --
-    # if guide_client buffered a whole round (main's approach) or a fixed
+    # if app/guide/streaming.py buffered a whole round (main's approach) or a fixed
     # character threshold (feature/live-token-streaming's), the post-phrase
     # Delta could only ever arrive after every event in the round had been
     # released. Here it must arrive after only the matching event.

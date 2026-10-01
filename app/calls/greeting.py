@@ -48,7 +48,7 @@ async def greeting_for(from_number: str) -> str:
     sits directly in the call-answering path (Twilio expects a prompt TwiML
     response), so a slow/unreachable Booqable or an unset BOOQABLE_API_KEY
     (which makes BooqableClient() itself raise immediately, see
-    booqable_client.py) must never delay or break answering the call."""
+    app/booking/booqable_client.py) must never delay or break answering the call."""
     if not from_number:
         return _published_greeting()
     try:

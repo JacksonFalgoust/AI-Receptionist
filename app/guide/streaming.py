@@ -51,7 +51,7 @@ class ToolCallStarted:
     """A round ended in one or more client-side tool calls, about to be run.
     Nothing will be spoken until a later round's text clears the sentinel
     gate, which can be several seconds away (real Booqable HTTP time) --
-    app.py uses this to soften barge-in for that gap so a caller talking
+    app/calls/relay.py uses this to soften barge-in for that gap so a caller talking
     into the silence can't cancel the answer that's still coming."""
 
     names: tuple[str, ...]
@@ -124,8 +124,8 @@ async def _start_conversation(
             matched, spoken = True, text
         else:
             m = sentinel.SENTINEL_STRICT.search(text)
-            # _LEAD_PUNCT_RE strips the marker's own trailing "." / ":" /
-            # extra spaces from the remainder -- see _SentinelGate's
+            # LEAD_PUNCT_RE strips the marker's own trailing "." / ":" /
+            # extra spaces from the remainder -- see SentinelGate's
             # docstring for why the phrase pattern itself no longer absorbs
             # this (it only matters here for a single already-complete
             # `text` blob, but the same cleanup is needed for the same
@@ -243,7 +243,7 @@ async def _stream_reply_with_tools(
 ) -> AsyncIterator[ReplyEvent]:
     """Drive one caller turn to completion, running any client-side tool
     calls (declared on the guide in GuideAnts -- see
-    guide-demo/caller-phone-client-tool.json, and _execute_tool for how this
+    guide-demo/caller-phone-client-tool.json, and execute_tool for how this
     app answers them) in between. Each iteration is its own `_stream_turn`
     call, individually wrapped in `aclosing` so a `.aclose()` on this
     generator (barge-in) cascades down to whichever streamed request is
@@ -251,7 +251,7 @@ async def _stream_reply_with_tools(
     Bounded by _MAX_TOOL_ITERATIONS so a guide that never stops calling tools
     can't hang a turn forever.
 
-    A round's deltas pass through a `_SentinelGate`: withheld until
+    A round's deltas pass through a `SentinelGate`: withheld until
     `config.FINAL_ANSWER_SENTINEL` (the guide is instructed -- see
     guide-demo/template/instructions.template.md's "FINAL ANSWER MARKER"
     paragraph -- to speak it once, at the very start of its actual final

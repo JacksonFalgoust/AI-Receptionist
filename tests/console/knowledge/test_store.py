@@ -1,4 +1,4 @@
-"""app/knowledge_store.py -- CRUD, filters, search, paging, and the
+"""app/console/knowledge/store.py -- CRUD, filters, search, paging, and the
 processing -> needs_review status rule (E6 slice 2)."""
 
 from datetime import datetime
@@ -11,7 +11,7 @@ from app.console.knowledge import store as knowledge_store
 from app.db import Base
 
 # frontend/src/types/knowledge.ts's KnowledgeType, mirrored in
-# app/knowledge_api.py -- the seed may only use values the console accepts.
+# app/console/knowledge/api.py -- the seed may only use values the console accepts.
 _KNOWLEDGE_TYPES = {
     "faq", "policy", "procedure", "product", "service",
     "pricing", "location", "instruction", "document", "url",

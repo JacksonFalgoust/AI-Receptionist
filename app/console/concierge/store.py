@@ -1,6 +1,6 @@
 """SQLAlchemy-backed access to the single console configuration row.
-Called by app/concierge_api.py and app/guide_publish/publisher.py. Same
-conventions as app/workflow_store.py: every function takes a Session and
+Called by app/console/concierge/api.py and app/guide/publish/publisher.py. Same
+conventions as app/console/workflows/store.py: every function takes a Session and
 none commit, so the caller owns the transaction boundary.
 
 Unlike the other console stores this one seeds itself. app/db.py's

@@ -158,7 +158,7 @@ def test_configuration_only_change_publishes_without_a_push(db, push_ok):
     # (b) the draft flag clears
     assert configuration_store.get_configuration(db).has_unpublished_changes is False
 
-    # (c) the greeting app/main.py reads is the new one
+    # (c) the greeting app/calls/greeting.py reads is the new one
     latest = publisher.latest_succeeded(db)
     assert latest.id == second.id
     assert latest.published_config["identity"]["greeting"] == "Peachtree Pedals, howdy!"

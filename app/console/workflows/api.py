@@ -141,7 +141,7 @@ def update_workflow(
     _auth: models.AuthSession = Depends(auth.require_auth),
 ) -> WorkflowOut:
     workflow = _require_workflow(db, workflow_id)
-    # Unlike knowledge_api.py's effectiveDate/effective_date, every field
+    # Unlike app/console/knowledge/api.py's effectiveDate/effective_date, every field
     # here (name, description, steps) has the same spelling as the model's
     # attribute -- model_dump() already yields exactly the dict save_draft
     # expects, steps included (its camelCase keys are stored verbatim in

@@ -17,7 +17,7 @@ instructions, and `fileIdsToKeep` is full-state -- an omitted file is
 deleted and its bytes are not retrievable. So the file-plan tests here are
 the ones guarding against silently wiping a knowledge base.
 
-Fakes are hand-rolled, matching tests/test_postmark_client.py -- this repo
+Fakes are hand-rolled, matching tests/booking/test_postmark_client.py -- this repo
 adds no HTTP-mocking dependency. Nothing here reaches a real GuideAnts.
 """
 

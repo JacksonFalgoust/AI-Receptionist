@@ -1,6 +1,6 @@
 """BusinessHours[] -> a sentence a text-to-speech engine reads correctly.
 
-Pure and I/O-free, in the same tradition as app/speech_timing.py: the
+Pure and I/O-free, in the same tradition as app/calls/speech_timing.py: the
 call-flow modules stay testable because the hard formatting decisions live
 in functions that take data and return strings.
 

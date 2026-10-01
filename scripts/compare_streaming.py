@@ -1,5 +1,5 @@
-"""Measures one branch's guide_client.stream_reply behavior against a live
-GuideAnts guide -- the same function app/main.py's respond_to() calls, so
+"""Measures one branch's stream_reply behavior against a live
+GuideAnts guide -- the same function app/calls/relay.py's respond_to() calls, so
 the numbers reported are what would actually reach Twilio on that branch.
 
 Meant to be pointed at a git worktree checked out to a specific branch (see

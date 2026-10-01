@@ -1,11 +1,11 @@
 """Estimates how long Twilio's TTS will take to speak a given text.
 
 GuideAnts typically returns the whole reply well before Twilio finishes
-speaking it aloud (with some models, as a single burst -- see guide_client.py
-and ARCHITECTURE.md), so app.py can't rely on "we're still receiving tokens"
+speaking it aloud (with some models, as a single burst -- see app/guide/streaming.py
+and ARCHITECTURE.md), so app/calls/relay.py can't rely on "we're still receiving tokens"
 to know a reply is still being spoken. The primary end-of-playback signal is
 Twilio's agent-stopped speaker event (`events="speaker-events"` in the
-TwiML, see speaker_events.py); this estimate is what app.py holds its
+TwiML, see speaker_events.py); this estimate is what app/calls/relay.py holds its
 in-flight-reply flag open on until the first such event is recognized on a
 call, and the basis of the ceiling on how long it will wait for one, so a
 lost event can't hold a turn open forever. estimate_spoken_prefix() inverts

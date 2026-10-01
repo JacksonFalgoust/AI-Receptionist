@@ -1,8 +1,8 @@
 """SQLAlchemy-backed derivation for the Overview page's KPIs, recent
 activity feed, and recent escalations feed (E6 dashboard slice). No new
 table -- every value is computed from Conversation/ConversationAction rows
-already written by app/conversation_store.py. Called only by
-app/dashboard_api.py. See docs/superpowers/specs/
+already written by app/console/conversations/store.py. Called only by
+app/console/dashboard/api.py. See docs/superpowers/specs/
 2026-09-22-e6-dashboard-design.md.
 """
 
@@ -31,7 +31,7 @@ def _today_start_utc() -> datetime:
     America/New_York), converted to a naive UTC datetime for comparison
     against started_at/at: every stored timestamp in this table is a naive
     datetime representing a UTC instant (see _to_iso's literal "Z" in
-    app/dashboard_api.py). Mirrored on the frontend by
+    app/console/dashboard/api.py). Mirrored on the frontend by
     frontend/src/lib/dateRange.ts's presetBounds -- keep both in sync if
     the business timezone ever becomes configurable per-organization
     instead of this shared hardcoded default."""
@@ -135,7 +135,7 @@ def list_recent_escalations(
     db: Session, from_: datetime | None, to: datetime | None, limit: int
 ) -> list[models.Conversation]:
     """One row per escalated conversation, newest started_at first. Escalation
-    status/assignedTo are synthesized at the API layer (app/dashboard_api.py)
+    status/assignedTo are synthesized at the API layer (app/console/dashboard/api.py)
     -- there is no persisted escalation lifecycle in this slice."""
     query = _conversations_in_range(from_, to).where(models.Conversation.escalated.is_(True))
     query = query.order_by(models.Conversation.started_at.desc()).limit(limit)

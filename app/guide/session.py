@@ -19,7 +19,7 @@ class GuideSession:
     # a non-streaming call to obtain the id.
     stream_missing_conversation: bool = False
     # The caller's phone number, captured from Twilio's `setup` `from` field
-    # (see app/main.py). Served to the guide via the client-side
+    # (see app/calls/relay.py). Served to the guide via the client-side
     # get_caller_phone_number tool -- not sent as prompt text, since it's
     # only relevant if/when the guide actually asks for it.
     caller_phone: str | None = None
@@ -34,8 +34,8 @@ class GuideSession:
     known_customer: dict | None = None
     # Business-language log of every reservation tool this call actually
     # ran, in call order -- persisted as ConversationAction rows by
-    # app/call_recording.py at call end. Not sent to GuideAnts; purely an
-    # observation of what _execute_tool did. get_caller_phone_number is
+    # app/calls/call_recording.py at call end. Not sent to GuideAnts; purely an
+    # observation of what execute_tool did. get_caller_phone_number is
     # deliberately not logged here -- it's internal bookkeeping, not a
     # business action an admin needs to see in a call's action timeline.
     actions: list[dict] = field(default_factory=list)

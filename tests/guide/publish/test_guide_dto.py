@@ -1,6 +1,6 @@
 """The DTO mapping and the safety guards around the read-modify-write PUT.
 
-tests/fixtures/guide_detail.json is a real GET /api/guides/{id} body from a
+tests/guide/publish/fixtures/guide_detail.json is a real GET /api/guides/{id} body from a
 GuideAnts scratch guide built as a faithful replica of the live one (two
 custom tools carrying nine operations, a context option, one indexed
 knowledge file), with the long strings trimmed. Everything here is pure --

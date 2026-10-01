@@ -1,6 +1,6 @@
 """Persists a finished call as a Conversation record: transcript, tool
 actions, and a GuideAnts wrap-up classification. Called once, from the
-/ws handler's disconnect teardown in app/main.py -- see that module's
+/ws handler's disconnect teardown in app/calls/relay.py -- see that module's
 docstring for why the call site wraps this in its own try/except (a
 persistence failure must never crash call teardown; the caller has already
 hung up).
@@ -34,7 +34,7 @@ _ROLE_TO_SPEAKER = {"assistant": "concierge", "user": "customer"}
 
 
 def _spread_timestamps(started_at: datetime, ended_at: datetime, count: int) -> list[datetime]:
-    """st.messages carries no timing of its own (see app/main.py's
+    """st.messages carries no timing of its own (see app/calls/relay.py's
     CallState.messages) -- messages are spread evenly across the call's
     actual duration instead. List order (already chronological) stays
     exact; the individual instants are an approximation."""

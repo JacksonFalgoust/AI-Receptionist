@@ -230,7 +230,7 @@ async def publish(db: Session, published_by: str) -> models.GuidePublication:
         #
         # But something local did change -- the configuration snapshot --
         # and the snapshot is how the greeting reaches callers
-        # (app/main.py's _published_greeting reads the latest succeeded
+        # (app/calls/greeting.py's _published_greeting reads the latest succeeded
         # row). Most configuration fields are not template slots:
         # identity.greeting/closing, terminology.*, and the profile's
         # phone/website/timezone/locations appear nowhere in the template.
@@ -281,7 +281,7 @@ async def publish(db: Session, published_by: str) -> models.GuidePublication:
 
     publication.status = "succeeded"
     publication.warnings = _warnings_for(result.get("warnings"), result.get("files"))
-    # Written only on success: this snapshot is what app/main.py's greeting
+    # Written only on success: this snapshot is what app/calls/greeting.py's greeting
     # reads, so a failed publish must not move what callers hear.
     publication.published_config = snapshot
     configuration_store.mark_published(db, configuration, datetime.utcnow())

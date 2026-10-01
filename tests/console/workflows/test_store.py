@@ -1,4 +1,4 @@
-"""app/workflow_store.py -- CRUD, publish (with the empty-steps guard),
+"""app/console/workflows/store.py -- CRUD, publish (with the empty-steps guard),
 and org-scoping for console workflows (E6 slice 3)."""
 
 import pytest

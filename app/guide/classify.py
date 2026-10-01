@@ -21,7 +21,7 @@ _CLASSIFICATION_PROMPT = (
 
 async def classify_conversation(session: GuideSession) -> dict[str, Any]:
     """Ask the guide to classify the just-ended call as structured JSON, for
-    app/call_recording.py to persist. Raises ValueError on any failure
+    app/calls/call_recording.py to persist. Raises ValueError on any failure
     (missing conversation, network/API error, non-JSON or invalid reply) --
     callers must supply their own safe defaults; see the design spec's
     section 3."""

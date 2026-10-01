@@ -1,7 +1,7 @@
 """Console rows -> slot values and knowledge files. Pure: no network, no
 database session, no filesystem writes -- it takes ORM rows and returns
 strings and bytes, which is what makes it directly unit-testable in the
-same way app/fillers.py is.
+same way app/calls/fillers.py is.
 """
 
 from __future__ import annotations

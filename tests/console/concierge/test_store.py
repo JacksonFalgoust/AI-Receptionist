@@ -1,5 +1,5 @@
 """CRUD for the single console configuration row. Same conventions as
-app/workflow_store.py: a Session in, no commit -- the caller owns the
+app/console/workflows/store.py: a Session in, no commit -- the caller owns the
 transaction boundary."""
 
 import pytest
