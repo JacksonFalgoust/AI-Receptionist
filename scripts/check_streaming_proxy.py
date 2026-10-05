@@ -2,16 +2,16 @@
 """Local logging reverse-proxy for this app -> GuideAnts (debug tool).
 
 check_streaming.py measures request/first-token/last-token timing by
-driving guide_client.stream_reply() directly with canned prompts, offline.
+driving stream_reply() directly with canned prompts, offline.
 This script gets the same TIMING numbers for REAL traffic during a live
 Twilio call, without touching app code or restarting anything mid-call:
 point this app's GUIDEANTS_BASE_URL at the proxy, and every request
-app/guide_client.py sends to GuideAnts is forwarded through here to the
+app/guide/streaming.py sends to GuideAnts is forwarded through here to the
 real GuideAnts host, with timing logged as the response streams back.
 
 Unlike check_streaming.py -- which only ever sees the final, already-
 buffered round, because _stream_reply_with_tools discards narration ahead
-of a tool call before anything reaches Twilio (see app/guide_client.py) --
+of a tool call before anything reaches Twilio (see app/guide/streaming.py) --
 this proxy sits below that buffering, at the network level: it logs ONE
 request/response cycle per responses.create() call GuideAnts receives, so
 a turn that needs a tool call shows up as two or more separate entries
@@ -147,7 +147,7 @@ def _sse_event_type(raw_event: bytes) -> str | None:
 
 def _reassemble_responses_sse(raw: bytes) -> dict:
     """Rebuild the assistant turn from a GuideAnts /v1/responses SSE stream,
-    matching the event types app/guide_client.py's _stream_turn understands,
+    matching the event types app/guide/streaming.py's _stream_turn understands,
     for the post-completion summary line."""
     content = []
     function_calls: list[str] = []

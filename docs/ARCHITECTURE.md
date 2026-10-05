@@ -15,29 +15,29 @@ Twilio Conversation Relay's WebSocket protocol and GuideAnts' OpenAI-compatible
 Responses API. As of E6 slice 1, though, the app also persists conversation
 history to a local SQLite database (`app/db.py`/`app/models.py`): a finished
 call's transcript, tool actions, and wrap-up classification are written as a
-`Conversation` record by `app/call_recording.py` at `/ws` disconnect —
+`Conversation` record by `app/calls/call_recording.py` at `/ws` disconnect —
 skipped entirely if the session had no dialogue and triggered no tool
 action, so a bare connect/disconnect (a probe, a hang-up before speaking)
 never becomes a row.
 
 As of E6 slice 2 the same database also holds the admin console's knowledge
-items (`app/knowledge_store.py`, served by `app/knowledge_api.py`). Those
+items (`app/console/knowledge/store.py`, served by `app/console/knowledge/api.py`). Those
 **are** pushed to the live guide by Publish, which replaces the guide's
 vector-store files with the rendered knowledge items — and owns that store
 outright, so a file the console does not publish is deleted from the guide
 (see "Publishing console configuration to the guide" below, and "Known
 gaps").
 
-`app/fillers.py`, `app/barge_in.py`, and `app/speaker_events.py` are the exceptions to
+`app/calls/fillers.py`, `app/calls/barge_in.py`, and `app/calls/speaker_events.py` are the exceptions to
 "no business logic": pure, I/O-free heuristics that decide whether a
-caller's utterance warrants a spoken filler phrase (`app/fillers.py`), should
-cancel and restart an in-flight reply (`app/barge_in.py`), or whether an
+caller's utterance warrants a spoken filler phrase (`app/calls/fillers.py`), should
+cancel and restart an in-flight reply (`app/calls/barge_in.py`), or whether an
 unrecognized WS message is one of Twilio's speaker events
-(`app/speaker_events.py`).
+(`app/calls/speaker_events.py`).
 
 ```
                     POST /twiml (TwiML)            WS /ws (JSON frames)
-Caller ⇄ Twilio ⇄ ───────────────────── ⇄ app/main.py ⇄ ───────────────────── ⇄ Twilio Conversation Relay
+Caller ⇄ Twilio ⇄ ───────────────────── ⇄ app/calls/ ⇄  ───────────────────── ⇄ Twilio Conversation Relay
                                             │
                                             │ HTTPS, OpenAI SDK
                                             ▼
@@ -52,30 +52,38 @@ Caller ⇄ Twilio ⇄ ───────────────────�
 | File | Role |
 |---|---|
 | [app/config.py](../app/config.py) | Reads all settings from environment / `.env`, no other file touches `os.environ`. |
-| [app/guide_client.py](../app/guide_client.py) | Thin wrapper around the `openai` SDK pointed at GuideAnts' Responses API; exposes `stream_reply` (one turn) and `build_input` (interruption-note folding), plus the `GuideSession` continuation handle. |
-| [app/fillers.py](../app/fillers.py) | Pure functions used by `app/main.py` to decide the filler-phrase behavior: `looks_like_question` classifies a caller utterance as question/request-like (warrants a filler) or not, `pick` returns a random filler phrase from a list, and `is_backchannel` classifies an utterance as pure acknowledgment noise (e.g. "ok", "yeah") that should never get a guide reply. No I/O, no Twilio/GuideAnts knowledge. |
-| [app/barge_in.py](../app/barge_in.py) | Pure functions used by `app/main.py` to decide selective barge-in: `is_stop_command` matches a caller utterance against a built-in stop/wait phrase list, and `should_interrupt` (= `is_stop_command` or `fillers.looks_like_question`) decides whether an utterance heard mid-reply should cancel the in-flight reply at all. No I/O, no Twilio/GuideAnts knowledge — unit-tested directly in `tests/test_barge_in.py`. |
-| [app/speech_timing.py](../app/speech_timing.py) | One pure function, `estimate_seconds`, used by `app/main.py` to estimate how long Twilio's TTS will take to speak a given text from its word count. Fallback pacing until the first agent-stopped speaker event is recognized on a call, and the basis of the ceiling on waiting for one. No I/O. |
-| [app/speaker_events.py](../app/speaker_events.py) | One pure function, `classify`, used by `app/main.py` to recognize Twilio's speaker-event WS messages (`agentSpeaking`/`clientSpeaking` start/stop, subscribed via `events="speaker-events"` in the TwiML). Matches loosely since Twilio doesn't document the exact JSON shape — unit-tested in `tests/test_speaker_events.py`. No I/O. |
-| [app/main.py](../app/main.py) | FastAPI app with the two endpoints Twilio talks to: `POST /twiml` and `WS /ws`. All call-handling logic lives here; also mounts `reservations_api.router`. |
-| [app/reservations_api.py](../app/reservations_api.py) | FastAPI router: just `/api/booqable/ping`, a manual pre-demo connectivity check. Independent of the Twilio WS path. |
-| [app/reservations.py](../app/reservations.py) | Booqable business logic (catalog lookup, availability check, create/cancel order) called directly by `app/guide_client.py`'s reservation tool handlers. See "Reservation tools" below. |
-| [app/booqable_client.py](../app/booqable_client.py) | Thin async `httpx` wrapper around Booqable's JSON:API v4 (Bearer-token auth). |
-| [app/knowledge_api.py](../app/knowledge_api.py) | FastAPI router for the admin console's Knowledge pages: `GET/POST /api/knowledge`, `GET/PATCH/DELETE /api/knowledge/{id}`, bearer-auth only. Edits here reach the live guide only via Publish (see "Publishing console configuration to the guide" below) — indexing is asynchronous after a successful push, so a changed item is not searchable the instant Publish returns. |
-| [app/knowledge_store.py](../app/knowledge_store.py) | SQLAlchemy CRUD for `KnowledgeItem`: filters, search, paging, the rule that a requested `processing` status is saved as `needs_review` (no ingestion pipeline exists), and `seed_default_items()`, which fills an empty table from `config.DEFAULT_KNOWLEDGE_ITEMS` so the console and the bundle download describe the shop's real policy set rather than an empty one. |
-| [app/workflow_api.py](../app/workflow_api.py) | FastAPI router for the admin console's Workflows pages: `GET/POST /api/workflows`, `GET/PATCH/DELETE /api/workflows/{id}`, `POST /api/workflows/{id}/publish`, bearer-auth only. Console-only — publishing has no effect on live calls. |
-| [app/workflow_store.py](../app/workflow_store.py) | SQLAlchemy CRUD for `Workflow`: `steps` is a JSON column replaced wholesale on every save, and `publish_workflow` refuses to activate a workflow with no steps. |
-| [app/dashboard_api.py](../app/dashboard_api.py) | FastAPI router for the Overview page and the Routing page's escalation count: `GET /api/dashboard/overview`, `GET /api/dashboard/activity`, `GET /api/dashboard/escalations`, `GET /api/dashboard/escalations/count`, bearer-auth only. Escalation `status`/`assignedTo` are fixed placeholders (`"new"`/`null`) -- no escalation lifecycle exists yet. |
-| [app/dashboard_store.py](../app/dashboard_store.py) | Derives every dashboard value from `Conversation`/`ConversationAction` rows -- no dedicated table. `range_bounds` mirrors `frontend/src/lib/dateRange.ts`'s `presetBounds` (rolling windows, not since-midnight). |
-| [app/guide_publish/hours.py](../app/guide_publish/hours.py) | Pure functions turning `BusinessHours[]` into spoken prose (`hours_prose`) and a single time into TTS-safe words (`time_prose`) — e.g. "nine A M", never "9:00 AM". No I/O. |
-| [app/guide_publish/render.py](../app/guide_publish/render.py) | Pure: `ConciergeConfiguration` row + `KnowledgeItem` rows -> the template's slot values (`build_slots`, which takes the `knowledge_topics` list) and one Markdown file per publishable knowledge item (`knowledge_files`, `is_publishable`). `knowledge_topics` lists the publishable titles, sanitized, de-duplicated and sorted case-insensitively. Rejects any field containing markup a caller would hear read aloud. |
-| [app/guide_publish/template.py](../app/guide_publish/template.py) | Loads `guide-demo/template/instructions.template.md` and fills its `{{slot}}` placeholders (`render_instructions`); errors in both directions — an unfilled slot or a value with no matching slot. `load_static_files()` reads the template's other files (manifest, OpenAPI schemas, context options) verbatim. |
-| [app/guide_publish/bundle.py](../app/guide_publish/bundle.py) | Assembles the deterministic bundle zip and refuses to build an unsafe one: checks the tool schemas carry the exact expected operation set, the manifest name matches `config.GUIDEANTS_GUIDE_NAME`, and the instructions are non-empty and sentinel-bearing — all before any network call. The zip itself is **no longer uploaded** (see "Why the import endpoint is not used" below); it still runs the invariants, produces the `content_hash` the history and the preview diff are keyed on, and backs `GET /api/concierge/bundle`. |
-| [app/guide_publish/guide_dto.py](../app/guide_publish/guide_dto.py) | Pure, no I/O: `build_update_dto()` rebuilds GuideAnts' full-state `UpdateGuideDto` from a `GET /api/guides/{id}` body with the instructions changed and, given a plan, the knowledge files re-synced; `plan_file_sync()` decides which existing `VectorStore` files to keep by id (same path, same content hash), which to replace, add or remove, and flags a plan that would wipe the whole store; `unsupported_features()` is the fail-closed guard listing anything on the guide this round-trip has not been verified to preserve; `missing_custom_tools()` supplies the template's tool sources (`voice-receptionist`, `caller-phone`) that a guide has none of — by name, so an empty guide gets its tools on Publish and a stocked one is never rewritten (only `name`, `apiHost` and the raw `openApiSpec` are sent; GuideAnts derives the operations); `comparable()` is the order-insensitive normalized view used to prove, after the write, that nothing else moved (`include_files=False` for a write that is meant to move the files). |
-| [app/guide_publish/guideants_admin.py](../app/guide_publish/guideants_admin.py) | The only module that calls GuideAnts' *authoring* API, using `GUIDEANTS_ADMIN_EMAIL`/`GUIDEANTS_ADMIN_PASSWORD` (a GuideAnts Admin-role user) — a different credential from the published guide's `GUIDEANTS_API_KEY` used on calls. `update_guide(instructions, knowledge)` does a verified read-modify-write: `POST /api/auth/login`, `GET /api/guides` (match by `GUIDEANTS_GUIDE_NAME`), `GET /api/guides/{id}`, refuse on `unsupported_features`, refuse a plan that would delete every knowledge file, `PUT /api/guides/{id}` (new instructions, `fileIdsToKeep` + `filesToAdd` from the plan), then `GET` again and compare — instructions, everything-but-the-files, the vector-store path set, and that every id meant to be kept survived. A failed verification attempts one restore and raises. Holds the login cookie, re-authenticating once on a 401. It has **no import path**: `import_bundle` was deleted, not deprecated. |
-| [app/guide_publish/publisher.py](../app/guide_publish/publisher.py) | Orchestrates a publish: render -> bundle (locally, for the invariants and the hash) -> push the rendered *instructions and knowledge files* -> record. `latest_succeeded()` is what `app/main.py`'s greeting reads; `republish()` re-sends a stored publication's `instructions_text` plus the knowledge files inside its stored `bundle_bytes` as the rollback path, and refuses a row that has no stored bundle. The stored `content_hash` folds in a constant marker (`_HASH_MARKER`) so a publication recorded before knowledge sync existed can never be mistaken for "unchanged". A push that moved any file adds one warning saying what moved and that indexing is asynchronous. |
-| [app/configuration_store.py](../app/configuration_store.py) | SQLAlchemy access to the single-row `ConciergeConfiguration` (business profile, identity, terminology), seeded from `app/config.py` defaults on first read. `save_draft`/`mark_published` manage `has_unpublished_changes`. |
-| [app/concierge_api.py](../app/concierge_api.py) | FastAPI router backing `configurationService.ts`: `GET`/`PATCH /api/concierge/configuration`, `POST .../preview`, `POST .../publish`, `GET /api/concierge/publications`, `POST /api/concierge/publications/{id}/rollback`, `GET /api/concierge/bundle` (an inspection/archive download of the rendered bundle — **not** a manual-import path: importing that zip by hand in GuideAnts hits the same destructive bug Publish avoids, on any guide with indexed files). Not console-only — a successful publish changes what the next caller hears. |
+| [app/guide/connection.py](../app/guide/connection.py) | Thin wrapper around the `openai` SDK pointed at GuideAnts' Responses API: `get_client()` builds the lazy singleton from the `GUIDEANTS_*` settings, plus the conversation-id helpers (`extract_conversation_id`, `is_lost_conversation`, `is_stale_tool_result`). |
+| [app/guide/session.py](../app/guide/session.py) | The `GuideSession` continuation handle, and `build_input` (interruption-note folding). |
+| [app/guide/streaming.py](../app/guide/streaming.py) | `stream_reply` (one turn) and its `Delta`/`ToolCallStarted` events, with continuation, the lost-conversation retry and the old-build fallback; never forwards to Twilio itself. |
+| [app/guide/sentinel.py](../app/guide/sentinel.py) | `SentinelGate` and the sentinel patterns: withholds a round's text until the trigger phrase is seen, then `strip_sentinel`s it. |
+| [app/guide/tools.py](../app/guide/tools.py) | `execute_tool` and `_run_reservation_tool`: in-process dispatch of the guide's client-side tool calls against `app/booking/`. |
+| [app/guide/classify.py](../app/guide/classify.py) | `classify_conversation`: end-of-call classification of the just-ended call as structured JSON, persisted by `app/calls/call_recording.py`. |
+| [app/calls/fillers.py](../app/calls/fillers.py) | Pure functions used by `app/calls/relay.py` to decide the filler-phrase behavior: `looks_like_question` classifies a caller utterance as question/request-like (warrants a filler) or not, `pick` returns a random filler phrase from a list, and `is_backchannel` classifies an utterance as pure acknowledgment noise (e.g. "ok", "yeah") that should never get a guide reply. No I/O, no Twilio/GuideAnts knowledge. |
+| [app/calls/barge_in.py](../app/calls/barge_in.py) | Pure functions used by `app/calls/relay.py` to decide selective barge-in: `is_stop_command` matches a caller utterance against a built-in stop/wait phrase list, and `should_interrupt` (= `is_stop_command` or `fillers.looks_like_question`) decides whether an utterance heard mid-reply should cancel the in-flight reply at all. No I/O, no Twilio/GuideAnts knowledge — unit-tested directly in `tests/calls/test_barge_in.py`. |
+| [app/calls/speech_timing.py](../app/calls/speech_timing.py) | One pure function, `estimate_seconds`, used by `app/calls/relay.py` to estimate how long Twilio's TTS will take to speak a given text from its word count. Fallback pacing until the first agent-stopped speaker event is recognized on a call, and the basis of the ceiling on waiting for one. No I/O. |
+| [app/calls/speaker_events.py](../app/calls/speaker_events.py) | One pure function, `classify`, used by `app/calls/relay.py` to recognize Twilio's speaker-event WS messages (`agentSpeaking`/`clientSpeaking` start/stop, subscribed via `events="speaker-events"` in the TwiML). Matches loosely since Twilio doesn't document the exact JSON shape — unit-tested in `tests/calls/test_speaker_events.py`. No I/O. |
+| [app/main.py](../app/main.py) | Creates the FastAPI app, runs `init_db()` on startup, and registers every router (including `app/booking/api.py`'s). No call-handling logic lives here. |
+| [app/calls/twiml.py](../app/calls/twiml.py) | `POST /twiml`: returns the TwiML that opens the `<ConversationRelay>` WebSocket back to `/ws`. |
+| [app/calls/greeting.py](../app/calls/greeting.py) | The welcome greeting: personalized for a known Booqable customer, else the last published greeting (`greeting_for`, `_published_greeting`), else `WELCOME_GREETING`. |
+| [app/calls/relay.py](../app/calls/relay.py) | `WS /ws`: the call-flow state machine (`CallState`, `schedule_turn()`, `start_reply()`/`respond_to()`, filler phrases, selective barge-in, playback hold, call teardown). All call-handling logic lives here. |
+| [app/booking/api.py](../app/booking/api.py) | FastAPI router: just `/api/booqable/ping`, a manual pre-demo connectivity check. Independent of the Twilio WS path. |
+| [app/booking/reservations.py](../app/booking/reservations.py) | Booqable business logic (catalog lookup, availability check, create/cancel order) called directly by `app/guide/tools.py`'s reservation tool handlers. See "Reservation tools" below. |
+| [app/booking/booqable_client.py](../app/booking/booqable_client.py) | Thin async `httpx` wrapper around Booqable's JSON:API v4 (Bearer-token auth). |
+| [app/console/knowledge/api.py](../app/console/knowledge/api.py) | FastAPI router for the admin console's Knowledge pages: `GET/POST /api/knowledge`, `GET/PATCH/DELETE /api/knowledge/{id}`, bearer-auth only. Edits here reach the live guide only via Publish (see "Publishing console configuration to the guide" below) — indexing is asynchronous after a successful push, so a changed item is not searchable the instant Publish returns. |
+| [app/console/knowledge/store.py](../app/console/knowledge/store.py) | SQLAlchemy CRUD for `KnowledgeItem`: filters, search, paging, the rule that a requested `processing` status is saved as `needs_review` (no ingestion pipeline exists), and `seed_default_items()`, which fills an empty table from `config.DEFAULT_KNOWLEDGE_ITEMS` so the console and the bundle download describe the shop's real policy set rather than an empty one. |
+| [app/console/workflows/api.py](../app/console/workflows/api.py) | FastAPI router for the admin console's Workflows pages: `GET/POST /api/workflows`, `GET/PATCH/DELETE /api/workflows/{id}`, `POST /api/workflows/{id}/publish`, bearer-auth only. Console-only — publishing has no effect on live calls. |
+| [app/console/workflows/store.py](../app/console/workflows/store.py) | SQLAlchemy CRUD for `Workflow`: `steps` is a JSON column replaced wholesale on every save, and `publish_workflow` refuses to activate a workflow with no steps. |
+| [app/console/dashboard/api.py](../app/console/dashboard/api.py) | FastAPI router for the Overview page and the Routing page's escalation count: `GET /api/dashboard/overview`, `GET /api/dashboard/activity`, `GET /api/dashboard/escalations`, `GET /api/dashboard/escalations/count`, bearer-auth only. Escalation `status`/`assignedTo` are fixed placeholders (`"new"`/`null`) -- no escalation lifecycle exists yet. |
+| [app/console/dashboard/store.py](../app/console/dashboard/store.py) | Derives every dashboard value from `Conversation`/`ConversationAction` rows -- no dedicated table. `range_bounds` mirrors `frontend/src/lib/dateRange.ts`'s `presetBounds` (rolling windows, not since-midnight). |
+| [app/guide/publish/hours.py](../app/guide/publish/hours.py) | Pure functions turning `BusinessHours[]` into spoken prose (`hours_prose`) and a single time into TTS-safe words (`time_prose`) — e.g. "nine A M", never "9:00 AM". No I/O. |
+| [app/guide/publish/render.py](../app/guide/publish/render.py) | Pure: `ConciergeConfiguration` row + `KnowledgeItem` rows -> the template's slot values (`build_slots`, which takes the `knowledge_topics` list) and one Markdown file per publishable knowledge item (`knowledge_files`, `is_publishable`). `knowledge_topics` lists the publishable titles, sanitized, de-duplicated and sorted case-insensitively. Rejects any field containing markup a caller would hear read aloud. |
+| [app/guide/publish/template.py](../app/guide/publish/template.py) | Loads `guide-demo/template/instructions.template.md` and fills its `{{slot}}` placeholders (`render_instructions`); errors in both directions — an unfilled slot or a value with no matching slot. `load_static_files()` reads the template's other files (manifest, OpenAPI schemas, context options) verbatim. |
+| [app/guide/publish/bundle.py](../app/guide/publish/bundle.py) | Assembles the deterministic bundle zip and refuses to build an unsafe one: checks the tool schemas carry the exact expected operation set, the manifest name matches `config.GUIDEANTS_GUIDE_NAME`, and the instructions are non-empty and sentinel-bearing — all before any network call. The zip itself is **no longer uploaded** (see "Why the import endpoint is not used" below); it still runs the invariants, produces the `content_hash` the history and the preview diff are keyed on, and backs `GET /api/concierge/bundle`. |
+| [app/guide/publish/guide_dto.py](../app/guide/publish/guide_dto.py) | Pure, no I/O: `build_update_dto()` rebuilds GuideAnts' full-state `UpdateGuideDto` from a `GET /api/guides/{id}` body with the instructions changed and, given a plan, the knowledge files re-synced; `plan_file_sync()` decides which existing `VectorStore` files to keep by id (same path, same content hash), which to replace, add or remove, and flags a plan that would wipe the whole store; `unsupported_features()` is the fail-closed guard listing anything on the guide this round-trip has not been verified to preserve; `missing_custom_tools()` supplies the template's tool sources (`voice-receptionist`, `caller-phone`) that a guide has none of — by name, so an empty guide gets its tools on Publish and a stocked one is never rewritten (only `name`, `apiHost` and the raw `openApiSpec` are sent; GuideAnts derives the operations); `comparable()` is the order-insensitive normalized view used to prove, after the write, that nothing else moved (`include_files=False` for a write that is meant to move the files). |
+| [app/guide/publish/guideants_admin.py](../app/guide/publish/guideants_admin.py) | The only module that calls GuideAnts' *authoring* API, using `GUIDEANTS_ADMIN_EMAIL`/`GUIDEANTS_ADMIN_PASSWORD` (a GuideAnts Admin-role user) — a different credential from the published guide's `GUIDEANTS_API_KEY` used on calls. `update_guide(instructions, knowledge)` does a verified read-modify-write: `POST /api/auth/login`, `GET /api/guides` (match by `GUIDEANTS_GUIDE_NAME`), `GET /api/guides/{id}`, refuse on `unsupported_features`, refuse a plan that would delete every knowledge file, `PUT /api/guides/{id}` (new instructions, `fileIdsToKeep` + `filesToAdd` from the plan), then `GET` again and compare — instructions, everything-but-the-files, the vector-store path set, and that every id meant to be kept survived. A failed verification attempts one restore and raises. Holds the login cookie, re-authenticating once on a 401. It has **no import path**: `import_bundle` was deleted, not deprecated. |
+| [app/guide/publish/publisher.py](../app/guide/publish/publisher.py) | Orchestrates a publish: render -> bundle (locally, for the invariants and the hash) -> push the rendered *instructions and knowledge files* -> record. `latest_succeeded()` is what `app/calls/greeting.py`'s greeting reads; `republish()` re-sends a stored publication's `instructions_text` plus the knowledge files inside its stored `bundle_bytes` as the rollback path, and refuses a row that has no stored bundle. The stored `content_hash` folds in a constant marker (`_HASH_MARKER`) so a publication recorded before knowledge sync existed can never be mistaken for "unchanged". A push that moved any file adds one warning saying what moved and that indexing is asynchronous. |
+| [app/console/concierge/store.py](../app/console/concierge/store.py) | SQLAlchemy access to the single-row `ConciergeConfiguration` (business profile, identity, terminology), seeded from `app/config.py` defaults on first read. `save_draft`/`mark_published` manage `has_unpublished_changes`. |
+| [app/console/concierge/api.py](../app/console/concierge/api.py) | FastAPI router backing `configurationService.ts`: `GET`/`PATCH /api/concierge/configuration`, `POST .../preview`, `POST .../publish`, `GET /api/concierge/publications`, `POST /api/concierge/publications/{id}/rollback`, `GET /api/concierge/bundle` (an inspection/archive download of the rendered bundle — **not** a manual-import path: importing that zip by hand in GuideAnts hits the same destructive bug Publish avoids, on any guide with indexed files). Not console-only — a successful publish changes what the next caller hears. |
 
 ---
 
@@ -88,42 +96,42 @@ env var is unset):
 
 | Constant | Env var | Default | Used by |
 |---|---|---|---|
-| `GUIDEANTS_BASE_URL` | `GUIDEANTS_BASE_URL` | `http://localhost:5107` | `app/guide_client.py` — base URL of the GuideAnts backend |
-| `GUIDEANTS_PUB_ID` | `GUIDEANTS_PUB_ID` | `""` | `app/guide_client.py` — published guide GUID, part of the URL path |
-| `GUIDEANTS_API_KEY` | `GUIDEANTS_API_KEY` | `"anonymous"` | `app/guide_client.py` — sent as `Authorization: Bearer <key>` |
-| `GUIDEANTS_MODEL` | `GUIDEANTS_MODEL` | `"guide"` | `app/guide_client.py` — `model` field in the responses request (fixed alias, not a real model name) |
-| `GUIDEANTS_TIMEOUT_SECONDS` | `GUIDEANTS_TIMEOUT_SECONDS` | `30` | `app/guide_client.py` — request timeout passed to the `AsyncOpenAI` client (with `max_retries=1`), replacing the SDK's 600s/2-retry defaults, which would be dead air on a live call |
-| `WELCOME_GREETING` | `WELCOME_GREETING` | `"Thanks for calling! How can I help you today?"` | `app/main.py` — spoken by Twilio before any WS traffic happens |
-| `TWILIO_AUTH_TOKEN` | `TWILIO_AUTH_TOKEN` | `""` | used both for outbound SMS auth (`app/twilio_client.py`) and to enforce `X-Twilio-Signature` validation on `/twiml` plus token verification on `/ws` (`app/twilio_auth.py`); if unset, that validation is skipped with a warning, matching pre-hardening behavior |
+| `GUIDEANTS_BASE_URL` | `GUIDEANTS_BASE_URL` | `http://localhost:5107` | `app/guide/connection.py` — base URL of the GuideAnts backend |
+| `GUIDEANTS_PUB_ID` | `GUIDEANTS_PUB_ID` | `""` | `app/guide/connection.py` — published guide GUID, part of the URL path |
+| `GUIDEANTS_API_KEY` | `GUIDEANTS_API_KEY` | `"anonymous"` | `app/guide/connection.py` — sent as `Authorization: Bearer <key>` |
+| `GUIDEANTS_MODEL` | `GUIDEANTS_MODEL` | `"guide"` | `app/guide/streaming.py` — `model` field in the responses request (fixed alias, not a real model name) |
+| `GUIDEANTS_TIMEOUT_SECONDS` | `GUIDEANTS_TIMEOUT_SECONDS` | `30` | `app/guide/connection.py` — request timeout passed to the `AsyncOpenAI` client (with `max_retries=1`), replacing the SDK's 600s/2-retry defaults, which would be dead air on a live call |
+| `WELCOME_GREETING` | `WELCOME_GREETING` | `"Thanks for calling! How can I help you today?"` | `app/calls/greeting.py` — spoken by Twilio before any WS traffic happens |
+| `TWILIO_AUTH_TOKEN` | `TWILIO_AUTH_TOKEN` | `""` | used both for outbound SMS auth (`app/booking/twilio_client.py`) and to enforce `X-Twilio-Signature` validation on `/twiml` plus token verification on `/ws` (`app/calls/twilio_auth.py`); if unset, that validation is skipped with a warning, matching pre-hardening behavior |
 | `PORT` | `PORT` | `8080` | not read by `app/main.py` itself — `uvicorn` is started with `--port` on the command line; this constant is unused today |
-| `FILLER_PHRASES` | `FILLER_PHRASES` | a built-in list of 6 phrases (e.g. `"Let me look that up for you."`) | `app/main.py` (via `fillers.pick`) — pool of filler phrases spoken before the real reply when the caller's utterance looks like a question/request *and* GuideAnts hasn't replied within `FILLER_DELAY_SECONDS`. Pipe-separated (`\|`) in the env var, since phrases contain commas/periods; falls back to the built-in list if unset. |
-| `FILLER_DELAY_SECONDS` | `FILLER_DELAY_SECONDS` | `1.0` | `app/main.py` — how long to wait for GuideAnts' reply, for a filler-eligible utterance, before speaking a filler phrase. If the reply arrives before this elapses, no filler is spoken at all. |
-| `TURN_PAUSE_SECONDS` | `TURN_PAUSE_SECONDS` | `0.5` | `app/main.py` (`schedule_turn()`) — how long the caller must stay quiet after a transcribed prompt before the buffered text is committed as their turn; a clientSpeaking-start speaker event during the wait holds the buffer open for the continuation instead (see "Turn-pause buffering" below). The only latency this feature adds to an ordinary turn. |
-| `TURN_RESUME_GRACE_SECONDS` | `TURN_RESUME_GRACE_SECONDS` | `1.5` | `app/main.py` — after the caller resumes speaking mid-buffer and then stops again, how long to wait for the continuation's transcript (which trails the clientSpeaking-stop event by STT finalization time) before giving up and committing the buffered text alone. |
-| `EXTRA_BACKCHANNEL_PHRASES` | `EXTRA_BACKCHANNEL_PHRASES` | `[]` (empty) | `app/main.py` (via `fillers.is_backchannel`) — comma-separated phrases, on top of the built-in `fillers.BACKCHANNEL_PHRASES`, that count as pure acknowledgment noise and should never get a guide reply. |
-| `EXTRA_STOP_PHRASES` | `EXTRA_STOP_PHRASES` | `[]` (empty) | `app/main.py` (via `barge_in.should_interrupt`/`is_stop_command`) — comma-separated phrases, on top of the built-in `barge_in.STOP_PHRASES`, that also cancel an in-flight reply when heard mid-reply. |
-| `STOP_ACK_PHRASES` | `STOP_ACK_PHRASES` | a built-in list of 4 phrases (e.g. `"Okay."`) | `app/main.py` (via `fillers.pick`) — pool of short local acknowledgments spoken (instead of a GuideAnts reply) when a stop/wait phrase cancels an in-flight reply. Pipe-separated (`\|`) in the env var; falls back to the built-in list if unset. |
-| `TTS_WORDS_PER_SECOND` | `TTS_WORDS_PER_SECOND` | `2.5` | `app/main.py` (via `speech_timing.estimate_seconds`) — assumed TTS speaking rate, used to estimate how long a reply takes to speak aloud. Twilio's agent-stopped speaker event is the primary "reply finished playing" signal; this estimate paces replies until the first such event is recognized on a call, and caps how long the app waits for one after that (×1.5 + 2s). |
-| `TWILIO_ACCOUNT_SID` / `TWILIO_FROM_NUMBER` | same | `""` | `app/twilio_client.py` — outbound SMS for the `sendPaymentLink` tool's `sms` channel; currently unusable pending carrier/government verification |
-| `PAYMENT_LINK_BASE_URL` | same | `https://example.com/pay` | `app/payments.py` — placeholder payment link, not a real checkout URL (see `docs/PAYMENT_LINK_OPTIONS.md`) |
-| `POSTMARK_SERVER_TOKEN` / `POSTMARK_FROM_EMAIL` | same | `""` | `app/postmark_client.py` — outbound email for the `sendPaymentLink` tool's default `email` channel; `POSTMARK_FROM_EMAIL` must be a confirmed Sender Signature in the Postmark account or sends fail with `ErrorCode 401` |
-| `POSTMARK_MESSAGE_STREAM` | same | `"outbound"` | `app/postmark_client.py` — Postmark message stream sends are tagged under |
-| `POSTMARK_API_URL` | same | `https://api.postmarkapp.com` | `app/postmark_client.py` — overridable for testing |
-| `PAYMENT_LINK_DEFAULT_CHANNEL` | same | `"email"` | `app/payments.py` — which channel `sendPaymentLink` falls back to when the guide doesn't pass one; flip to `"sms"` once Twilio verification clears |
+| `FILLER_PHRASES` | `FILLER_PHRASES` | a built-in list of 6 phrases (e.g. `"Let me look that up for you."`) | `app/calls/relay.py` (via `fillers.pick`) — pool of filler phrases spoken before the real reply when the caller's utterance looks like a question/request *and* GuideAnts hasn't replied within `FILLER_DELAY_SECONDS`. Pipe-separated (`\|`) in the env var, since phrases contain commas/periods; falls back to the built-in list if unset. |
+| `FILLER_DELAY_SECONDS` | `FILLER_DELAY_SECONDS` | `1.0` | `app/calls/relay.py` — how long to wait for GuideAnts' reply, for a filler-eligible utterance, before speaking a filler phrase. If the reply arrives before this elapses, no filler is spoken at all. |
+| `TURN_PAUSE_SECONDS` | `TURN_PAUSE_SECONDS` | `0.5` | `app/calls/relay.py` (`schedule_turn()`) — how long the caller must stay quiet after a transcribed prompt before the buffered text is committed as their turn; a clientSpeaking-start speaker event during the wait holds the buffer open for the continuation instead (see "Turn-pause buffering" below). The only latency this feature adds to an ordinary turn. |
+| `TURN_RESUME_GRACE_SECONDS` | `TURN_RESUME_GRACE_SECONDS` | `1.5` | `app/calls/relay.py` — after the caller resumes speaking mid-buffer and then stops again, how long to wait for the continuation's transcript (which trails the clientSpeaking-stop event by STT finalization time) before giving up and committing the buffered text alone. |
+| `EXTRA_BACKCHANNEL_PHRASES` | `EXTRA_BACKCHANNEL_PHRASES` | `[]` (empty) | `app/calls/relay.py` (via `fillers.is_backchannel`) — comma-separated phrases, on top of the built-in `fillers.BACKCHANNEL_PHRASES`, that count as pure acknowledgment noise and should never get a guide reply. |
+| `EXTRA_STOP_PHRASES` | `EXTRA_STOP_PHRASES` | `[]` (empty) | `app/calls/relay.py` (via `barge_in.should_interrupt`/`is_stop_command`) — comma-separated phrases, on top of the built-in `barge_in.STOP_PHRASES`, that also cancel an in-flight reply when heard mid-reply. |
+| `STOP_ACK_PHRASES` | `STOP_ACK_PHRASES` | a built-in list of 4 phrases (e.g. `"Okay."`) | `app/calls/relay.py` (via `fillers.pick`) — pool of short local acknowledgments spoken (instead of a GuideAnts reply) when a stop/wait phrase cancels an in-flight reply. Pipe-separated (`\|`) in the env var; falls back to the built-in list if unset. |
+| `TTS_WORDS_PER_SECOND` | `TTS_WORDS_PER_SECOND` | `2.5` | `app/calls/relay.py` (via `speech_timing.estimate_seconds`) — assumed TTS speaking rate, used to estimate how long a reply takes to speak aloud. Twilio's agent-stopped speaker event is the primary "reply finished playing" signal; this estimate paces replies until the first such event is recognized on a call, and caps how long the app waits for one after that (×1.5 + 2s). |
+| `TWILIO_ACCOUNT_SID` / `TWILIO_FROM_NUMBER` | same | `""` | `app/booking/twilio_client.py` — outbound SMS for the `sendPaymentLink` tool's `sms` channel; currently unusable pending carrier/government verification |
+| `PAYMENT_LINK_BASE_URL` | same | `https://example.com/pay` | `app/booking/payments.py` — placeholder payment link, not a real checkout URL (see `docs/PAYMENT_LINK_OPTIONS.md`) |
+| `POSTMARK_SERVER_TOKEN` / `POSTMARK_FROM_EMAIL` | same | `""` | `app/booking/postmark_client.py` — outbound email for the `sendPaymentLink` tool's default `email` channel; `POSTMARK_FROM_EMAIL` must be a confirmed Sender Signature in the Postmark account or sends fail with `ErrorCode 401` |
+| `POSTMARK_MESSAGE_STREAM` | same | `"outbound"` | `app/booking/postmark_client.py` — Postmark message stream sends are tagged under |
+| `POSTMARK_API_URL` | same | `https://api.postmarkapp.com` | `app/booking/postmark_client.py` — overridable for testing |
+| `PAYMENT_LINK_DEFAULT_CHANNEL` | same | `"email"` | `app/booking/payments.py` — which channel `sendPaymentLink` falls back to when the guide doesn't pass one; flip to `"sms"` once Twilio verification clears |
 
-If `GUIDEANTS_PUB_ID` is empty when the guide client is first used, `app/guide_client.py` raises a `RuntimeError` telling the user to fill in `.env` — this is the only config validation in the app.
+If `GUIDEANTS_PUB_ID` is empty when the guide client is first used, `app/guide/connection.py` raises a `RuntimeError` telling the user to fill in `.env` — this is the only config validation in the app.
 
 ---
 
-## app/guide_client.py
+## app/guide/ (connection, session, streaming, sentinel, tools, classify)
 
 Exposes:
 
-- `GuideSession` — a small dataclass holding the call's continuation state: `conversation_id: str | None`, mutated in place by `stream_reply` as the continuation handle it gets back from GuideAnts, and `caller_phone: str | None`, set once by `app/main.py`'s `setup` handler from Twilio's `from` field and read by the `get_caller_phone_number` client-side tool (see "Client-side tool calls" below). Also `known_customer_checked: bool` and `known_customer: dict | None`, caching the result of a lazy Booqable customer lookup on `caller_phone`, done at most once per call the first time `get_caller_phone_number` is invoked. One instance lives for the life of a call (`CallState.guide` in `app/main.py`).
+- `GuideSession` — a small dataclass holding the call's continuation state: `conversation_id: str | None`, mutated in place by `stream_reply` as the continuation handle it gets back from GuideAnts, and `caller_phone: str | None`, set once by `app/calls/relay.py`'s `setup` handler from Twilio's `from` field and read by the `get_caller_phone_number` client-side tool (see "Client-side tool calls" below). Also `known_customer_checked: bool` and `known_customer: dict | None`, caching the result of a lazy Booqable customer lookup on `caller_phone`, done at most once per call the first time `get_caller_phone_number` is invoked. One instance lives for the life of a call (`CallState.guide` in `app/calls/relay.py`).
 - `stream_reply(user_text, session) -> AsyncIterator[ReplyEvent]` — sends a single caller utterance and yields events: `Delta(text)` for text to speak, and `ToolCallStarted(names)` right before a client-side tool call runs (see "Trigger-phrase gating" below for why text isn't yielded live the instant GuideAnts produces it).
 - `build_input(user_text, interrupted_partial) -> str` — pure text-shaping helper, see "Interruption notes" below.
 
-`_get_client()` lazily builds a module-level singleton `AsyncOpenAI` client the first time it's needed, pointed at:
+`get_client()` lazily builds a module-level singleton `AsyncOpenAI` client the first time it's needed, pointed at:
 `{GUIDEANTS_BASE_URL}/api/published/openai/{GUIDEANTS_PUB_ID}/v1`
 This is GuideAnts' OpenAI-compatible endpoint, **not** the OpenAI API — same request/response shape, different backend. `timeout=config.GUIDEANTS_TIMEOUT_SECONDS` and `max_retries=1` are set explicitly (the SDK's defaults, 600s/2 retries, would leave a caller in silence far too long on a hung request). Because it's a singleton, the client (and its HTTP connection pool) is reused across every call/WS connection the app handles.
 
@@ -151,7 +159,7 @@ The guide's entire tool surface is client-side: `get_caller_phone_number`
 `sendPaymentLink`). None of these
 are server-side Booqable-style HTTP tools GuideAnts calls itself — all of
 them are resolved by whichever client is on the call, i.e. this app, in
-`app/guide_client.py`.
+`app/guide/tools.py`.
 
 `get_caller_phone_number` needed this from the start: GuideAnts' outgoing
 tool-call HTTP requests (`ToolCaller.ExecuteWebApiAsync` in the GuideAnts
@@ -168,8 +176,8 @@ copy of that header was enough to check availability or create/cancel a
 reservation from anywhere, not just from an active call through this app.
 Moving them to Client Actions closes that off: GuideAnts never dials out for
 them at all, there's no HTTP endpoint or shared secret to leak or replay, and
-`app/reservations.py`/`app/payments.py`'s Booqable business logic is now only
-reachable through `app/guide_client.py`'s in-process tool dispatch, mid-call.
+`app/booking/reservations.py`/`app/booking/payments.py`'s Booqable business logic is now only
+reachable through `app/guide/tools.py`'s in-process tool dispatch, mid-call.
 
 **Declared in GuideAnts, not in this app's code.** Each tool's schema
 (`guide-demo/caller-phone-client-tool.json`,
@@ -189,7 +197,7 @@ same underlying pathway request-supplied `tools` would use, so the choice
 between UI-declared and per-request is purely about where the schema lives,
 never about correctness or per-call routing (see "Concurrency" below).
 
-- `app/main.py`'s `setup` handler sets `st.guide.caller_phone = msg.get("from")`
+- `app/calls/relay.py`'s `setup` handler sets `st.guide.caller_phone = msg.get("from")`
   the moment a call connects (see `WS /ws` below) — this is the only producer
   of that value, read by the `get_caller_phone_number` handler.
 - This app never attaches a `tools` kwarg to any `responses.create` call —
@@ -204,7 +212,7 @@ never about correctness or per-call routing (see "Concurrency" below).
     than as its own streamed event.
   - `_stream_reply_with_tools` is the loop that actually drives one caller
     turn: after a streamed request ends, if it collected any `function_call`s,
-    it resolves each via `_execute_tool` — `get_caller_phone_number` returns
+    it resolves each via `execute_tool` — `get_caller_phone_number` returns
     `json.dumps({"phone_number": ...})` (`null` if the `setup` message never
     carried a `from`), plus `customer_name`/`customer_email` if a lazy,
     once-per-call Booqable lookup on that phone number (cached on
@@ -213,15 +221,15 @@ never about correctness or per-call routing (see "Concurrency" below).
     any failure) finds an existing customer; the eight reservation tool
     names are dispatched to `_run_reservation_tool`, which builds a
     `BooqableClient` and calls straight into
-    `app/reservations.py`/`app/payments.py` — the same
+    `app/booking/reservations.py`/`app/booking/payments.py` — the same
     find/check/book/reserve/register/cancel/pay logic the old
     `/api/reservations/*` routes wrapped, just invoked directly instead of
     over HTTP. `sendPaymentLink` picks a `PostmarkClient` or `TwilioSmsClient`
-    inside `app/payments.py` itself, based on the `channel` argument (or
+    inside `app/booking/payments.py` itself, based on the `channel` argument (or
     `config.PAYMENT_LINK_DEFAULT_CHANNEL` if none is given). A
     `BooqableError`/`TwilioSmsError`/`PostmarkError` (or a missing required
     argument) is caught and turned into `json.dumps({"error": ...})` rather
-    than raised — `_execute_tool` never raises, an error result is still a
+    than raised — `execute_tool` never raises, an error result is still a
     well-formed reply the model can react to. Resolving each call then
     immediately issues a follow-up `responses.create` whose `input` is the
     list of `{"type": "function_call_output", "call_id": ..., "output": ...}`
@@ -231,7 +239,7 @@ never about correctness or per-call routing (see "Concurrency" below).
     hang the turn forever; hitting the cap just logs a warning and ends the
     turn with whatever text (if any) was produced.
   - `stream_reply` also yields a `ToolCallStarted(names)` event right after a
-    round's tool calls are known (before running them) — `app/main.py` uses
+    round's tool calls are known (before running them) — `app/calls/relay.py` uses
     it to stamp `st.tool_call_started_at`, which softens barge-in for the
     real tool-call latency that follows (see "Selective barge-in" below).
 - **Cancellation safety**: each `_stream_turn` call inside the loop is wrapped
@@ -243,8 +251,8 @@ never about correctness or per-call routing (see "Concurrency" below).
 - **Concurrency**: two simultaneous calls never share state. Each Twilio
   WebSocket connection gets its own `CallState`/`GuideSession`
   (`CallState.guide: GuideSession = field(default_factory=GuideSession)`,
-  `app/main.py`), so `session.caller_phone` is always the number captured on
-  *that* call's own `setup` message. `_execute_tool` takes `session` as an
+  `app/calls/relay.py`), so `session.caller_phone` is always the number captured on
+  *that* call's own `setup` message. `execute_tool` takes `session` as an
   explicit parameter — no global lookup — and each call's tool loop runs as
   its own `asyncio.Task`, awaiting its own `responses.create` calls against
   its own `conversation` id. GuideAnts itself never executes the tool or
@@ -273,7 +281,7 @@ never about correctness or per-call routing (see "Concurrency" below).
   fallback for the conversation-id reason can still use tools — but it isn't a
   general-purpose escape hatch for streamed-tool-call failures on its own.
 
-### Trigger-phrase gating (`_SentinelGate`)
+### Trigger-phrase gating (`SentinelGate`)
 
 This app can only speak text it's sure is the caller-facing final answer —
 every Twilio frame it sends carries `preemptible: true` (see "Selective
@@ -288,7 +296,7 @@ The guide is instructed (see `guide-demo/template/instructions.template.md`'s
 "FINAL ANSWER MARKER" paragraph) to begin its actual final answer with a
 fixed phrase, `config.FINAL_ANSWER_SENTINEL` ("declare victory" by default).
 `_stream_reply_with_tools` runs every round's deltas through a per-round
-`_SentinelGate` (`app/guide_client.py`): closed, it appends each delta to an
+`SentinelGate` (`app/guide/sentinel.py`): closed, it appends each delta to an
 internal `retained` string and re-searches it for the phrase, without
 yielding anything; the instant the phrase matches — even mid-delta, split
 across several deltas — it opens and returns the remainder of that same
@@ -303,7 +311,7 @@ nothing once the phrase is seen, because the phrase itself is the decision.
   produced the phrase (the guide forgot it), the round's whole retained text
   is spoken as one un-gated burst once the round ends — exactly `main`'s
   behavior, logged as a warning (`No trigger phrase this turn`). A loose
-  cleanup pass (`_strip_sentinel`) still strips a near-miss the strict
+  cleanup pass (`strip_sentinel`) still strips a near-miss the strict
   gating pattern didn't catch (odd punctuation around the phrase) before
   that burst is spoken.
 - **Mis-bet**: if the phrase opens the gate in a round that still goes on to
@@ -326,7 +334,7 @@ nothing once the phrase is seen, because the phrase itself is the decision.
 
 ---
 
-## app/main.py
+## app/calls/ (twiml.py, greeting.py, relay.py)
 
 ### `POST /twiml`
 
@@ -349,9 +357,9 @@ Called once by Twilio the moment a call comes in (this URL is configured on the 
     </Connect>
   </Response>
   ```
-- `interruptible="none"` + `reportInputDuringAgentSpeech="speech"` together mean Twilio itself never pauses or stops TTS playback because of caller speech, but caller speech heard during agent speech is still transcribed and delivered to this app as a `prompt` message (instead of the `interrupt` message Twilio would send under `interruptible="speech"`). What this app does with that reported speech — ignore it, or cancel and restart the reply for it — is a decision made in `app/main.py`/`app/fillers.py`/`app/barge_in.py`; see "Filler phrases and mid-reply speech" and "Selective barge-in" below.
+- `interruptible="none"` + `reportInputDuringAgentSpeech="speech"` together mean Twilio itself never pauses or stops TTS playback because of caller speech, but caller speech heard during agent speech is still transcribed and delivered to this app as a `prompt` message (instead of the `interrupt` message Twilio would send under `interruptible="speech"`). What this app does with that reported speech — ignore it, or cancel and restart the reply for it — is a decision made in `app/calls/relay.py`/`app/calls/fillers.py`/`app/calls/barge_in.py`; see "Filler phrases and mid-reply speech" and "Selective barge-in" below.
 - `welcomeGreetingInterruptible="none"` — the welcome greeting's interruptibility is a **separate** attribute from `interruptible`, and defaults to interruptible. Before this was set, real calls showed Twilio cutting off the greeting and sending an `interrupt` message (with the greeting text as `utteranceUntilInterrupt`) whenever it detected caller-side audio during the greeting — including the greeting's own echo picked up from a speakerphone.
-- `events="speaker-events"` subscribes to Twilio's notifications that the agent (TTS playback) or client (caller) started/stopped speaking. The agent-stopped event is the real "the reply finished playing" signal used to hold the reply task open (see "`start_reply()` / `respond_to()`" below); Twilio documents the subscription attribute but not the messages' JSON shape, so `app/speaker_events.py` recognizes them loosely and the app falls back to the word-count estimate until the first agent-stop is recognized on a call. The shape actually observed on live calls is `{"type": "info", "name": "agentSpeaking"|"clientSpeaking", "value": "on"|"off"}` — pinned in `tests/test_speaker_events.py`.
+- `events="speaker-events"` subscribes to Twilio's notifications that the agent (TTS playback) or client (caller) started/stopped speaking. The agent-stopped event is the real "the reply finished playing" signal used to hold the reply task open (see "`start_reply()` / `respond_to()`" below); Twilio documents the subscription attribute but not the messages' JSON shape, so `app/calls/speaker_events.py` recognizes them loosely and the app falls back to the word-count estimate until the first agent-stop is recognized on a call. The shape actually observed on live calls is `{"type": "info", "name": "agentSpeaking"|"clientSpeaking", "value": "on"|"off"}` — pinned in `tests/calls/test_speaker_events.py`.
 - Response content type is `application/xml`. No request body is read — everything needed comes from the `Host` header and this app's own config.
 
 ### `WS /ws`
@@ -359,8 +367,8 @@ Called once by Twilio the moment a call comes in (this URL is configured on the 
 Twilio opens exactly one WebSocket connection here per call, immediately after `/twiml` returns, and keeps it open for the life of the call. All messages are JSON text frames.
 
 **Per-connection state** (`CallState`, one instance per call — all local to the WS handler closure; nothing is shared across calls, nothing persists after disconnect):
-- `guide: GuideSession` — the one piece of state that actually matters for memory: holds the `conversation_id` GuideAnts assigned on this call's first turn, echoed back on every later turn. See `app/guide_client.py` above.
-- `messages: list[dict]` — a local log of what was actually said; never sent to GuideAnts (continuation is by conversation id). It's also, as of E6 slice 1, the source `app/call_recording.py` turns into the persisted transcript `GET /api/conversations/{id}` serves once the call ends.
+- `guide: GuideSession` — the one piece of state that actually matters for memory: holds the `conversation_id` GuideAnts assigned on this call's first turn, echoed back on every later turn. See `app/guide/` above.
+- `messages: list[dict]` — a local log of what was actually said; never sent to GuideAnts (continuation is by conversation id). It's also, as of E6 slice 1, the source `app/calls/call_recording.py` turns into the persisted transcript `GET /api/conversations/{id}` serves once the call ends.
 - `interrupted_reply: str | None` — the text of a reply the caller was cut off mid-way through by a barge-in, if any; consumed and cleared by the next `start_reply()` call via `build_input()`. See "Interruption notes" below.
 - `task` — the `asyncio.Task` currently generating/speaking a reply, if any; also doubles as the "is a reply active right now" flag (`st.task and not st.task.done()`). On turns 2+, deltas arrive continuously over SSE, but Twilio still plays TTS far slower than the deltas stream in — `respond_to()` doesn't let this task finish once generation ends; it holds the task open until Twilio's agent-stopped speaker event reports that playback actually finished (with the word-count estimate — `speech_timing.estimate_seconds`, paced by `config.TTS_WORDS_PER_SECOND` — as a ×1.5 + 2s ceiling on that wait), or, until the first such event has been recognized on the call, just sleeps out whatever's left of that same estimate. Either way the task stays "not done," and mid-reply speech still gets evaluated as mid-reply, for roughly as long as Twilio is actually still speaking.
 - `playback_done: asyncio.Event` — set by the WS loop whenever an agent-stopped speaker event arrives; awaited by `respond_to()`'s playback hold. Cleared by `respond_to()` only at the start of the hold, so stale sets (the welcome greeting ending, or a filler finishing while GuideAnts was still generating) can't release a later hold early.
@@ -389,7 +397,7 @@ Non-JSON frames are logged and skipped rather than crashing the loop.
 {"type": "text", "token": "Hello there!", "last": false, "preemptible": true}
 {"type": "text", "token": "", "last": true, "preemptible": true}
 ```
-Every turn, including the call's first, sends one Twilio `text` frame per `Delta` event `guide_client.stream_reply` yields — but that's not the same as "every GuideAnts SSE delta": each round's text is withheld behind `_SentinelGate` until `config.FINAL_ANSWER_SENTINEL` has been seen in it (see "Trigger-phrase gating" above), so the caller starts hearing the reply the instant the trigger phrase clears, not the instant GuideAnts starts generating. The filler phrase (sent as its own frame first, see below) covers that gated silence, first wait or later — not only the gap before the very first delta. **Caveat: this depends on the deployed GuideAnts build streaming at all** — an outdated `guideants-webapi-ui` image (pre-dating GuideAnts' wire-streaming fixes, or pre-dating the streamed `conversation` field) emits the entire reply as a single SSE burst after generation completes, regardless of which model the guide uses, which looks exactly like "streaming doesn't work"; an image that streams but doesn't yet echo `conversation` falls back to one non-streaming turn (see `app/guide_client.py`'s `stream_missing_conversation` above) before resuming streaming. If replies seem to arrive all at once even after the trigger phrase, rebuild/update the GuideAnts container before blaming the model or this app; `scripts/check_streaming.py` prints per-event timing, including `TOOL CALL` markers, to check either way. Every frame carries `preemptible: true` — see "Selective barge-in" below for why.
+Every turn, including the call's first, sends one Twilio `text` frame per `Delta` event `streaming.stream_reply` yields — but that's not the same as "every GuideAnts SSE delta": each round's text is withheld behind `SentinelGate` until `config.FINAL_ANSWER_SENTINEL` has been seen in it (see "Trigger-phrase gating" above), so the caller starts hearing the reply the instant the trigger phrase clears, not the instant GuideAnts starts generating. The filler phrase (sent as its own frame first, see below) covers that gated silence, first wait or later — not only the gap before the very first delta. **Caveat: this depends on the deployed GuideAnts build streaming at all** — an outdated `guideants-webapi-ui` image (pre-dating GuideAnts' wire-streaming fixes, or pre-dating the streamed `conversation` field) emits the entire reply as a single SSE burst after generation completes, regardless of which model the guide uses, which looks exactly like "streaming doesn't work"; an image that streams but doesn't yet echo `conversation` falls back to one non-streaming turn (see `app/guide/streaming.py`'s `stream_missing_conversation` above) before resuming streaming. If replies seem to arrive all at once even after the trigger phrase, rebuild/update the GuideAnts container before blaming the model or this app; `scripts/check_streaming.py` prints per-event timing, including `TOOL CALL` markers, to check either way. Every frame carries `preemptible: true` — see "Selective barge-in" below for why.
 
 ### Turn-pause buffering (`schedule_turn()`)
 
@@ -438,7 +446,7 @@ so it can't fire mid-teardown and start a reply nothing would cancel.
 
 `start_reply(user_text)` builds this turn's actual input via `build_input(user_text, st.interrupted_reply)` (folding in an interruption note if the previous reply was cut short — see "Interruption notes" below), clears `st.interrupted_reply`, logs `user_text` to `st.messages`, and spawns `respond_to(input_text, filler_eligible)` as an `asyncio.Task` stored on `st.task`, where `filler_eligible = fillers.looks_like_question(user_text)`:
 
-1. Start `guide_client.stream_reply(input_text, st.guide)`. Every fetch of the next delta (`gen.__anext__()`) is begun as a background task rather than awaited directly, so it can be raced against the filler delay.
+1. Start `streaming.stream_reply(input_text, st.guide)`. Every fetch of the next delta (`gen.__anext__()`) is begun as a background task rather than awaited directly, so it can be raced against the filler delay.
 2. If `filler_eligible` is true, race *each* such fetch against `config.FILLER_DELAY_SECONDS` (`asyncio.wait(..., timeout=...)`) — not just the first one, and only if Twilio doesn't still have unplayed audio queued from what's already been sent this turn (`_queued_audio_seconds()`, so a filler can't stack on top of speech the guide just produced). If GuideAnts hasn't produced that event by the time the timeout elapses, pick a random phrase from `config.FILLER_PHRASES` and send it immediately as its own spoken token: `{"type": "text", "token": filler + " ", "last": False, "preemptible": True}`. Either way (timed out or not), keep waiting on the *same* in-flight fetch afterward — nothing is restarted or duplicated. Because this races every event, not only the first, a reply with a client-side tool call (which can go quiet for several real seconds of tool latency behind the sentinel gate — see "Trigger-phrase gating" above) may speak more than one filler phrase in sequence rather than leaving the caller in silence; this is intentional. A `ToolCallStarted` event doesn't itself get a filler — it's handled separately, stamping `st.tool_call_started_at` (see "Selective barge-in" below) — but the *next* fetch after it is still filler-eligible like any other. If `filler_eligible` is false, every fetch is simply awaited with no race and no filler, regardless of how long it takes.
 3. Forward each resulting delta to the WS as its own `{"type": "text", ...}` frame as it arrives, accumulating them into `reply_text` (and `st.partial_reply`, kept current after every delta so a mid-stream barge-in has an accurate cut-off point), then send a final `{"token": "", "last": true}` frame to signal end-of-turn to Twilio.
 4. **On success**, log the real reply to `st.messages` — the filler is never logged. Then hold the turn open until playback actually ends: wait for Twilio's agent-stopped speaker event (`st.playback_done`, with ×1.5 + 2s of the word-count estimate as a ceiling in case the event is lost), or — until the first agent-stop has been recognized on the call — just sleep out the remainder of the word-count estimate as the older versions did. This is what keeps `st.task` "not done" while Twilio is still speaking.
@@ -457,7 +465,7 @@ On `WebSocketDisconnect`, any in-flight task is cancelled and the loop exits —
 ### Selective barge-in
 
 `interruptible` stays `"none"` — Twilio itself never pauses or stops
-playback on its own. Instead, `app/main.py` decides, per mid-reply `prompt`,
+playback on its own. Instead, `app/calls/relay.py` decides, per mid-reply `prompt`,
 whether to cut the reply over using `barge_in.should_interrupt(text,
 config.EXTRA_STOP_PHRASES)`:
 
@@ -518,7 +526,7 @@ naturally instead of repeating itself or guessing. The mechanism:
 1. On a barge-in that trims a cut-off reply, `st.interrupted_reply` is set to
    `st.partial_reply` (the text streamed so far this turn).
 2. The next call to `start_reply(user_text)` builds this turn's actual input
-   via `guide_client.build_input(user_text, st.interrupted_reply)`, which
+   via `session.build_input(user_text, st.interrupted_reply)`, which
    (if `interrupted_reply` is set) prefixes something like:
    `[Note: your previous reply was interrupted; the caller heard only up to: "…{last ~150 chars}"] {user_text}`
    — then clears `st.interrupted_reply`.
@@ -546,7 +554,7 @@ naturally instead of repeating itself or guessing. The mechanism:
 4. **The inverse case produces no note at all.** If a barge-in lands during
    the *playback hold* (generation already finished, `st.partial_reply`
    already cleared, only trailing audio still playing when cut off), there's
-   no way for `app/main.py` to know the caller missed the tail end — the guide
+   no way for `app/calls/relay.py` to know the caller missed the tail end — the guide
    will believe the caller heard the whole reply.
 5. **Long partials are truncated to their last ~150 characters** before
    being quoted, so the note may start mid-sentence.
@@ -563,7 +571,7 @@ naturally instead of repeating itself or guessing. The mechanism:
 
 ---
 
-## Reservation tools (app/guide_client.py, app/reservations.py, app/payments.py, app/booqable_client.py)
+## Reservation tools (app/guide/tools.py, app/booking/reservations.py, app/booking/payments.py, app/booking/booqable_client.py)
 
 Booqable availability/booking/customer/payment-link operations are eight of
 the guide's client-side tools (see "Client-side tool calls" above) —
@@ -572,40 +580,40 @@ the guide's client-side tools (see "Client-side tool calls" above) —
 GuideAnts hands
 each unresolved `function_call` back to this app, same as
 `get_caller_phone_number`; there's no `/api/reservations/*` HTTP surface
-anymore (`app/reservations_api.py` now only serves `/api/booqable/ping`, a
+anymore (`app/booking/api.py` now only serves `/api/booqable/ping`, a
 manual connectivity check). None of this touches the Twilio WS path directly
 either — no streaming, no per-call state — it's plain async function calls
-made from inside `_execute_tool`/`_run_reservation_tool` while a tool-call
+made from inside `execute_tool`/`_run_reservation_tool` while a tool-call
 round-trip is in flight for some call's turn.
 
 ```
-GuideAnts (function_call, unresolved) ⇄ this app (app/guide_client.py) ⇄ Booqable JSON:API v4
+GuideAnts (function_call, unresolved) ⇄ this app (app/guide/tools.py) ⇄ Booqable JSON:API v4
 ```
 
-- **`app/guide_client.py`** — `_run_reservation_tool(name, args)` dispatches
+- **`app/guide/tools.py`** — `_run_reservation_tool(name, args)` dispatches
   each of the eight tool names to the matching call below, building a
-  `BooqableClient()` per call. `_execute_tool` wraps it: JSON-decodes
+  `BooqableClient()` per call. `execute_tool` wraps it: JSON-decodes
   `arguments`, catches `BooqableError`/`TwilioSmsError`/`PostmarkError`/a
   missing-argument `KeyError`, and always returns a `json.dumps(...)` string —
   see "Client-side tool calls" above for how this fits into the tool-call
   round-trip.
-- **`app/reservations.py`** — the actual find/check/book/reserve/register logic
+- **`app/booking/reservations.py`** — the actual find/check/book/reserve/register logic
   against a `BooqableClient`: `list_catalog`, `check_product_availability`,
   `find_or_create_customer`, `create_reservation`, `cancel_reservation`,
   `list_customers`, `add_customer_note`, `register_customer`, `get_order_contact`,
   plus small helpers for resolving the account's one active location and
   mapping a product group to its bookable product.
-- **`app/payments.py`** — `send_payment_link` (used by the `sendPaymentLink`
+- **`app/booking/payments.py`** — `send_payment_link` (used by the `sendPaymentLink`
   tool): looks up the order's contact via `reservations.get_order_contact`,
   then picks a channel (`email` by default, or `sms`, per the `channel`
   argument or `config.PAYMENT_LINK_DEFAULT_CHANNEL`) and sends via
   `PostmarkClient` or `TwilioSmsClient` accordingly.
-- **`app/postmark_client.py`** — thin `httpx` wrapper around Postmark's Email
+- **`app/booking/postmark_client.py`** — thin `httpx` wrapper around Postmark's Email
   API (`POST {POSTMARK_API_URL}/email`), raising `PostmarkError` on an HTTP
   error status *or* a non-zero Postmark `ErrorCode` in an otherwise-200
   response (e.g. `406` inactive recipient, `401` unconfirmed sender
   signature).
-- **`app/booqable_client.py`** — a thin async `httpx` wrapper around Booqable's
+- **`app/booking/booqable_client.py`** — a thin async `httpx` wrapper around Booqable's
   JSON:API v4 (`{company_url}/api/4`), Bearer-token auth from
   `config.BOOQABLE_API_KEY`, plus `resource()`/`attrs()` helpers for building
   and reading JSON:API envelopes.
@@ -720,7 +728,7 @@ call path, and stays in that project.
 
 ---
 
-## Publishing console configuration to the guide (app/guide_publish/, app/configuration_store.py, app/concierge_api.py)
+## Publishing console configuration to the guide (app/guide/publish/, app/console/concierge/store.py, app/console/concierge/api.py)
 
 Everything above this section describes a call once the guide's instructions
 already say what they say. This section is how they get that way: the path
@@ -731,11 +739,11 @@ words actually being read by GuideAnts on the next call.
 console PATCH businessProfile/identity/terminology
         │
         ▼
-ConciergeConfiguration draft row (app/configuration_store.py, has_unpublished_changes=true)
+ConciergeConfiguration draft row (app/console/concierge/store.py, has_unpublished_changes=true)
         │  POST /api/concierge/configuration/publish
         ▼
-render (app/guide_publish/render.py + hours.py) -> slots filled into
-guide-demo/template/instructions.template.md (app/guide_publish/template.py)
+render (app/guide/publish/render.py + hours.py) -> slots filled into
+guide-demo/template/instructions.template.md (app/guide/publish/template.py)
 
 The template is generic: it names no business. Six slots, a closed set that
 `render_instructions` enforces in both directions: the five business/identity
@@ -748,7 +756,7 @@ files, and the content hash notices.
         │  + knowledge_files() for every publishable KnowledgeItem
         │    (same fetched list also feeds {{knowledge.topics}})
         ▼
-bundle (app/guide_publish/bundle.py) -- invariants checked here, before
+bundle (app/guide/publish/bundle.py) -- invariants checked here, before
 anything is sent; the zip is kept LOCALLY (hash, history, /bundle download)
 and never uploaded
         │  the rendered instructions and knowledge files go on the wire
@@ -781,7 +789,7 @@ re-indexed asynchronously, so they are not searchable the instant this
 returns
 ```
 
-`app/guide_publish/publisher.py`'s `publish()` is the orchestrator: it loads
+`app/guide/publish/publisher.py`'s `publish()` is the orchestrator: it loads
 the configuration and knowledge rows, renders and bundles them (everything
 that can fail locally — an empty required field, a missing template slot, a
 bundle invariant — happens here, before the first network call), decides
@@ -852,7 +860,7 @@ GuideAnts has **no instructions-only endpoint**. `PUT /api/guides/{id}`
 takes `UpdateGuideDto`, a *full-state* record: an omitted file is deleted, a
 null field is cleared. So changing one field means reading the whole guide
 back and rebuilding that record from it verbatim — which is what
-`app/guide_publish/guide_dto.py`'s `build_update_dto()` is, and it is why it
+`app/guide/publish/guide_dto.py`'s `build_update_dto()` is, and it is why it
 was verified rather than assumed. On a faithful scratch replica (two custom
 tools carrying nine operations, a context option, one indexed knowledge
 file) the round-trip produced **zero** unintended differences, and file ids
@@ -885,7 +893,7 @@ was missing `findReservations`), the manifest name matching
 `config.GUIDEANTS_GUIDE_NAME`, and rendered instructions that are non-empty
 and still carry `config.FINAL_ANSWER_SENTINEL` — empty or sentinel-less
 instructions would mean this app never speaks anything the guide says (see
-`_SentinelGate` above). Those checks now guard what is *rendered* rather
+`SentinelGate` above). Those checks now guard what is *rendered* rather
 than what is uploaded, but a refused publish is still a refused publish.
 
 ### Knowledge IS synced by Publish — and Publish owns the whole store
@@ -959,7 +967,7 @@ being publishable (deactivated, or past its expiration date) simply
 disappears from that set — which is exactly how an expired policy leaves the
 guide's vector store.
 
-`app/knowledge_store.py`'s `seed_default_items()` populates an empty table
+`app/console/knowledge/store.py`'s `seed_default_items()` populates an empty table
 from `config.DEFAULT_KNOWLEDGE_ITEMS` (the shop's original vector-store
 document, one item per section) on first read. It runs on the publish path
 as well as on `GET /api/knowledge`, because an admin can reach Publish
@@ -972,8 +980,8 @@ a migration's data step would never run for most checkouts.
 
 ### The draft boundary: what keeps an unpublished edit off a live call
 
-`app/main.py`'s `_published_greeting()` (called from `_greeting_for()`) reads
-`app/guide_publish/publisher.py`'s `latest_succeeded()` — the most recent
+`app/calls/greeting.py`'s `_published_greeting()` (called from `greeting_for()`) reads
+`app/guide/publish/publisher.py`'s `latest_succeeded()` — the most recent
 `GuidePublication` row with `status == "succeeded"` — and speaks the
 greeting out of that row's stored `published_config` snapshot, not out of
 the live `ConciergeConfiguration` row. That's the entire mechanism that
@@ -998,7 +1006,7 @@ directly.
   and no warning at publish time. Both attempts are still recorded as their
   own `GuidePublication` rows either way, so the history isn't lost —
   `POST /api/concierge/publications/{id}/rollback`
-  (`app/guide_publish/publisher.py`'s `republish()`, re-sending that row's
+  (`app/guide/publish/publisher.py`'s `republish()`, re-sending that row's
   stored `instructions_text`) is the recovery path if the wrong one wins.
   Since a publish only ever changed the instructions, putting the old ones
   back is a complete undo. Only a `succeeded` publication is a valid
@@ -1010,7 +1018,7 @@ directly.
 
 ## The GuideAnts endpoint this app depends on
 
-`app/guide_client.py` calls **`POST {GUIDEANTS_BASE_URL}/api/published/openai/{GUIDEANTS_PUB_ID}/v1/responses`** — GuideAnts' OpenAI-wire-compatible Responses endpoint (implemented server-side in `PublishedOpenAiChatWireHandler.PostResponsesAsync`, routed via `PublishedOpenAiWireEndpoints`, GuideAnts repo). Relevant contract details:
+`app/guide/streaming.py` calls **`POST {GUIDEANTS_BASE_URL}/api/published/openai/{GUIDEANTS_PUB_ID}/v1/responses`** — GuideAnts' OpenAI-wire-compatible Responses endpoint (implemented server-side in `PublishedOpenAiChatWireHandler.PostResponsesAsync`, routed via `PublishedOpenAiWireEndpoints`, GuideAnts repo). Relevant contract details:
 
 - **Auth**: `Authorization: Bearer <GUIDEANTS_API_KEY>` header (the `openai` SDK adds this automatically from `api_key=`). GuideAnts also accepts `x-guideants-apikey` or anonymous access, depending on how the published guide's auth mode was configured (see SETUP.md step 1.4).
 - **Request body**: `{"model": "guide", "input": "<latest utterance>", "conversation": "conv_...", "stream": true|false}`. `model` must match one of the alias `id`s returned by `GET .../v1/models` (normally the fixed alias `"guide"`). `input` is just the current turn's text — not a message array, not a resent transcript. `conversation` is present on every request once a call has one; on the very first turn of a call it's simply omitted (there is nothing to send yet).
@@ -1027,11 +1035,11 @@ directly.
     "usage": {"input_tokens": ..., "output_tokens": ..., "total_tokens": ...}
   }
   ```
-  `response.conversation` here is the durable continuation handle `app/guide_client.py` captures into `GuideSession.conversation_id`. The openai SDK also exposes the concatenated text directly as `response.output_text`.
+  `response.conversation` here is the durable continuation handle `app/guide/streaming.py` stores in `GuideSession.conversation_id` (via `connection.extract_conversation_id`). The openai SDK also exposes the concatenated text directly as `response.output_text`.
 - **Streaming response** (`stream: true`, used on every turn including the first): `text/event-stream`, typed events —
-  `response.created` → `response.output_item.added` → `response.content_part.added` → repeated `response.output_text.delta` (the actual token text, in `.delta`) → `response.output_text.done` → `response.output_item.done` → `response.completed`. On a current GuideAnts build, both the `response.created` and `response.completed` events' embedded `response` object carry the same `conversation` field as the non-streaming body — `app/guide_client.py` reads it off whichever of those two events arrives first with the session not yet having an id. An older GuideAnts build whose stream predates this omits the field entirely; see the `stream_missing_conversation` fallback in `app/guide_client.py` above.
-- **Tool calls**: the endpoint also supports OpenAI-style `tools`/client-side tool execution (emitted as `function_call` output items). All nine of this app's tools (`get_caller_phone_number` plus the eight Booqable reservation operations) are declared in the GuideAnts UI as **Client Actions** sources (`client://` scheme, `ActionType.ClientHandled`, `ToolCaller.cs`, GuideAnts repo), not via a request-level `tools` param — GuideAnts never executes any of them itself; it hands each `function_call` back to this app instead, which answers it in `app/guide_client.py`. See "Client-side tool calls" below for the full mechanism and why the reservation operations moved here from an earlier Web API tool source.
-- **Errors this app handles specially**: HTTP 400 with `code: "conversation_not_found"` or `code: "invalid_conversation_id"` — GuideAnts no longer recognizes the `conversation` id sent (e.g. it restarted and lost in-memory/db state). `guide_client.stream_reply` catches this, clears the session, and retries once as a fresh conversation (no recap replay — prior context for that call is lost; see "Known gaps" below).
+  `response.created` → `response.output_item.added` → `response.content_part.added` → repeated `response.output_text.delta` (the actual token text, in `.delta`) → `response.output_text.done` → `response.output_item.done` → `response.completed`. On a current GuideAnts build, both the `response.created` and `response.completed` events' embedded `response` object carry the same `conversation` field as the non-streaming body — `app/guide/streaming.py` reads it off whichever of those two events arrives first with the session not yet having an id. An older GuideAnts build whose stream predates this omits the field entirely; see the `stream_missing_conversation` fallback in `app/guide/streaming.py` above.
+- **Tool calls**: the endpoint also supports OpenAI-style `tools`/client-side tool execution (emitted as `function_call` output items). All nine of this app's tools (`get_caller_phone_number` plus the eight Booqable reservation operations) are declared in the GuideAnts UI as **Client Actions** sources (`client://` scheme, `ActionType.ClientHandled`, `ToolCaller.cs`, GuideAnts repo), not via a request-level `tools` param — GuideAnts never executes any of them itself; it hands each `function_call` back to this app instead, which answers it in `app/guide/tools.py`. See "Client-side tool calls" below for the full mechanism and why the reservation operations moved here from an earlier Web API tool source.
+- **Errors this app handles specially**: HTTP 400 with `code: "conversation_not_found"` or `code: "invalid_conversation_id"` — GuideAnts no longer recognizes the `conversation` id sent (e.g. it restarted and lost in-memory/db state). `streaming.stream_reply` catches this, clears the session, and retries once as a fresh conversation (no recap replay — prior context for that call is lost; see "Known gaps" below).
 - **Other errors**: e.g. `403 endpoint_disabled` if the guide's "Enable Wire API" / **"Responses"** toggle isn't turned on in the Publish dialog (see SETUP.md step 1.5 — note this is a different checkbox from "Chat Completions").
 
 `GET {GUIDEANTS_BASE_URL}/api/published/openai/{pubId}/v1/models` is the companion read-only endpoint used manually (not by this app's code) to discover the valid `model` alias values before filling in `.env`.
@@ -1049,7 +1057,7 @@ directly.
    the turn only after `TURN_PAUSE_SECONDS` of caller silence, holding
    longer if the clientSpeaking speaker events say the caller resumed — see
    "Turn-pause buffering" above.
-5. On commit, `app/main.py` logs it to `messages`, builds this turn's input via `build_input()` (folding in an interruption note if the previous reply was cut short), and calls `guide_client.stream_reply`. If the utterance looks like a question/request (`fillers.looks_like_question()`) and GuideAnts hasn't replied within `config.FILLER_DELAY_SECONDS`, a random filler phrase is sent as its own spoken token while still waiting on the same in-flight call, masking the wait. Every turn, including the call's first, streams in as many small deltas as GuideAnts emits, each forwarded to Twilio as its own frame as soon as it arrives (capturing the conversation id off the first `response.created`/`response.completed` event on turns that don't have one yet). Twilio speaks it via TTS, with `interruptible="none"` so nothing Twilio hears from the caller during this stops playback.
+5. On commit, `app/calls/relay.py` logs it to `messages`, builds this turn's input via `build_input()` (folding in an interruption note if the previous reply was cut short), and calls `streaming.stream_reply`. If the utterance looks like a question/request (`fillers.looks_like_question()`) and GuideAnts hasn't replied within `config.FILLER_DELAY_SECONDS`, a random filler phrase is sent as its own spoken token while still waiting on the same in-flight call, masking the wait. Every turn, including the call's first, streams in as many small deltas as GuideAnts emits, each forwarded to Twilio as its own frame as soon as it arrives (capturing the conversation id off the first `response.created`/`response.completed` event on turns that don't have one yet). Twilio speaks it via TTS, with `interruptible="none"` so nothing Twilio hears from the caller during this stops playback.
 6. If the caller talks during the reply, Twilio still transcribes it and sends it as another `prompt` (`report_input_during_agent_speech="speech"`) rather than an `interrupt`. If it's a stop/wait phrase (`barge_in.is_stop_command()`), the in-flight reply is cancelled and a short local acknowledgment is spoken instead — no GuideAnts call. If it's a new question, the in-flight reply is cancelled and the question is scheduled as a fresh turn through the same turn-pause buffer (repeat from step 4). Either way, the reply text streamed so far is remembered as `st.interrupted_reply` for the next real question. Otherwise (non-trigger speech) the current reply keeps playing to the end and the utterance is just logged.
 7. Once the reply finishes normally, the real reply is logged to `messages` (the filler, if any, is never logged). `messages` grows for the life of the call as a debug record only — GuideAnts' own memory of the conversation lives server-side, keyed by `st.guide.conversation_id`.
 8. Repeat from step 4 for each new turn. Non-trigger speech heard mid-reply (step 6) is never recorded anywhere and is not automatically revisited — if it was itself a real question, it is only answered if the caller asks it again after the current reply finishes.
@@ -1062,8 +1070,8 @@ From SETUP.md's hardening notes — not implemented, not required for the demo t
 - No silence timeout / re-prompt if the caller goes quiet.
 - `dtmf` digits are logged but never acted on — no keypad menu.
 - If GuideAnts loses track of a conversation mid-call (restart, expiry — see "The GuideAnts endpoint this app depends on" above), the fallback starts a brand-new conversation with **no recap** of what was said earlier in the call. The guide won't remember anything from before the reset; a caller who'd already explained their situation would have to repeat it. Replaying a summary from `st.messages` into the fresh conversation's first turn would fix this but was deliberately left out — this failure mode is mostly a dev-environment concern (a live GuideAnts restart mid-call), not something expected in normal operation.
-- Against an older GuideAnts build whose streamed events don't carry `conversation` yet: the very first turn of a call streams with no way to capture a continuation handle, so that turn's server-side conversation is orphaned (the client has no id for it). `stream_missing_conversation` catches this after the fact, and the *next* turn falls back to one non-streaming call, which starts (and captures the id of) yet another fresh conversation — so the first turn's context is lost, same as the lost-conversation case above. Every turn after that streams and continues normally. This only happens once per call, on the first turn, against a build old enough to lack the field — see `app/guide_client.py` above.
+- Against an older GuideAnts build whose streamed events don't carry `conversation` yet: the very first turn of a call streams with no way to capture a continuation handle, so that turn's server-side conversation is orphaned (the client has no id for it). `stream_missing_conversation` catches this after the fact, and the *next* turn falls back to one non-streaming call, which starts (and captures the id of) yet another fresh conversation — so the first turn's context is lost, same as the lost-conversation case above. Every turn after that streams and continues normally. This only happens once per call, on the first turn, against a build old enough to lack the field — see `app/guide/streaming.py` above.
 - See "Interruption notes" above for the known rough edges of the barge-in note-folding feature specifically.
 - **Publish owns the guide's whole knowledge store, and a deletion cannot be undone from here.** This supersedes the earlier "knowledge is not synced on Publish" wording here and in `frontend/TODO.md`. Publish now replaces the live guide's `VectorStore` files with the rendered knowledge items through the same verified `PUT /api/guides/{id}` (never the import endpoint — see "Why the import endpoint is not used" above), keeping unchanged files by id. The gap is the ownership: any other vector-store file, including one uploaded by hand in the GuideAnts editor, is deleted on the next publish, and GuideAnts hands back a file's metadata but never its bytes, so this app cannot restore it. Publish refuses only the total wipe (no publishable items at all); it does not warn before deleting a file it does not recognize, and the console has no view of what is in the guide's vector store that the console did not put there. Indexing is also asynchronous, so a changed item is not searchable the moment Publish returns — the publication's warning says so. Separately, a `document`/`url` item's Markdown is still built from its title/category/tags/content fields only: the uploaded file or linked page is stored as a filename/address and never fetched, so what reaches the vector store is the console's description of a document, not the document. See `docs/superpowers/specs/2026-09-16-e6-knowledge-design.md`.
-- **Console workflows have no live effect either.** Workflows created or edited in the admin console (`app/workflow_api.py`) are stored in SQLite and never read by anything in `app/`'s call-handling code — publishing a workflow changes nothing about what the concierge does on a call. See `docs/superpowers/specs/2026-09-17-e6-workflows-design.md`, "Future: giving a published workflow live effect".
-- **Escalations have no lifecycle either.** `app/dashboard_api.py`'s `/dashboard/escalations` rows are synthesized read-only from `Conversation.escalated` — `status` is always `"new"` and `assignedTo` is always `null`. Nothing in the console has an assign/resolve action that would ever change either value. See `docs/superpowers/specs/2026-09-22-e6-dashboard-design.md`, "Future: a real escalation lifecycle".
+- **Console workflows have no live effect either.** Workflows created or edited in the admin console (`app/console/workflows/api.py`) are stored in SQLite and never read by anything in `app/`'s call-handling code — publishing a workflow changes nothing about what the concierge does on a call. See `docs/superpowers/specs/2026-09-17-e6-workflows-design.md`, "Future: giving a published workflow live effect".
+- **Escalations have no lifecycle either.** `app/console/dashboard/api.py`'s `/dashboard/escalations` rows are synthesized read-only from `Conversation.escalated` — `status` is always `"new"` and `assignedTo` is always `null`. Nothing in the console has an assign/resolve action that would ever change either value. See `docs/superpowers/specs/2026-09-22-e6-dashboard-design.md`, "Future: a real escalation lifecycle".

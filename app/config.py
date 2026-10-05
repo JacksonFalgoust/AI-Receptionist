@@ -11,11 +11,11 @@ GUIDEANTS_MODEL = os.environ.get("GUIDEANTS_MODEL", "guide")
 
 # Request timeout for calls to GuideAnts. The openai SDK's default (600s,
 # 2 retries) is dead air on a live phone call, so this app uses a much
-# tighter budget and a single retry (set in guide_client._get_client()).
+# tighter budget and a single retry (set in connection.get_client()).
 GUIDEANTS_TIMEOUT_SECONDS = float(os.environ.get("GUIDEANTS_TIMEOUT_SECONDS", "30"))
 
 # Average TTS speaking rate, used to estimate how long Twilio will take to
-# speak a reply (see speech_timing.py). Twilio's agent-stopped speaker event
+# speak a reply (see app/calls/speech_timing.py). Twilio's agent-stopped speaker event
 # is the primary "reply finished playing" signal; this estimate paces the
 # reply until the first such event is recognized on a call, and caps how
 # long the app waits for one after that. ~150 wpm is a typical
@@ -30,7 +30,7 @@ WELCOME_BACK_GREETING_TEMPLATE = os.environ.get(
 )
 
 # --- Console configuration seed -------------------------------------------
-# Seeded on first read (app/configuration_store.py), NOT in a migration:
+# Seeded on first read (app/console/concierge/store.py), NOT in a migration:
 # app/db.py's create_all() is the real runtime schema path, so a migration's
 # data step would never run for most checkouts.
 #
@@ -78,12 +78,12 @@ DEFAULT_TERMINOLOGY = {
 }
 
 # --- Console knowledge seed -----------------------------------------------
-# The shop's policy knowledge, seeded on first read (app/knowledge_store.py's
+# The shop's policy knowledge, seeded on first read (app/console/knowledge/store.py's
 # seed_default_items) exactly as the configuration row above is.
 #
 # This is not decoration. A publish replaces the live guide's vector store
 # wholesale (anything absent from the bundle is DELETED -- see
-# app/guide_publish/bundle.py), and instructions.template.md tells the guide
+# app/guide/publish/bundle.py), and instructions.template.md tells the guide
 # to "search the knowledge base" for precisely these topics. With an empty
 # knowledge_items table the first publish would strip the receptionist's
 # entire policy knowledge while leaving it talking fluently about nothing.
@@ -279,7 +279,7 @@ DEFAULT_ORGANIZATION_ID = os.environ.get("DEFAULT_ORGANIZATION_ID", "org_default
 
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@example.com")
 # A salted PBKDF2 hash ("<salt_hex>:<hash_hex>"), never a plaintext password
-# -- see app/auth.py's hash_password() to generate one. No default: an
+# -- see app/console/auth/sessions.py's hash_password() to generate one. No default: an
 # unset value means no one can log in, the safe failure mode for a fresh
 # checkout.
 ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH", "")
@@ -293,10 +293,10 @@ FILLER_DELAY_SECONDS = float(os.environ.get("FILLER_DELAY_SECONDS", "1.0"))
 # Twilio finalizes a `prompt` at each pause in caller speech, so a caller who
 # takes a brief mid-sentence breath used to have their turn split in two: the
 # first half was answered as the whole turn and the second half arrived
-# mid-reply and was ignored. Instead, app.py buffers each transcribed prompt
+# mid-reply and was ignored. Instead, app/calls/relay.py buffers each transcribed prompt
 # and only commits the turn after this much further caller silence; a
 # clientSpeaking-start speaker event during the wait holds the buffer open
-# for the caller's continuation (see app.py's schedule_turn()). Raising this
+# for the caller's continuation (see app/calls/relay.py's schedule_turn()). Raising this
 # tolerates longer pauses but delays the start of every reply by the same
 # amount.
 TURN_PAUSE_SECONDS = float(os.environ.get("TURN_PAUSE_SECONDS", "0.5"))
@@ -311,18 +311,18 @@ TURN_RESUME_GRACE_SECONDS = float(os.environ.get("TURN_RESUME_GRACE_SECONDS", "1
 
 # The literal phrase the guide is instructed (see guide-demo/Twillio demo
 # agent/instructions.md's "FINAL ANSWER MARKER" paragraph) to speak at the
-# start of its final answer, once it has nothing left to check. guide_client
+# start of its final answer, once it has nothing left to check. app/guide/sentinel.py
 # scans every incoming delta for this phrase and forwards nothing to Twilio
 # until it's seen -- so narration and tool-call preamble are dropped with
 # certainty rather than guessed at by a length threshold (see
-# _SentinelGate). Matching is case-insensitive and tolerant of the
+# SentinelGate). Matching is case-insensitive and tolerant of the
 # whitespace/punctuation GuideAnts puts around it; the phrase itself is
 # never spoken. Set to "" to disable gating entirely (every delta streams
 # live, unconditionally) -- used as this app's control/no-op mode.
 FINAL_ANSWER_SENTINEL = os.environ.get("FINAL_ANSWER_SENTINEL", "declare victory")
 
 # For this long (in seconds) after a client-side tool call starts (see
-# guide_client._stream_reply_with_tools's ToolCallStarted event), app.py
+# streaming._stream_reply_with_tools's ToolCallStarted event), app/calls/relay.py
 # ignores non-stop-command caller speech instead of letting
 # barge_in.should_interrupt() treat it as a new question and cancel the
 # answer that's still coming; an explicit stop/wait phrase always still cuts
@@ -379,7 +379,7 @@ STOP_ACK_PHRASES = [
     if p.strip()
 ] or _DEFAULT_STOP_ACK_PHRASES
 
-# Booqable reservation tools (see app/guide_client.py's _run_reservation_tool
+# Booqable reservation tools (see app/guide/tools.py's _run_reservation_tool
 # and /api/booqable/ping) -- lets the GuideAnts guide check availability and
 # book rentals through this app instead of talking to Booqable directly. The
 # guide never sees BOOQABLE_API_KEY -- these calls are resolved in-process,

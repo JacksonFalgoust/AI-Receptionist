@@ -1,5 +1,5 @@
-"""Measures one branch's guide_client.stream_reply behavior against a live
-GuideAnts guide -- the same function app/main.py's respond_to() calls, so
+"""Measures one branch's stream_reply behavior against a live
+GuideAnts guide -- the same function app/calls/relay.py's respond_to() calls, so
 the numbers reported are what would actually reach Twilio on that branch.
 
 Meant to be pointed at a git worktree checked out to a specific branch (see
@@ -39,6 +39,7 @@ import statistics
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 # Fixed 3-turn script driven against every branch, so the comparison holds
 # the caller's side of the conversation constant. Turn 2 exercises a single
@@ -143,6 +144,21 @@ def _load_existing(path: Path, label: str) -> dict:
     return {"label": label, "runs": []}
 
 
+def _load_guide():
+    """The stream_reply/GuideSession pair from whichever layout the target worktree
+    uses: app/guide/ (after the backend reorganization) or the flat
+    app/guide_client.py (every branch before it). Must run after sys.path
+    and the cwd point at that worktree."""
+    try:
+        from app.guide import session, streaming
+    except ModuleNotFoundError as exc:
+        if exc.name != "app.guide":
+            raise
+        from app import guide_client  # pre-reorganization layout
+        return guide_client
+    return SimpleNamespace(stream_reply=streaming.stream_reply, GuideSession=session.GuideSession)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", required=True, help="Path to the git worktree/checkout to measure")
@@ -172,7 +188,7 @@ def main() -> None:
     sys.path.insert(0, repo_path)
     os.chdir(repo_path)
 
-    from app import guide_client  # noqa: E402  (must import after sys.path/cwd are set)
+    guide_client = _load_guide()  # must run after sys.path/cwd are set
 
     data = _load_existing(out_path, args.label) if args.append else {"label": args.label, "runs": []}
     start_index = args.rep_start_index if args.rep_start_index is not None else len(data["runs"])
