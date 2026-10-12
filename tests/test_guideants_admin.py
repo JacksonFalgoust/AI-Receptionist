@@ -758,6 +758,8 @@ def test_a_changed_tool_source_is_replaced_and_verified():
     caller["operations"] = [op for op in caller["operations"] if op["operationId"] != "endCall"]
     after = copy.deepcopy(before)
     after["instructions"] = "New instructions"
+    after["guide"]["toolCount"] = 10
+    stale["guide"]["toolCount"] = 9
     FakeAsyncClient.responses = [
         LOGIN_OK(), GUIDE_LIST(), FakeResponse(200, stale), FakeResponse(200, {}), FakeResponse(200, after),
     ]

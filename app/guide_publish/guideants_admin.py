@@ -412,6 +412,11 @@ def _verification_problem(
     after_view["customTools"] = [
         tool for tool in after_view["customTools"] if tool.get("name") not in added
     ]
+    # A tool source added or replaced moves GuideAnts' derived tool count too.
+    if added:
+        for view in (before_view, after_view):
+            if isinstance(view.get("guide"), dict):
+                view["guide"].pop("toolCount", None)
     # A replaced (changed-spec) source was also meant to move.
     before_view["customTools"] = [
         tool for tool in before_view["customTools"] if tool.get("name") not in added
