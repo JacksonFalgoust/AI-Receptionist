@@ -339,6 +339,11 @@ async def _execute_tool(name: str, arguments: str, session: GuideSession) -> str
                 except Exception:
                     session.known_customer = None
         result: dict[str, Any] = {"phone_number": session.caller_phone}
+        digits = "".join(ch for ch in (session.caller_phone or "") if ch.isdigit())
+        if len(digits) >= 4:
+            # Read this to the caller -- never work the digits out yourself.
+            result["last_four"] = digits[-4:]
+            result["last_four_spoken"] = ", ".join(digits[-4:])
         if session.known_customer:
             attrs = BooqableClient.attrs(session.known_customer)
             if attrs.get("name"):

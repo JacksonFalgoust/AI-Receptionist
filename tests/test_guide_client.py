@@ -442,7 +442,7 @@ def test_execute_tool_returns_caller_phone(monkeypatch):
 
     session = GuideSession(caller_phone="+15551234567")
     result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
-    assert json.loads(result) == {"phone_number": "+15551234567"}
+    assert json.loads(result) == {"phone_number": "+15551234567", "last_four": "4567", "last_four_spoken": "4, 5, 6, 7"}
 
 
 def test_execute_tool_returns_null_when_caller_phone_unknown():
@@ -462,7 +462,7 @@ def test_execute_tool_caller_phone_includes_known_customer_info(monkeypatch):
     session = GuideSession(caller_phone="+15551234567")
     result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
     assert json.loads(result) == {
-        "phone_number": "+15551234567",
+        "phone_number": "+15551234567", "last_four": "4567", "last_four_spoken": "4, 5, 6, 7",
         "customer_name": "Jane Doe",
         "customer_email": "jane@example.com",
     }
@@ -478,7 +478,7 @@ def test_execute_tool_caller_phone_lookup_raises_falls_back_gracefully(monkeypat
 
     session = GuideSession(caller_phone="+15551234567")
     result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
-    assert json.loads(result) == {"phone_number": "+15551234567"}
+    assert json.loads(result) == {"phone_number": "+15551234567", "last_four": "4567", "last_four_spoken": "4, 5, 6, 7"}
 
 
 def test_execute_tool_caller_phone_lookup_timeout_falls_back_gracefully(monkeypatch):
@@ -493,7 +493,7 @@ def test_execute_tool_caller_phone_lookup_timeout_falls_back_gracefully(monkeypa
 
     session = GuideSession(caller_phone="+15551234567")
     result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
-    assert json.loads(result) == {"phone_number": "+15551234567"}
+    assert json.loads(result) == {"phone_number": "+15551234567", "last_four": "4567", "last_four_spoken": "4, 5, 6, 7"}
 
 
 def test_execute_tool_caller_phone_caches_lookup_across_calls(monkeypatch):
@@ -918,7 +918,7 @@ def test_streamed_tool_call_round_trip_yields_tool_call_started_then_text(monkey
         {
             "type": "function_call_output",
             "call_id": "call_1",
-            "output": json.dumps({"phone_number": "+15551234567"}),
+            "output": json.dumps({"phone_number": "+15551234567", "last_four": "4567", "last_four_spoken": "4, 5, 6, 7"}),
         }
     ]
     assert tool_call_stream.closed

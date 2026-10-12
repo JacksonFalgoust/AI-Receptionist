@@ -447,10 +447,22 @@ WORKING_SOUND_TOOLS = frozenset(
     for t in os.getenv(
         "WORKING_SOUND_TOOLS",
         "listCatalog,checkAvailability,createReservation,sendPaymentLink,findReservations,"
-        "cancelReservation,listCustomers,createCustomer,get_caller_phone_number",
+        "cancelReservation,listCustomers,createCustomer",
     ).split(",")
     if t.strip()
 )
 # After the guide calls endCall, wait this long past the goodbye's playback
 # before ending the ConversationRelay session (so nothing is cut off).
 END_CALL_AFTER_PLAYBACK_SECONDS = float(os.getenv("END_CALL_AFTER_PLAYBACK_SECONDS", "0.4"))
+
+# Server-side hang-up backup (see app/call_end.py) when the guide says goodbye
+# without calling endCall.
+AUTO_END_CALL_ENABLED = os.getenv("AUTO_END_CALL_ENABLED", "true").lower() not in ("0", "false", "no")
+# Speech-to-text hints (ConversationRelay `hints`): times, numbers and product
+# names callers say, so e.g. "nine" isn't heard as "none". Empty disables.
+STT_HINTS = os.getenv(
+    "STT_HINTS",
+    "nine AM,ten AM,eleven AM,noon,one PM,two PM,three PM,four PM,five PM,six PM,"
+    "nine,ten,eleven,twelve,o'clock,Downtown Dash,Lake Loop,Urban Cruiser,Weekend Warrior,"
+    "text,email,yes,no",
+)

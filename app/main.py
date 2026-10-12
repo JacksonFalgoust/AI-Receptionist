@@ -87,6 +87,7 @@ from .booqable_client import BooqableClient, BooqableError
 from .concierge_api import router as concierge_router
 from .conversations_api import router as conversations_router
 from .dashboard_api import router as dashboard_router
+from . import call_end
 from .db import init_db
 from .guide_client import Delta, GuideSession, ToolCallStarted, build_input, stream_reply
 from .knowledge_api import router as knowledge_router
@@ -225,6 +226,7 @@ async def twiml(request: Request) -> Response:
         welcome_greeting=greeting,
         tts_provider="ElevenLabs",
         transcription_provider="Deepgram",
+        **({"hints": config.STT_HINTS} if config.STT_HINTS else {}),
         speech_model=config.STT_SPEECH_MODEL,
         language=config.STT_LANGUAGE,
         interruptible="none",
@@ -312,6 +314,11 @@ class CallState:
     reply_first_frame_at: float = 0.0
     # Event-loop time of the caller's most recent client-stop speaker event.
     client_stop_at: float = 0.0
+    # Working-sound bookkeeping for the current reply: a play message was
+    # sent, and reply text has since gone out. If Twilio only starts the
+    # sound after that (mediaPlaying on), it is cut immediately.
+    working_play_sent: bool = False
+    reply_text_after_play: bool = False
     # Event-loop time a client-side tool call started this turn, or 0.0 if
     # none is currently pending. guide_client streams every round's text
     # live, including narration ahead of a tool call, so the guide can go
@@ -347,6 +354,8 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         working_sound_on = False
         # The caller said something new, so any earlier endCall is void.
         st.guide.end_call_requested = False
+        st.working_play_sent = False
+        st.reply_text_after_play = False
         audio_started_at: float | None = None
         gen = stream_reply(input_text, st.guide)
         pending: asyncio.Future | None = None
@@ -403,21 +412,27 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                         filler = phrase
                         if not st.reply_first_frame_at:
                             st.reply_first_frame_at = asyncio.get_event_loop().time()
-                        # Not preemptible when the working sound follows, or
-                        # the play message would cut the filler off.
                         await websocket.send_json(
-                            {"type": "text", "token": phrase + " ", "last": False,
-                             "preemptible": not play_working}
+                            {"type": "text", "token": phrase + " ", "last": False, "preemptible": True}
                         )
                     if play_working:
-                        # Loops (0 = up to 1000x) until the reply's first text
-                        # token preempts it.
-                        await websocket.send_json(
-                            {"type": "play", "source": working_sound_url, "loop": 0,
-                             "preemptible": True, "interruptible": False}
+                        working_sound_on = True  # one attempt per wait
+                        # Only once the filler has finished playing, and only
+                        # if the answer still isn't back: then a one-shot
+                        # ~8s chime (no loop), so it can never run on.
+                        filler_secs = (
+                            speech_timing.estimate_seconds(phrase, config.TTS_WORDS_PER_SECOND) + 0.3
+                            if phrase else 0.0
                         )
-                        working_sound_on = True
-                        logger.info("Working sound started (tool wait)")
+                        done, _ = await asyncio.wait({pending}, timeout=filler_secs)
+                        if pending not in done:
+                            await websocket.send_json(
+                                {"type": "play", "source": working_sound_url, "loop": 1,
+                                 "preemptible": True, "interruptible": False}
+                            )
+                            st.working_play_sent = True
+                            st.reply_text_after_play = False
+                            logger.info("Working sound started (tool wait)")
             try:
                 return await pending
             except StopAsyncIteration:
@@ -442,7 +457,9 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                     logger.info("Client tool call(s) in flight: %s", ", ".join(event.names))
                     continue
                 st.tool_call_started_at = 0.0
-                working_sound_on = False  # this text preempts the loop
+                working_sound_on = False  # this text preempts the sound
+                if st.working_play_sent:
+                    st.reply_text_after_play = True
                 token = event.text
                 if reply_text and not reply_text[-1].isspace() and not token[:1].isspace():
                     # Round boundary (e.g. narration, then a tool call, then
@@ -566,6 +583,14 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 await asyncio.sleep(remaining)
         if st.guide.end_call_requested and reply_text:
             await _end_call()
+        elif reply_text and config.AUTO_END_CALL_ENABLED:
+            # Backup when the guide said goodbye but didn't call endCall.
+            assistants = [x["content"] for x in st.messages if x["role"] == "assistant"]
+            users = [x["content"] for x in st.messages if x["role"] == "user"]
+            previous_agent = assistants[-2] if len(assistants) >= 2 else ""
+            if users and call_end.should_end(previous_agent, users[-1], reply_text):
+                logger.info("Caller is done and reply was a goodbye; ending call (server-side backup)")
+                await _end_call()
 
     async def _end_call() -> None:
         """Goodbye has finished playing: hand the call back to Twilio, which
@@ -789,6 +814,20 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
 
             # Only unhandled types reach the classifier, so a prompt whose
             # transcript happens to mention "agent speaking" can't match.
+            elif msg_type == "info" and msg.get("name") == "mediaPlaying":
+                if msg.get("value") == "on" and st.reply_text_after_play:
+                    # The chime only started after the reply had begun (Twilio
+                    # fetched it late and queued it behind the reply): cut it.
+                    logger.info("Working sound started after the reply; cutting it")
+                    with contextlib.suppress(Exception):
+                        await websocket.send_json(
+                            {"type": "text", "token": " ", "last": True, "preemptible": True}
+                        )
+                    st.reply_text_after_play = False
+                elif msg.get("value") == "off":
+                    st.working_play_sent = False
+                    st.reply_text_after_play = False
+
             elif (speaker_kind := speaker_events.classify(msg)) is not None:
                 if speaker_kind == "agent-stop":
                     st.agent_stop_seen = True

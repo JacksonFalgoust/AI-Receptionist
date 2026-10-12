@@ -67,16 +67,15 @@ def test_working_sound_plays_during_slow_tool_and_stops_for_reply(monkeypatch):
 
     async def fake(input_text, guide):
         yield ToolCallStarted(("createReservation",))
-        await asyncio.sleep(0.4)
+        await asyncio.sleep(1.5)
         yield Delta("You're all set.")
 
     frames = _call(monkeypatch, fake, "Yes.", "CA_work_1")  # not a question
     types = [f["type"] for f in frames]
     assert "play" in types
     play = frames[types.index("play")]
-    assert play["source"].endswith(config.WORKING_SOUND_PATH) and play["loop"] == 0 and play["preemptible"] is True
+    assert play["source"].endswith(config.WORKING_SOUND_PATH) and play["loop"] == 1 and play["preemptible"] is True
     filler = next(f for f in frames if f["type"] == "text" and "One moment" in f["token"])
-    assert filler["preemptible"] is False  # so the play message doesn't cut it off
     assert frames.index(filler) < types.index("play") < next(
         i for i, f in enumerate(frames) if f["type"] == "text" and "all set" in f["token"]
     )
