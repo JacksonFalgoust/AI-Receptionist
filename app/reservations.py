@@ -165,10 +165,21 @@ async def find_customer(
     return None
 
 
+_LOOKUP = object()  # sentinel: no prefetched lookup supplied, so look up now
+
+
 async def find_or_create_customer(
-    client: BooqableClient, *, name: str, email: str | None = None, phone: str | None = None
+    client: BooqableClient,
+    *,
+    name: str,
+    email: str | None = None,
+    phone: str | None = None,
+    prefetched: Any = _LOOKUP,
 ) -> dict[str, Any]:
-    existing = await find_customer(client, email=email, phone=phone)
+    """`prefetched` lets a caller that has already looked this contact up
+    (e.g. the call's get_caller_phone_number lookup) pass the result -- a
+    customer record or None for "no match" -- to skip a second customers GET."""
+    existing = await find_customer(client, email=email, phone=phone) if prefetched is _LOOKUP else prefetched
     if existing:
         return existing
 
@@ -274,18 +285,25 @@ async def create_reservation(
     stops_at: str,
     items: list[dict[str, Any]],
     auto_reserve: bool = True,
+    location: dict[str, Any] | None = None,
+    prefetched_customer: Any = _LOOKUP,
 ) -> dict[str, Any]:
     if not items:
         raise BooqableError("At least one item is required to create a reservation")
 
-    location = await resolve_location(client, location_id)
+    if location is None:
+        location = await resolve_location(client, location_id)
     starts_dt = _parse_datetime(starts_at)
     stops_dt = _parse_datetime(stops_at)
     starts_api = _order_timestamp(starts_dt)
     stops_api = _order_timestamp(stops_dt)
 
     customer_record = await find_or_create_customer(
-        client, name=customer["name"], email=customer.get("email"), phone=customer.get("phone")
+        client,
+        name=customer["name"],
+        email=customer.get("email"),
+        phone=customer.get("phone"),
+        prefetched=prefetched_customer,
     )
 
     order_payload = client.resource(

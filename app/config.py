@@ -430,3 +430,9 @@ GUIDEANTS_ADMIN_PASSWORD = os.environ.get("GUIDEANTS_ADMIN_PASSWORD", "")
 # The update-match key: GuideAnts decides create-vs-update by matching
 # manifest.json's name against an existing guide's name.
 GUIDEANTS_GUIDE_NAME = os.environ.get("GUIDEANTS_GUIDE_NAME", "Twilio Demo Agent")
+
+
+# ConversationRelay speech-to-text (Deepgram). nova-3-general handles names
+# and short answers better than the provider default.
+STT_SPEECH_MODEL = os.getenv("STT_SPEECH_MODEL", "nova-3-general")
+STT_LANGUAGE = os.getenv("STT_LANGUAGE", "en-US")

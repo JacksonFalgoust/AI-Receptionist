@@ -37,7 +37,16 @@ def _looks_like_email(value: str) -> bool:
     return bool(sep) and bool(local) and "." in domain.strip(".")
 
 
+def _first_name(name: str | None) -> str | None:
+    """Greet by first name only: a full name heard over the phone is the part
+    most likely to be mis-transcribed, and a wrong surname in a text reads
+    worse than none."""
+    parts = (name or "").split()
+    return parts[0] if parts else None
+
+
 def _payment_message(name: str | None, link: str) -> tuple[str, str, str]:
+    name = _first_name(name)
     greeting = f"Hi {name}," if name else "Hi,"
     subject = "Your bike rental payment link"
     text_body = (
@@ -62,6 +71,7 @@ async def send_payment_link(
     email: str | None = None,
     sms_client: TwilioSmsClient | None = None,
     postmark_client: PostmarkClient | None = None,
+    fallback_phone: str | None = None,
 ) -> dict[str, Any]:
     channel = _normalize_channel(channel or config.PAYMENT_LINK_DEFAULT_CHANNEL)
     contact = await reservations.get_order_contact(booqable_client, order_id)
@@ -80,10 +90,11 @@ async def send_payment_link(
         await client.send_email(to=to_email, subject=subject, text_body=text_body, html_body=html_body)
         return {"order_id": order_id, "channel": "email", "sent_to": to_email, "payment_link": link}
 
-    to_phone = phone or contact.get("phone")
+    to_phone = phone or contact.get("phone") or fallback_phone
     if not to_phone:
         raise BooqableError(f"No phone number on file for order {order_id}; pass one explicitly")
-    greeting = f"Hi {contact['name']}, " if contact.get("name") else "Hi, "
+    first = _first_name(contact.get("name"))
+    greeting = f"Hi {first}, " if first else "Hi, "
     client = sms_client or TwilioSmsClient()
     await client.send_sms(
         to=to_phone,

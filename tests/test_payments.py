@@ -36,7 +36,7 @@ def test_send_payment_link_sms_uses_contact_phone(monkeypatch):
     }
     sms_client.send_sms.assert_called_once_with(
         to="+15551234567",
-        body="Hi Jane Doe, here's your payment link for your reservation: https://example.com/pay/order_1",
+        body="Hi Jane, here's your payment link for your reservation: https://example.com/pay/order_1",
     )
 
 
@@ -58,7 +58,7 @@ def test_send_payment_link_sms_prefers_explicit_phone_override(monkeypatch):
     assert result["sent_to"] == "+15559998888"
     sms_client.send_sms.assert_called_once_with(
         to="+15559998888",
-        body="Hi Jane Doe, here's your payment link for your reservation: https://example.com/pay/order_1",
+        body="Hi Jane, here's your payment link for your reservation: https://example.com/pay/order_1",
     )
 
 
@@ -128,13 +128,13 @@ def test_send_payment_link_email_uses_contact_email(monkeypatch):
         to="jane@example.com",
         subject="Your bike rental payment link",
         text_body=(
-            "Hi Jane Doe,\n\n"
+            "Hi Jane,\n\n"
             "Here's your payment link for your reservation:\n"
             "https://example.com/pay/order_1\n\n"
             "Thanks!"
         ),
         html_body=(
-            '<p>Hi Jane Doe,</p>'
+            '<p>Hi Jane,</p>'
             '<p>Here\'s your payment link for your reservation: '
             '<a href="https://example.com/pay/order_1">https://example.com/pay/order_1</a></p>'
             "<p>Thanks!</p>"

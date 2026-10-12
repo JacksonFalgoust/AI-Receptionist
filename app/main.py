@@ -92,8 +92,18 @@ from .knowledge_api import router as knowledge_router
 from .reservations_api import router as reservations_router
 from .workflow_api import router as workflow_router
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s.%(msecs)03d %(levelname)s:%(name)s:%(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 logger = logging.getLogger("voice_receptionist")
+
+
+def mask_phone(value: str | None) -> str:
+    """Log-safe phone: keep only the last 4 digits."""
+    digits = "".join(ch for ch in (value or "") if ch.isdigit())
+    return f"***{digits[-4:]}" if len(digits) >= 4 else ("***" if value else "none")
 
 
 @contextlib.asynccontextmanager
@@ -205,6 +215,8 @@ async def twiml(request: Request) -> Response:
         welcome_greeting=greeting,
         tts_provider="ElevenLabs",
         transcription_provider="Deepgram",
+        speech_model=config.STT_SPEECH_MODEL,
+        language=config.STT_LANGUAGE,
         interruptible="none",
         # The welcome greeting has its own interruptibility setting, separate
         # from `interruptible` -- without this, Twilio cuts the greeting off
@@ -280,6 +292,14 @@ class CallState:
     # no application-level ack for individual text frames). 0.0 means no
     # reply has finished sending yet this call.
     last_reply_sent_at: float = 0.0
+    # Event-loop time the *current* reply's first frame went to Twilio (0.0
+    # once its agent-start has been reported, or before any frame). The
+    # agent-start handler measures against this, not last_reply_sent_at: a
+    # streamed reply's playback starts before its last frame is sent, so
+    # measuring from "last frame" picked up the previous turn's timestamp.
+    reply_first_frame_at: float = 0.0
+    # Event-loop time of the caller's most recent client-stop speaker event.
+    client_stop_at: float = 0.0
     # Event-loop time a client-side tool call started this turn, or 0.0 if
     # none is currently pending. guide_client streams every round's text
     # live, including narration ahead of a tool call, so the guide can go
@@ -356,6 +376,8 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                     phrase = fillers.pick(config.FILLER_PHRASES)
                     if phrase:
                         filler = phrase
+                        if not st.reply_first_frame_at:
+                            st.reply_first_frame_at = asyncio.get_event_loop().time()
                         await websocket.send_json(
                             {"type": "text", "token": phrase + " ", "last": False, "preemptible": True}
                         )
@@ -391,6 +413,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                     token = " " + token
                 if twilio_send_start is None:
                     twilio_send_start = asyncio.get_event_loop().time()
+                    st.reply_first_frame_at = twilio_send_start
                     logger.info(
                         "TIMING: GuideAnts request sent -> first token ready to send to Twilio: %.3fs",
                         twilio_send_start - start_time,
@@ -587,8 +610,8 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 logger.info(
                     "Call setup: callSid=%s from=%s to=%s",
                     msg.get("callSid"),
-                    msg.get("from"),
-                    msg.get("to"),
+                    mask_phone(msg.get("from")),
+                    mask_phone(msg.get("to")),
                 )
 
             elif not authenticated:
@@ -717,17 +740,24 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 if speaker_kind == "agent-stop":
                     st.agent_stop_seen = True
                     st.playback_done.set()
-                elif speaker_kind == "agent-start" and st.last_reply_sent_at:
+                elif speaker_kind == "agent-start" and st.reply_first_frame_at:
                     # Closest thing to a receipt Twilio gives back for a
                     # reply's text frames: not an ack of receiving them, but
                     # confirmation it has started speaking them, which it
                     # can't do without having received (and TTS'd) them
                     # first. Compare against respond_to()'s "last frame
                     # sent" TIMING log to see the app -> Twilio gap in full.
+                    now = asyncio.get_event_loop().time()
                     logger.info(
-                        "TIMING: last frame sent to Twilio -> Twilio agent-start (playback begins): %.3fs",
-                        asyncio.get_event_loop().time() - st.last_reply_sent_at,
+                        "TIMING: first frame sent to Twilio -> Twilio agent-start (playback begins): %.3fs",
+                        now - st.reply_first_frame_at,
                     )
+                    if st.client_stop_at and st.client_stop_at < st.reply_first_frame_at:
+                        logger.info(
+                            "TIMING: caller stopped speaking -> agent playback begins: %.3fs",
+                            now - st.client_stop_at,
+                        )
+                    st.reply_first_frame_at = 0.0
                 elif speaker_kind == "client-start":
                     st.client_speaking = True
                     # The caller resumed while a turn was buffered: hold the
@@ -738,6 +768,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                     if st.pending_text:
                         _arm_commit(PENDING_TURN_CEILING_SECONDS)
                 elif speaker_kind == "client-stop":
+                    st.client_stop_at = asyncio.get_event_loop().time()
                     st.client_speaking = False
                     # The continuation's transcript trails this event by STT
                     # finalization time, so give it TURN_RESUME_GRACE_SECONDS

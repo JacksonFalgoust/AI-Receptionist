@@ -130,6 +130,11 @@ class GuideSession:
     # The matched Booqable customer record from that lookup, or None if not
     # yet checked, no match was found, or the lookup failed/timed out.
     known_customer: dict | None = None
+    # Per-call caches for Booqable data that doesn't change mid-call: the
+    # catalog (listCatalog) and the resolved default location. Saves the
+    # repeat product_groups/locations GETs on later tool turns.
+    catalog_cache: list | None = None
+    location_cache: dict | None = None
     # Business-language log of every reservation tool this call actually
     # ran, in call order -- persisted as ConversationAction rows by
     # app/call_recording.py at call end. Not sent to GuideAnts; purely an
@@ -213,16 +218,35 @@ _TOOL_ACTION_LABELS: dict[str, tuple[str, str]] = {
 }
 
 
-async def _run_reservation_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
+def _same_phone(a: str | None, b: str | None) -> bool:
+    return bool(a and b) and reservations._normalize_phone(a) == reservations._normalize_phone(b)
+
+
+async def _default_location(client, session: "GuideSession | None", location_id: str | None) -> dict[str, Any]:
+    if location_id or session is None:
+        return await reservations.resolve_location(client, location_id)
+    if session.location_cache is None:
+        session.location_cache = await reservations.resolve_location(client, None)
+    return session.location_cache
+
+
+async def _run_reservation_tool(
+    name: str, args: dict[str, Any], session: "GuideSession | None" = None
+) -> dict[str, Any]:
     """Execute one Booqable-backed reservation tool -- the same business
     logic the old /api/reservations/* routes wrapped (app/reservations.py,
     app/payments.py), called directly instead of over HTTP. Required
     arguments missing from `args` raise KeyError, caught by the caller."""
     client = BooqableClient()
     if name == "listCatalog":
-        return {"products": await reservations.list_catalog(client)}
+        if session is not None and session.catalog_cache is not None:
+            return {"products": session.catalog_cache}
+        catalog = await reservations.list_catalog(client)
+        if session is not None:
+            session.catalog_cache = catalog
+        return {"products": catalog}
     if name == "checkAvailability":
-        location = await reservations.resolve_location(client, args.get("location_id"))
+        location = await _default_location(client, session, args.get("location_id"))
         result = await reservations.check_product_availability(
             client,
             product_id=args["product_id"],
@@ -245,6 +269,19 @@ async def _run_reservation_tool(name: str, args: dict[str, Any]) -> dict[str, An
     if name == "createReservation":
         if not args.get("customer_email") and not args.get("customer_phone"):
             raise BooqableError("customer_email or customer_phone is required")
+        extra: dict[str, Any] = {}
+        if not args.get("location_id") and session is not None and session.location_cache:
+            # Resolved earlier this call (checkAvailability always runs first).
+            extra["location"] = session.location_cache
+        if (
+            session is not None
+            and session.known_customer_checked
+            and not args.get("customer_email")
+            and _same_phone(args.get("customer_phone"), session.caller_phone)
+        ):
+            # get_caller_phone_number already looked this exact number up
+            # this call -- reuse that result instead of a second customers GET.
+            extra["prefetched_customer"] = session.known_customer
         return await reservations.create_reservation(
             client,
             customer={
@@ -257,6 +294,7 @@ async def _run_reservation_tool(name: str, args: dict[str, Any]) -> dict[str, An
             stops_at=args["stops_at"],
             items=args["items"],
             auto_reserve=args.get("auto_reserve", True),
+            **extra,
         )
     if name == "findReservations":
         return await reservations.find_reservations(
@@ -271,6 +309,9 @@ async def _run_reservation_tool(name: str, args: dict[str, Any]) -> dict[str, An
             channel=args.get("channel"),
             phone=args.get("phone"),
             email=args.get("email"),
+            # SMS with no number from the guide: payments falls back to the
+            # order's phone, then to the number this call came from.
+            fallback_phone=session.caller_phone if session is not None else None,
         )
     raise KeyError(name)
 
@@ -308,7 +349,7 @@ async def _execute_tool(name: str, arguments: str, session: GuideSession) -> str
             result: dict[str, Any] = {"error": "malformed arguments"}
         else:
             try:
-                result = await _run_reservation_tool(name, args)
+                result = await _run_reservation_tool(name, args, session)
             except (BooqableError, TwilioSmsError, PostmarkError) as exc:
                 logger.warning("Reservation tool %r failed: %s", name, exc)
                 result = {"error": str(exc)}
