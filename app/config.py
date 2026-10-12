@@ -288,7 +288,11 @@ AUTH_TOKEN_TTL_SECONDS = int(os.environ.get("AUTH_TOKEN_TTL_SECONDS", str(60 * 6
 # How long to wait for GuideAnts' reply before speaking a filler phrase to
 # mask the lookup latency. If the reply arrives before this elapses, no
 # filler is spoken at all.
-FILLER_DELAY_SECONDS = float(os.environ.get("FILLER_DELAY_SECONDS", "1.0"))
+# When true (default), fillers are only spoken while a client-side tool
+# call (a real lookup) is in flight -- a plain answer starts streaming fast
+# enough that a canned "let me check" would just delay it.
+FILLER_ONLY_FOR_TOOL_CALLS = os.environ.get("FILLER_ONLY_FOR_TOOL_CALLS", "true").lower() not in ("0", "false", "no")
+FILLER_DELAY_SECONDS = float(os.environ.get("FILLER_DELAY_SECONDS", "0.3"))
 
 # Twilio finalizes a `prompt` at each pause in caller speech, so a caller who
 # takes a brief mid-sentence breath used to have their turn split in two: the
@@ -307,7 +311,7 @@ TURN_PAUSE_SECONDS = float(os.environ.get("TURN_PAUSE_SECONDS", "0.5"))
 # (instead of TURN_PAUSE_SECONDS) for the transcript before giving up and
 # committing the buffered text alone. Also bounds the extra dead air when
 # the "resume" was just untranscribable noise.
-TURN_RESUME_GRACE_SECONDS = float(os.environ.get("TURN_RESUME_GRACE_SECONDS", "1.5"))
+TURN_RESUME_GRACE_SECONDS = float(os.environ.get("TURN_RESUME_GRACE_SECONDS", "0.6"))
 
 # The literal phrase the guide is instructed (see guide-demo/Twillio demo
 # agent/instructions.md's "FINAL ANSWER MARKER" paragraph) to speak at the

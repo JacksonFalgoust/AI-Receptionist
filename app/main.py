@@ -308,6 +308,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         start_time = asyncio.get_event_loop().time()
         reply_text = ""
         filler = None
+        tool_call_seen = False
         audio_started_at: float | None = None
         gen = stream_reply(input_text, st.guide)
         pending: asyncio.Future | None = None
@@ -347,9 +348,9 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         # gets its own filler, so the caller is never sitting in true
         # silence for long.
         async def next_event():
-            nonlocal pending, filler
+            nonlocal pending, filler, tool_call_seen
             pending = asyncio.ensure_future(gen.__anext__())
-            if filler_eligible:
+            if filler_eligible and (tool_call_seen or not config.FILLER_ONLY_FOR_TOOL_CALLS):
                 done, _ = await asyncio.wait({pending}, timeout=config.FILLER_DELAY_SECONDS)
                 if pending not in done and _queued_audio_seconds() <= 0.0:
                     phrase = fillers.pick(config.FILLER_PHRASES)
@@ -376,6 +377,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                     # softens barge-in for that gap; see the `prompt`
                     # handler below.
                     st.tool_call_started_at = asyncio.get_event_loop().time()
+                    tool_call_seen = True
                     logger.info("Client tool call(s) in flight: %s", ", ".join(event.names))
                     continue
                 st.tool_call_started_at = 0.0

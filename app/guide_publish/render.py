@@ -54,7 +54,9 @@ def _hours_prose(profile: dict, field: str) -> str:
 
 
 def build_slots(
-    configuration: models.ConciergeConfiguration, knowledge_topics: list[str]
+    configuration: models.ConciergeConfiguration,
+    knowledge_topics: list[str],
+    core_facts: str = "none",
 ) -> dict[str, str]:
     """The complete slot set. Adding one here requires adding it to
     instructions.template.md too -- template.render_instructions() rejects
@@ -76,6 +78,7 @@ def build_slots(
         ),
         "identity.tone_prose": _tone_prose(configuration.identity),
         "knowledge.topics": "; ".join(knowledge_topics) if knowledge_topics else "none",
+        "knowledge.core_facts": core_facts or "none",
     }
 
 
@@ -163,3 +166,27 @@ def knowledge_topics(items: list[models.KnowledgeItem], today: date) -> list[str
             seen.add(title)
             topics.append(title)
     return sorted(topics, key=lambda t: (t.lower(), t))
+
+
+# Item types inlined into the instructions (knowledge.core_facts) so the
+# most common caller questions are answered without a vector-store search
+# round trip. Products/accessories/etc. stay search-only.
+CORE_FACT_TYPES = ("location", "policy", "procedure", "service")
+_CORE_FACTS_MAX_CHARS = 4000
+
+
+def core_facts(items: list[models.KnowledgeItem], today: date) -> str:
+    """Publishable items of a CORE_FACT_TYPES type, one plain sentence block
+    per item ("Title: content."), markup replaced with spaces so nothing a
+    TTS engine would read aloud reaches the prompt. Sorted by title so the
+    prompt hash is stable. Capped in length; "none" when empty."""
+    parts: list[str] = []
+    for item in sorted(items, key=lambda i: ((i.title or "").lower(), i.id)):
+        if (item.type or "") not in CORE_FACT_TYPES or not is_publishable(item, today):
+            continue
+        title = " ".join(_FORBIDDEN.sub(" ", item.title or "").split())
+        body = " ".join(_FORBIDDEN.sub(" ", (item.content or "").replace("\u2014", ",")).split())
+        if title and body:
+            parts.append(f"{title}: {body}")
+    text = "\n".join(parts)
+    return text[:_CORE_FACTS_MAX_CHARS] if text else "none"

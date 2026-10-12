@@ -314,7 +314,11 @@ def test_a_knowledge_only_change_is_pushed(db, push_ok):
     first = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
     assert len(push_ok) == 1
 
-    item = publisher._knowledge_items(db)[0]
+    # A non-core item (core-fact types are inlined into the instructions,
+    # see render.core_facts, so editing one of those does move a slot).
+    item = next(
+        i for i in publisher._knowledge_items(db) if i.type not in render.CORE_FACT_TYPES
+    )
     item.content = "We close an hour early in January."
     db.commit()
 
@@ -452,3 +456,17 @@ def test_adding_or_renaming_knowledge_changes_the_pushed_instructions(db, push_o
     assert len(push_ok) == 3
     assert "Holiday hours" in push_ok.instructions[2]
     assert "Winter hours" not in push_ok.instructions[2]
+
+
+def test_a_core_fact_edit_reaches_the_instructions(db, push_ok):
+    """Core-fact items (policies, hours, services) are inlined into the
+    instructions so common questions skip the knowledge search."""
+    first = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+    item = next(
+        i for i in publisher._knowledge_items(db) if i.type in render.CORE_FACT_TYPES
+    )
+    item.content = "We close an hour early in January."
+    db.commit()
+    second = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+    assert "close an hour early" not in first.instructions_text
+    assert "close an hour early" in second.instructions_text
