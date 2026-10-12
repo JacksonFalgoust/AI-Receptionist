@@ -436,3 +436,21 @@ GUIDEANTS_GUIDE_NAME = os.environ.get("GUIDEANTS_GUIDE_NAME", "Twilio Demo Agent
 # and short answers better than the provider default.
 STT_SPEECH_MODEL = os.getenv("STT_SPEECH_MODEL", "nova-3-general")
 STT_LANGUAGE = os.getenv("STT_LANGUAGE", "en-US")
+
+# Soft looping "working" sound played (after a short spoken filler) while a
+# known-slow client tool runs. Served by this app at WORKING_SOUND_PATH on the
+# same public host Twilio reached /twiml on.
+WORKING_SOUND_ENABLED = os.getenv("WORKING_SOUND_ENABLED", "true").lower() not in ("0", "false", "no")
+WORKING_SOUND_PATH = "/audio/working.mp3"
+WORKING_SOUND_TOOLS = frozenset(
+    t.strip()
+    for t in os.getenv(
+        "WORKING_SOUND_TOOLS",
+        "listCatalog,checkAvailability,createReservation,sendPaymentLink,findReservations,"
+        "cancelReservation,listCustomers,createCustomer,get_caller_phone_number",
+    ).split(",")
+    if t.strip()
+)
+# After the guide calls endCall, wait this long past the goodbye's playback
+# before ending the ConversationRelay session (so nothing is cut off).
+END_CALL_AFTER_PLAYBACK_SECONDS = float(os.getenv("END_CALL_AFTER_PLAYBACK_SECONDS", "0.4"))

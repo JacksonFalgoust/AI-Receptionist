@@ -134,6 +134,9 @@ class GuideSession:
     # catalog (listCatalog) and the resolved default location. Saves the
     # repeat product_groups/locations GETs on later tool turns.
     catalog_cache: list | None = None
+    # Set when the guide calls endCall; app/main.py ends the ConversationRelay
+    # session once the current reply's playback finishes.
+    end_call_requested: bool = False
     location_cache: dict | None = None
     # Business-language log of every reservation tool this call actually
     # ran, in call order -- persisted as ConversationAction rows by
@@ -320,6 +323,9 @@ async def _execute_tool(name: str, arguments: str, session: GuideSession) -> str
     """Run one client-side tool call and return its result as the string to
     send back as a function_call_output. Never raises -- an error result is
     still a well-formed reply the model can react to."""
+    if name == "endCall":
+        session.end_call_requested = True
+        return json.dumps({"ok": True, "note": "Say a brief goodbye now; the call ends right after it plays."})
     if name == "get_caller_phone_number":
         if not session.known_customer_checked:
             session.known_customer_checked = True

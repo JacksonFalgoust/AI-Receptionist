@@ -71,12 +71,13 @@ input (guide_client.build_input) so the guide knows not to repeat itself
 import asyncio
 import contextlib
 import json
+from pathlib import Path
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from twilio.twiml.voice_response import Connect, VoiceResponse
 
 from . import barge_in, config, fillers, reservations, speaker_events, speech_timing, twilio_auth
@@ -196,6 +197,15 @@ async def _greeting_for(from_number: str) -> str:
         return _published_greeting()
 
 
+_WORKING_SOUND_FILE = Path(__file__).parent / "static" / "working.mp3"
+
+
+@app.get(config.WORKING_SOUND_PATH)
+async def working_sound() -> FileResponse:
+    """Public, static, non-sensitive: the soft 'working' loop Twilio fetches."""
+    return FileResponse(_WORKING_SOUND_FILE, media_type="audio/mpeg")
+
+
 @app.post("/twiml")
 async def twiml(request: Request) -> Response:
     """Return TwiML that connects the call to our Conversation Relay WebSocket."""
@@ -228,6 +238,8 @@ async def twiml(request: Request) -> Response:
         events="speaker-events",
     )
     vr.append(connect)
+    # Reached when the app ends the ConversationRelay session (endCall).
+    vr.hangup()
 
     return Response(content=str(vr), media_type="application/xml")
 
@@ -317,6 +329,8 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
     token = websocket.query_params.get("token", "")
 
     st = CallState()
+    public_host = websocket.headers.get("host", "")
+    working_sound_url = f"https://{public_host}{config.WORKING_SOUND_PATH}" if public_host else ""
 
     async def respond_to(input_text: str, filler_eligible: bool) -> None:
         # Every frame is marked preemptible so that if this turn is still
@@ -329,6 +343,10 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         reply_text = ""
         filler = None
         tool_call_seen = False
+        slow_tool_seen = False
+        working_sound_on = False
+        # The caller said something new, so any earlier endCall is void.
+        st.guide.end_call_requested = False
         audio_started_at: float | None = None
         gen = stream_reply(input_text, st.guide)
         pending: asyncio.Future | None = None
@@ -368,19 +386,38 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         # gets its own filler, so the caller is never sitting in true
         # silence for long.
         async def next_event():
-            nonlocal pending, filler, tool_call_seen
+            nonlocal pending, filler, tool_call_seen, working_sound_on
             pending = asyncio.ensure_future(gen.__anext__())
-            if filler_eligible and (tool_call_seen or not config.FILLER_ONLY_FOR_TOOL_CALLS):
+            # Known-slow tools always get the filler (+ working sound), even
+            # when the caller's turn wasn't a question ("Yes." before a booking).
+            if (filler_eligible or slow_tool_seen) and (
+                tool_call_seen or not config.FILLER_ONLY_FOR_TOOL_CALLS
+            ):
                 done, _ = await asyncio.wait({pending}, timeout=config.FILLER_DELAY_SECONDS)
-                if pending not in done and _queued_audio_seconds() <= 0.0:
+                if pending not in done and _queued_audio_seconds() <= 0.0 and not working_sound_on:
                     phrase = fillers.pick(config.FILLER_PHRASES)
+                    play_working = bool(
+                        slow_tool_seen and config.WORKING_SOUND_ENABLED and working_sound_url
+                    )
                     if phrase:
                         filler = phrase
                         if not st.reply_first_frame_at:
                             st.reply_first_frame_at = asyncio.get_event_loop().time()
+                        # Not preemptible when the working sound follows, or
+                        # the play message would cut the filler off.
                         await websocket.send_json(
-                            {"type": "text", "token": phrase + " ", "last": False, "preemptible": True}
+                            {"type": "text", "token": phrase + " ", "last": False,
+                             "preemptible": not play_working}
                         )
+                    if play_working:
+                        # Loops (0 = up to 1000x) until the reply's first text
+                        # token preempts it.
+                        await websocket.send_json(
+                            {"type": "play", "source": working_sound_url, "loop": 0,
+                             "preemptible": True, "interruptible": False}
+                        )
+                        working_sound_on = True
+                        logger.info("Working sound started (tool wait)")
             try:
                 return await pending
             except StopAsyncIteration:
@@ -400,9 +437,12 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                     # handler below.
                     st.tool_call_started_at = asyncio.get_event_loop().time()
                     tool_call_seen = True
+                    if set(event.names) & config.WORKING_SOUND_TOOLS:
+                        slow_tool_seen = True
                     logger.info("Client tool call(s) in flight: %s", ", ".join(event.names))
                     continue
                 st.tool_call_started_at = 0.0
+                working_sound_on = False  # this text preempts the loop
                 token = event.text
                 if reply_text and not reply_text[-1].isspace() and not token[:1].isspace():
                     # Round boundary (e.g. narration, then a tool call, then
@@ -524,6 +564,19 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
             remaining = estimated_duration - (asyncio.get_event_loop().time() - start_time)
             if remaining > 0:
                 await asyncio.sleep(remaining)
+        if st.guide.end_call_requested and reply_text:
+            await _end_call()
+
+    async def _end_call() -> None:
+        """Goodbye has finished playing: hand the call back to Twilio, which
+        reaches the <Hangup/> after <Connect> and ends the call."""
+        st.guide.end_call_requested = False
+        await asyncio.sleep(config.END_CALL_AFTER_PLAYBACK_SECONDS)
+        logger.info("Caller is done; ending ConversationRelay session (endCall)")
+        with contextlib.suppress(Exception):
+            await websocket.send_json(
+                {"type": "end", "handoffData": json.dumps({"reasonCode": "caller-done"})}
+            )
 
     def start_reply(user_text: str) -> None:
         input_text = build_input(user_text, st.interrupted_reply)

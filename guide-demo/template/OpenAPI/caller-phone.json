@@ -45,6 +45,30 @@
           }
         }
       }
+    },
+    "/end-call": {
+      "post": {
+        "operationId": "endCall",
+        "summary": "Hang up after the goodbye",
+        "description": "Takes no arguments. Call this only when the caller has clearly finished - they said goodbye, or said no / that's all / thank you after you asked if there was anything else - and in the same reply say a short goodbye. The call ends automatically right after your goodbye finishes playing. Never call it mid-task, while waiting on an answer, or when the caller's reply is unclear.",
+        "responses": {
+          "200": {
+            "description": "Acknowledged",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
