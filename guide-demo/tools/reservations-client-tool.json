@@ -347,8 +347,8 @@
     "/{order_id}/send-payment-link": {
       "post": {
         "operationId": "sendPaymentLink",
-        "summary": "Send the caller a payment link for their reservation",
-        "description": "Emails or texts a link so the caller can pay before arrival. This is currently a placeholder/test link -- no real charge is processed yet. Defaults to emailing the address already on file for the reservation unless channel is set to 'sms', in which case it texts the phone number on file. Pass email or phone to override the contact on file. Never call this in the same turn as asking the caller a question; wait for their answer. If it returns NOT SENT, ask/confirm, then call it after they reply. Email: refused with NOT SENT unless the address was read back to the caller and they said yes in their reply to that read-back (or it was confirmed earlier in the call).",
+        "summary": "Text the caller a booking confirmation (confirmation number + secure payment link)",
+        "description": "Texts the caller their booking confirmation -- the confirmation number (Booqable order number) and a link to pay before arrival; describe it to the caller as 'a booking confirmation with your confirmation number and a secure payment link'. Returns confirmation_id (e.g. '#54') when known (SMS only -- email is not offered and is refused with NOT SENT). This is currently a placeholder/test link -- no real charge is processed yet. Sends to the number they're calling from unless phone is given. Never call this in the same turn as asking the caller a question; wait for their answer. If it returns NOT SENT, ask/confirm, then call it after they reply.",
         "parameters": [
           {
             "name": "order_id",
@@ -369,18 +369,13 @@
                   "channel": {
                     "type": "string",
                     "enum": [
-                      "email",
                       "sms"
                     ],
-                    "description": "Which channel to send the payment link over: 'email' (default) or 'sms'."
-                  },
-                  "email": {
-                    "type": "string",
-                    "description": "Override email address to send to, if different from the one on file"
+                    "description": "Always 'sms'. Payment links are only sent by text."
                   },
                   "phone": {
                     "type": "string",
-                    "description": "Override phone number to text, if different from the one on file"
+                    "description": "A different number to text, only if the caller asked for one and confirmed it; leave empty for the number they're calling from."
                   }
                 }
               }
