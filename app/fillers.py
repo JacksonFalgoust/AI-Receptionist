@@ -173,6 +173,11 @@ ACTION_FILLERS: dict[str, list[str]] = {
         "Okay, booking that for you now.",
         "Just a moment while I get that booked.",
     ],
+    "cancel": [
+        "One moment while I cancel that.",
+        "Okay, cancelling that for you now.",
+        "Just a moment while I take care of that cancellation.",
+    ],
     "message": [
         "Sending that now.",
         "Okay, sending that over now.",
@@ -190,20 +195,23 @@ NO_FILLER_TOOLS = frozenset({"endcall", "end_call"})
 
 # Prefix-based so read-only tools like getOrder / lookupCustomerByEmail stay
 # in the "lookup" pool.
-_BOOKING_PREFIXES = ("create", "book", "reserve", "cancel", "update", "modify", "reschedule")
+_BOOKING_PREFIXES = ("create", "book", "reserve", "update", "modify", "reschedule")
+_CANCEL_PREFIXES = ("cancel",)
 _MESSAGE_PREFIXES = ("send", "sms", "text", "email")
 
 
 def action_for_tools(names) -> str | None:
     """Classify the in-flight tool call(s) into a filler pool key, or None
-    when every tool is filler-free. Messaging wins over booking, which wins
-    over lookup, when a round mixes several tools."""
+    when every tool is filler-free. Messaging wins over cancel, then booking,
+    then lookup, when a round mixes several tools."""
     lowered = [n.lower() for n in names or () if n]
     lowered = [n for n in lowered if n not in NO_FILLER_TOOLS]
     if not lowered and names:
         return None
     if any(n.startswith(_MESSAGE_PREFIXES) for n in lowered):
         return "message"
+    if any(n.startswith(_CANCEL_PREFIXES) for n in lowered):
+        return "cancel"
     if any(n.startswith(_BOOKING_PREFIXES) for n in lowered):
         return "booking"
     return "lookup"

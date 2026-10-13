@@ -23,6 +23,58 @@ def _parse_datetime(value: str) -> datetime:
     return dt.astimezone(ZoneInfo("UTC"))
 
 
+def _ordinal(n: int) -> str:
+    if 10 <= n % 100 <= 20:
+        return f"{n}th"
+    return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def to_local(value: str | None) -> datetime | None:
+    """Parse a Booqable timestamp (UTC, or naive = business-local) into
+    config.BOOQABLE_TIMEZONE. None/unparseable -> None."""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo(config.BOOQABLE_TIMEZONE))
+    return dt.astimezone(ZoneInfo(config.BOOQABLE_TIMEZONE))
+
+
+def spoken_date(value: str | None) -> str | None:
+    """'Saturday, October 17th' in the business's local time -- ready to say."""
+    dt = to_local(value)
+    return f"{dt:%A}, {dt:%B} {_ordinal(dt.day)}" if dt else None
+
+
+def spoken_time(value: str | None) -> str | None:
+    """'nine A M' style is left to the model; give '9 AM' / '3:30 PM' local."""
+    dt = to_local(value)
+    if not dt:
+        return None
+    hour = dt.hour % 12 or 12
+    suffix = "AM" if dt.hour < 12 else "PM"
+    return f"{hour} {suffix}" if dt.minute == 0 else f"{hour}:{dt.minute:02d} {suffix}"
+
+
+def spoken_when(starts_at: str | None, stops_at: str | None = None) -> dict[str, Any]:
+    """Local-time, speakable fields for a reservation's start/stop. The raw
+    starts_at/stops_at values are UTC -- never read those to a caller."""
+    out: dict[str, Any] = {}
+    start = to_local(starts_at)
+    if start:
+        out["starts_local"] = start.isoformat()
+        out["date_spoken"] = spoken_date(starts_at)
+        out["start_time_spoken"] = spoken_time(starts_at)
+    stop = to_local(stops_at)
+    if stop:
+        out["stops_local"] = stop.isoformat()
+        out["end_time_spoken"] = spoken_time(stops_at)
+    return out
+
+
 def _order_timestamp(dt: datetime) -> str:
     return dt.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -449,14 +501,17 @@ async def create_reservation(
         "reserved": reserved,
         "booking_error": booking_error,
         "reserve_error": reserve_error,
+        **spoken_when(starts_api, stops_api),
     }
 
 
 async def cancel_reservation(client: BooqableClient, order_id: str) -> dict[str, Any]:
     order = (await client.get(f"orders/{order_id}"))["data"]
-    status = client.attrs(order).get("status")
+    order_attrs = client.attrs(order)
+    status = order_attrs.get("status")
+    when = spoken_when(order_attrs.get("starts_at"), order_attrs.get("stops_at"))
     if status in {"canceled", "archived"}:
-        return {"order_id": order_id, "status": status, "already_canceled": True}
+        return {"order_id": order_id, "status": status, "already_canceled": True, **when}
     if status not in CANCELABLE_STATUSES:
         raise BooqableError(f"Order {order_id} in status '{status}' cannot be canceled")
 
@@ -467,7 +522,7 @@ async def cancel_reservation(client: BooqableClient, order_id: str) -> dict[str,
             {"order_id": order_id, "transition_from": status, "transition_to": "canceled"},
         ),
     )
-    return {"order_id": order_id, "previous_status": status, "status": "canceled"}
+    return {"order_id": order_id, "previous_status": status, "status": "canceled", **when}
 
 
 async def get_order_contact(client: BooqableClient, order_id: str) -> dict[str, Any]:
@@ -527,6 +582,7 @@ async def find_reservations(
                 "stops_at": attrs.get("stops_at"),
                 "items": _order_line_items(client, detail.get("included") or []),
                 "price_usd": (attrs.get("grand_total_in_cents") or 0) / 100,
+                **spoken_when(attrs.get("starts_at"), attrs.get("stops_at")),
             }
         )
     found.sort(key=lambda r: r["starts_at"] or "")
@@ -535,4 +591,7 @@ async def find_reservations(
         "customer_found": True,
         "customer_name": client.attrs(customer).get("name"),
         "reservations": found,
+        "note": "starts_at/stops_at are UTC. When speaking, use only date_spoken and "
+                "start_time_spoken (local time). Never cancel any of these unless the caller "
+                "says yes to that specific reservation.",
     }
