@@ -53,6 +53,15 @@ def _hours_prose(profile: dict, field: str) -> str:
         raise ValueError(f"{field}: {exc}") from exc
 
 
+def spoken_name(name: str) -> str:
+    """The business name as TTS should say it (config.SPOKEN_NAME_ALIASES)."""
+    from app import config as _config
+
+    for word, spoken in _config.SPOKEN_NAME_ALIASES.items():
+        name = name.replace(word.strip(), spoken.strip())
+    return name
+
+
 def build_slots(
     configuration: models.ConciergeConfiguration,
     knowledge_topics: list[str],
@@ -69,6 +78,9 @@ def build_slots(
     profile = configuration.business_profile
     return {
         "business.name": _clean(profile.get("name", ""), "business.name"),
+        "business.spoken_name": _clean(
+            spoken_name(profile.get("name", "")), "business.spoken_name"
+        ),
         "business.description": _clean(
             profile.get("description", ""), "business.description"
         ),

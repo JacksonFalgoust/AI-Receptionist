@@ -831,6 +831,8 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 st.guide.caller_phone = msg.get("from")
                 if config.FAST_TOOLS_ENABLED and config.BOOQABLE_API_KEY and st.guide.prefetch_task is None:
                     st.guide.prefetch_task = asyncio.create_task(guide_client.prefetch_booqable(st.guide))
+                if config.KNOWN_CALLER_NOTE_ENABLED and config.BOOQABLE_API_KEY and st.guide.caller_lookup_task is None:
+                    st.guide.caller_lookup_task = asyncio.create_task(guide_client.lookup_known_caller(st.guide))
                 logger.info(
                     "Call setup: callSid=%s from=%s to=%s",
                     msg.get("callSid"),

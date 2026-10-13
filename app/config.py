@@ -476,6 +476,17 @@ STUCK_AUDIO_RECOVERY_SECONDS = float(os.getenv("STUCK_AUDIO_RECOVERY_SECONDS", "
 # Ready-made goodbye: after the agent asked "anything else?" and the caller
 # clearly says they're done, speak this and hang up without a model round trip.
 CANNED_GOODBYE_ENABLED = os.getenv("CANNED_GOODBYE_ENABLED", "true").lower() not in ("0", "false", "no")
+# "Word=Spoken form" pairs (comma-separated) applied to the business name the
+# guide is told to SAY, so TTS pronounces it right ("Peachtree" was read as
+# "Paf-tree"). The written name (business.name) is unchanged.
+SPOKEN_NAME_ALIASES = dict(
+    pair.split("=", 1)
+    for pair in os.getenv("SPOKEN_NAME_ALIASES", "Peachtree=Peach tree").split(",")
+    if "=" in pair
+)
+# Tell the guide on the caller's first turn who a known caller is (from the
+# call-setup Booqable lookup), so it confirms the name instead of asking.
+KNOWN_CALLER_NOTE_ENABLED = os.getenv("KNOWN_CALLER_NOTE_ENABLED", "true").lower() not in ("0", "false", "no")
 CANNED_GOODBYE_TEXT = os.getenv(
     "CANNED_GOODBYE_TEXT", "You're welcome! Thanks for calling, and have a great day. Goodbye!"
 )

@@ -30,7 +30,7 @@ from typing import Any, AsyncIterator
 import openai
 from openai import AsyncOpenAI
 
-from . import config, payments, reservations
+from . import call_end, config, payments, reservations
 from .booqable_client import BooqableClient, BooqableError
 from .postmark_client import PostmarkError
 from .twilio_client import TwilioSmsError
@@ -143,6 +143,10 @@ class GuideSession:
     # session once the current reply's playback finishes.
     end_call_requested: bool = False
     location_cache: dict | None = None
+    # Background known-caller lookup started at call setup (see
+    # lookup_known_caller); the first turn's input carries its result.
+    caller_lookup_task: Any = None
+    known_caller_note_sent: bool = False
     # Business-language log of every reservation tool this call actually
     # ran, in call order -- persisted as ConversationAction rows by
     # app/call_recording.py at call end. Not sent to GuideAnts; purely an
@@ -457,6 +461,53 @@ async def _tool_outputs(outcome: "_TurnOutcome", session: GuideSession) -> list[
 
 # Safe to run concurrently within one round: no writes, no ordering needs.
 _READ_ONLY_TOOLS = frozenset({"listCatalog", "checkAvailability", "listCustomers", "findReservations"})
+
+
+async def lookup_known_caller(session: GuideSession) -> None:
+    """Look the caller's number up in Booqable right at call setup (the same
+    lookup get_caller_phone_number does), so the first turn can tell the guide
+    who is calling. Best effort; never raises."""
+    if session.known_customer_checked or not session.caller_phone:
+        return
+    try:
+        client = BooqableClient()
+        session.known_customer = await asyncio.wait_for(
+            reservations.find_customer(client, phone=session.caller_phone),
+            timeout=config.CALLER_LOOKUP_TIMEOUT_SECONDS,
+        )
+        session.known_customer_checked = True
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.info("Known-caller lookup skipped: %s", type(exc).__name__)
+
+
+def known_caller_note(session: GuideSession) -> str | None:
+    """One-time note for the guide naming a known caller. Never contains the
+    phone number itself -- only its last four digits, spoken."""
+    if not session.known_customer:
+        return None
+    name = (BooqableClient.attrs(session.known_customer).get("name") or "").strip()
+    if not name:
+        return None
+    digits = "".join(ch for ch in (session.caller_phone or "") if ch.isdigit())
+    last_four = ", ".join(digits[-4:]) if len(digits) >= 4 else ""
+    ending = f" (number ending in {last_four})" if last_four else ""
+    return (
+        f"[Note: this caller is a known customer, {name}, calling from the number on file{ending}. "
+        f"They were already greeted by first name. Never ask for their name; when you need it, "
+        f"call get_caller_phone_number and confirm it instead.]"
+    )
+
+
+async def _with_known_caller_note(user_text: str, session: GuideSession) -> str:
+    if session.known_caller_note_sent or not config.KNOWN_CALLER_NOTE_ENABLED:
+        return user_text
+    session.known_caller_note_sent = True
+    task = session.caller_lookup_task
+    if task is not None and not task.done():
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(asyncio.shield(task), timeout=config.CALLER_LOOKUP_TIMEOUT_SECONDS)
+    note = known_caller_note(session)
+    return f"{note} {user_text}" if note else user_text
 
 
 async def prefetch_booqable(session: GuideSession) -> None:
@@ -790,6 +841,11 @@ async def _stream_reply_with_tools(
     and then cut off same as the buffering branches' worst case; this is
     logged as a warning since it means the guide said the marker too early."""
     next_input: Any = user_text
+    spoken_so_far = ""
+    # Set once a round has already spoken a goodbye and then called endCall:
+    # the follow-up round (the guide answering the endCall result) is
+    # consumed but not spoken, so the caller never hears the goodbye twice.
+    mute = False
     for i in range(_MAX_TOOL_ITERATIONS):
         outcome = _TurnOutcome()
         gate = _SentinelGate()
@@ -798,10 +854,15 @@ async def _stream_reply_with_tools(
         async with contextlib.aclosing(_stream_turn(client, next_input, session, outcome)) as gen:
             async for delta in gen:
                 session.round_text += delta
-                if text := gate.feed(delta):
+                if (text := gate.feed(delta)) and not mute:
+                    spoken_so_far += text
                     yield Delta(text)
+        if mute and not gate.open and gate.retained:
+            logger.info("Goodbye already spoken before endCall; not repeating it: %r", gate.retained)
 
         if not outcome.function_calls:  # final round
+            if mute:
+                return
             if not gate.open:  # FAILSAFE: phrase never arrived this turn
                 if text := _strip_sentinel(gate.retained):
                     yield Delta(text)
@@ -809,6 +870,19 @@ async def _stream_reply_with_tools(
                     "No trigger phrase this turn; speaking the round unstreamed (failsafe)"
                 )
             return
+
+        names = [name for _, name, _ in outcome.function_calls]
+        if (
+            gate.emitted_any
+            and names
+            and all(n == "endCall" for n in names)
+            and call_end.reply_is_goodbye(spoken_so_far)
+        ):
+            logger.info("Goodbye spoken in the same round as endCall; the follow-up round stays silent")
+            mute = True
+            yield ToolCallStarted(tuple(names))
+            next_input = await _tool_outputs(outcome, session)
+            continue
 
         if i == _MAX_TOOL_ITERATIONS - 1:
             logger.warning(
@@ -856,6 +930,8 @@ async def stream_reply(
     than opening fresh conversations forever.
     """
     client = _get_client()
+    if not _is_retry:
+        user_text = await _with_known_caller_note(user_text, session)
 
     if session.conversation_id is None and session.stream_missing_conversation:
         async for event in _start_conversation(client, user_text, session):
