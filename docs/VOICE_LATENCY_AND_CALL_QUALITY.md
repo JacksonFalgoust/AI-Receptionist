@@ -196,11 +196,28 @@ Problems seen on the 17:52 call, and their fixes:
   twice over a caller who is just starting.
 - **Pronunciation:** `SPOKEN_NAME_ALIASES` default adds `Pedals=Peddles`
   ("Pedals" came out as "Pen-o-lose").
-- **Email payment links are confirmed like names.** The guide reads the
-  address back spelled out and sends only after a clear yes. Server guard:
-  sendPaymentLink by email returns `NOT SENT` unless the previous turn read
-  that address back and the caller's reply was a yes (or it was confirmed
-  earlier in the call).
+
+### Text-only booking confirmation (Oct 13 18:46 test call)
+
+Email payment links were removed. On the 18:46 call, choosing email took
+about 90 s and five round trips. Spelled addresses were misheard
+differently each time ("brackens", "drackins", "b b rackins"). The
+model twice tried to send before the caller said yes (an earlier
+email-confirmation guard blocked both). When the caller finally confirmed,
+Postmark rejected the send (HTTP 401, invalid server token). Now:
+
+- sendPaymentLink sends **by text only**, to the calling number unless the
+  caller confirmed a different one. Any email channel or address gets
+  `NOT SENT: payment links are only sent by text message`. The tool spec's
+  channel enum is just `sms`, with no email field.
+- The text is a professional booking confirmation: "Hi Eric, your
+  reservation with Peachtree Pedals is confirmed. Confirmation number: #54.
+  You can pay securely ahead of your visit here: <link> Thank you!" The
+  confirmation number is the Booqable order number, and the tool returns it
+  as `confirmation_id`.
+- The agent offers "a booking confirmation with your confirmation number
+  and a secure payment link", and says the confirmation number after
+  sending. It never calls it just "a payment link".
 
 ## Configuration
 

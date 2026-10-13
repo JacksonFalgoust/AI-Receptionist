@@ -171,7 +171,6 @@ def test_template_rules():
     t = TEMPLATE.read_text(encoding="utf-8")
     assert "BUSINESS HOURS:" in t and "offer the next open day" in t
     assert '"Booking under"' in t and "read the details back again" in t
-    assert "always confirm the address first" in t
 
 
 def test_spoken_name_default_aliases():
@@ -195,56 +194,49 @@ def test_bare_greeting(text, bare):
     assert call_end.is_bare_greeting(text) is bare
 
 
-# --- email confirmation guard ---------------------------------------------------------
+# --- payment links: text only (email removed) ----------------------------------------
 
-def _email_session(prev, user):
-    s = GuideSession()
-    s.prev_round_text, s.turn_user_text = prev, user
-    return s
-
-
-def _send(s, email):
+def _send(args, session=None):
     return asyncio.run(guide_client._run_reservation_tool(
-        "sendPaymentLink", {"order_id": "o", "channel": "email", "email": email}, s))
+        "sendPaymentLink", {"order_id": "o", **args}, session or GuideSession(caller_phone="+15550003374")))
 
 
-def test_email_refused_without_read_back(monkeypatch):
+@pytest.mark.parametrize("args", [
+    {"channel": "email", "email": "someone@example.com"},
+    {"channel": "email"},
+    {"channel": "sms", "email": "someone@example.com"},
+])
+def test_email_payment_link_refused(monkeypatch, args):
+    async def boom(*a, **k):
+        raise AssertionError("must not send")
+
     monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
-    out = _send(_email_session("Would you like it by text or by email?", "Email."), "john@example.com")
-    assert out["sent"] is False and out["error"].startswith("NOT SENT")
+    monkeypatch.setattr(guide_client.payments, "send_payment_link", boom)
+    out = _send(args)
+    assert out["sent"] is False and out["error"].startswith("NOT SENT: payment links are only sent by text")
 
 
-def test_email_refused_when_caller_says_no(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
-    s = _email_session("I have j, o, h, n at example dot com. Is that right?", "No, it's jon.")
-    assert _send(s, "john@example.com")["sent"] is False
+@pytest.mark.parametrize("args", [{"channel": "sms"}, {}, {"channel": "text"}])
+def test_payment_link_always_sms_to_caller(monkeypatch, args):
+    seen = {}
 
-
-def test_email_sent_after_read_back_and_yes(monkeypatch):
     async def fake_send(client, **kw):
-        return {"sent": True, "channel": kw["channel"]}
-
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
-    monkeypatch.setattr(guide_client.payments, "send_payment_link", fake_send)
-    s = _email_session("I have j-o-h-n at example dot com. Is that right?", "[Note: x] Yes, that's right.")
-    assert _send(s, "john@example.com") == {"sent": True, "channel": "email"}
-    # Confirmed once -> later sends this call are fine.
-    s.prev_round_text, s.turn_user_text = "Anything else?", "Send it again"
-    assert _send(s, "john@example.com")["sent"] is True
-
-
-def test_email_read_back_must_match_address(monkeypatch):
-    monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
-    s = _email_session("I have j, o, h, n at example dot com. Is that right?", "Yes.")
-    assert _send(s, "jane@example.com")["sent"] is False
-
-
-def test_sms_unaffected(monkeypatch):
-    async def fake_send(client, **kw):
+        seen.update(kw)
         return {"sent": True}
 
     monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
     monkeypatch.setattr(guide_client.payments, "send_payment_link", fake_send)
-    out = asyncio.run(guide_client._run_reservation_tool(
-        "sendPaymentLink", {"order_id": "o", "channel": "sms"}, _email_session("", "Text.")))
-    assert out == {"sent": True}
+    assert _send(args) == {"sent": True}
+    assert seen["channel"] == "sms" and "email" not in seen
+    assert seen["fallback_phone"] == "+15550003374"
+
+
+def test_spec_and_template_have_no_email_channel():
+    import json
+    spec = json.loads((TEMPLATE.parents[0] / "OpenAPI" / "voice-receptionist.json").read_text(encoding="utf-8"))
+    body = spec["paths"]["/{order_id}/send-payment-link"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+    assert body["properties"]["channel"]["enum"] == ["sms"] and "email" not in body["properties"]
+    t = TEMPLATE.read_text(encoding="utf-8")
+    assert "only ever sent by text message, never by email" in t and "by text or by email" not in t
+    assert "booking confirmation with your confirmation number and a secure payment link" in t
+    assert "the confirmation\"" not in t

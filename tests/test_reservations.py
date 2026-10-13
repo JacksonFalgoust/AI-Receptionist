@@ -199,6 +199,7 @@ def test_get_order_contact_returns_phone_and_total():
         "phone": "+15551234567",
         "email": "jane@example.com",
         "grand_total_usd": 123.45,
+        "order_number": None,
     }
     client.get.assert_any_call("orders/order_1")
     client.get.assert_any_call("customers/cust_1")

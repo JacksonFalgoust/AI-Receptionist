@@ -681,8 +681,8 @@ def test_execute_tool_send_payment_link(monkeypatch):
     monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
     fake_result = {
         "order_id": "order_1",
-        "channel": "email",
-        "sent_to": "jane@example.com",
+        "channel": "sms",
+        "sent_to": "+15559998888",
         "payment_link": "https://example.com/pay/order_1",
     }
     monkeypatch.setattr(guide_client.payments, "send_payment_link", AsyncMock(return_value=fake_result))
@@ -708,28 +708,21 @@ def test_execute_tool_send_payment_link_passes_phone_override(monkeypatch):
     assert send_mock.call_args.kwargs["phone"] == "+15559998888"
 
 
-def _confirmed_email_session(email: str) -> GuideSession:
-    # The email guard needs a confirmed address (see test_hours_email_known_booking.py).
-    s = GuideSession()
-    s.confirmed_emails.add("".join(ch for ch in email.lower() if ch.isalnum()))
-    return s
-
-
-def test_execute_tool_send_payment_link_passes_channel_and_email(monkeypatch):
+def test_execute_tool_send_payment_link_refuses_email(monkeypatch):
     monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
-    send_mock = AsyncMock(return_value={"order_id": "order_1", "sent_to": "jane@example.com", "payment_link": "x"})
+    send_mock = AsyncMock(return_value={"order_id": "order_1"})
     monkeypatch.setattr(guide_client.payments, "send_payment_link", send_mock)
 
-    asyncio.run(
+    result = asyncio.run(
         guide_client._execute_tool(
             "sendPaymentLink",
             json.dumps({"order_id": "order_1", "channel": "email", "email": "jane@example.com"}),
-            _confirmed_email_session("jane@example.com"),
+            GuideSession(),
         )
     )
 
-    assert send_mock.call_args.kwargs["channel"] == "email"
-    assert send_mock.call_args.kwargs["email"] == "jane@example.com"
+    assert json.loads(result)["error"].startswith("NOT SENT")
+    send_mock.assert_not_called()
 
 
 def test_execute_tool_booqable_error_returns_error_json(monkeypatch):

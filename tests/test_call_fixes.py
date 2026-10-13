@@ -39,7 +39,7 @@ def test_sms_falls_back_to_caller_phone_when_order_has_none(monkeypatch):
         )
     )
     assert result["sent_to"] == "+15550002222"
-    assert sms.send_sms.call_args.kwargs["body"].startswith("Hi, ")
+    assert sms.send_sms.call_args.kwargs["body"].startswith("Hello, your reservation")
 
 
 def test_execute_send_payment_link_passes_caller_phone_as_fallback(monkeypatch):

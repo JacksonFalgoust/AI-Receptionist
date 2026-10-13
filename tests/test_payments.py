@@ -36,7 +36,7 @@ def test_send_payment_link_sms_uses_contact_phone(monkeypatch):
     }
     sms_client.send_sms.assert_called_once_with(
         to="+15551234567",
-        body="Hi Jane, here's your payment link for your reservation: https://example.com/pay/order_1",
+        body=payments.confirmation_sms("Jane", None, "https://example.com/pay/order_1", payments._business_name()),
     )
 
 
@@ -58,7 +58,7 @@ def test_send_payment_link_sms_prefers_explicit_phone_override(monkeypatch):
     assert result["sent_to"] == "+15559998888"
     sms_client.send_sms.assert_called_once_with(
         to="+15559998888",
-        body="Hi Jane, here's your payment link for your reservation: https://example.com/pay/order_1",
+        body=payments.confirmation_sms("Jane", None, "https://example.com/pay/order_1", payments._business_name()),
     )
 
 
@@ -262,3 +262,31 @@ def test_send_payment_link_unknown_channel_raises(monkeypatch):
 
     with pytest.raises(BooqableError):
         asyncio.run(payments.send_payment_link(object(), order_id="order_1", channel="carrier-pigeon"))
+
+
+def test_confirmation_sms_includes_confirmation_id(monkeypatch):
+    monkeypatch.setattr(config, "PAYMENT_LINK_BASE_URL", "https://example.com/pay")
+    monkeypatch.setattr(
+        payments.reservations,
+        "get_order_contact",
+        AsyncMock(return_value={"order_id": "order_1", "name": "Eric Smith", "phone": "+15550003374", "order_number": 54}),
+    )
+    sms_client = AsyncMock()
+    result = asyncio.run(
+        payments.send_payment_link(object(), order_id="order_1", channel="sms", sms_client=sms_client)
+    )
+    assert result["confirmation_id"] == "#54"
+    sms_client.send_sms.assert_called_once_with(
+        to="+15550003374",
+        body=payments.confirmation_sms("Eric", 54, "https://example.com/pay/order_1", payments._business_name()),
+    )
+
+
+def test_confirmation_sms_wording():
+    assert payments.confirmation_sms("Eric", 54, "https://x/pay", "Peachtree Pedals") == (
+        "Hi Eric, your reservation with Peachtree Pedals is confirmed. Confirmation number: #54. "
+        "You can pay securely ahead of your visit here: https://x/pay Thank you!"
+    )
+    assert payments.confirmation_sms(None, None, "L") == (
+        "Hello, your reservation is confirmed. You can pay securely ahead of your visit here: L Thank you!"
+    )
