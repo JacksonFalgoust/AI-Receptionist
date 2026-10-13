@@ -89,7 +89,7 @@ from .conversations_api import router as conversations_router
 from .dashboard_api import router as dashboard_router
 from . import call_end
 from .db import init_db
-from . import stt_fixups
+from . import guide_client, stt_fixups
 from .guide_client import Delta, GuideSession, ToolCallStarted, build_input, stream_reply
 from .knowledge_api import router as knowledge_router
 from .reservations_api import router as reservations_router
@@ -719,6 +719,18 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         # model handles it. caller_done() also covers "bye"/"goodbye".
         return call_end.asked_anything_else(last_agent) and call_end.caller_done(user_text)
 
+    def _one_word_name_reply() -> bool:
+        """The agent just asked for the caller's name and all we have so far is
+        one word -- likely a first name with the last name still coming."""
+        if config.NAME_EXTRA_WAIT_SECONDS <= 0:
+            return False
+        words = (st.pending_text or "").split()
+        if len(words) != 1:
+            return False
+        agent = [x["content"] for x in st.messages if x["role"] == "assistant"]
+        last = (agent[-1] if agent else "").lower()
+        return "name" in last and "spell" not in last and "?" in last
+
     def start_reply(user_text: str) -> None:
         _agent_lines = [x["content"] for x in st.messages if x["role"] == "assistant"]
         fixed = stt_fixups.fix_choice(_agent_lines[-1] if _agent_lines else "", user_text)
@@ -746,6 +758,8 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         st.task = asyncio.create_task(respond_to(input_text, fillers.looks_like_question(user_text)))
 
     def _arm_commit(delay: float) -> None:
+        if delay < PENDING_TURN_CEILING_SECONDS and _one_word_name_reply():
+            delay += config.NAME_EXTRA_WAIT_SECONDS
         if st.pending_commit and not st.pending_commit.done():
             st.pending_commit.cancel()
         st.pending_commit = asyncio.create_task(_commit_pending_after(delay))
@@ -815,6 +829,8 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
 
                 authenticated = True
                 st.guide.caller_phone = msg.get("from")
+                if config.FAST_TOOLS_ENABLED and config.BOOQABLE_API_KEY and st.guide.prefetch_task is None:
+                    st.guide.prefetch_task = asyncio.create_task(guide_client.prefetch_booqable(st.guide))
                 logger.info(
                     "Call setup: callSid=%s from=%s to=%s",
                     msg.get("callSid"),

@@ -486,4 +486,11 @@ ACCESSORY_KEYWORDS = tuple(
     for w in os.getenv("ACCESSORY_KEYWORDS", "helmet,lock,basket,light,bell,accessory,child seat").split(",")
     if w.strip()
 )
+# Faster tool turns: fetch the catalog's product groups in parallel, prefetch
+# catalog + location at call setup, and run read-only tool calls of one round
+# concurrently. "false" restores the old sequential behaviour.
+FAST_TOOLS_ENABLED = os.getenv("FAST_TOOLS_ENABLED", "true").lower() not in ("0", "false", "no")
+# Extra wait before committing a one-word reply to "what's your full name?"
+# (callers pause between first and last name).
+NAME_EXTRA_WAIT_SECONDS = float(os.getenv("NAME_EXTRA_WAIT_SECONDS", "1.0"))
 GUIDE_WARMUP_ON_STARTUP = os.getenv("GUIDE_WARMUP_ON_STARTUP", "true").lower() not in ("0", "false", "no")

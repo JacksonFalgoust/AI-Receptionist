@@ -137,6 +137,8 @@ class GuideSession:
     # All text the model produced so far in the current caller turn (every
     # round, spoken or not) -- used by the sendPaymentLink guard.
     round_text: str = ""
+    # Background Booqable prefetch started at call setup (see prefetch_booqable).
+    prefetch_task: Any = None
     # Set when the guide calls endCall; app/main.py ends the ConversationRelay
     # session once the current reply's playback finishes.
     end_call_requested: bool = False
@@ -245,6 +247,9 @@ async def _run_reservation_tool(
     arguments missing from `args` raise KeyError, caught by the caller."""
     client = BooqableClient()
     if name == "listCatalog":
+        if session is not None and session.prefetch_task is not None:
+            with contextlib.suppress(Exception):
+                await session.prefetch_task
         if session is not None and session.catalog_cache is not None:
             catalog = session.catalog_cache
         else:
@@ -435,11 +440,40 @@ def _collect_function_calls(output: Any, outcome: "_TurnOutcome") -> None:
 
 
 async def _tool_outputs(outcome: "_TurnOutcome", session: GuideSession) -> list[dict[str, str]]:
-    outputs = []
-    for call_id, name, arguments in outcome.function_calls:
-        output = await _execute_tool(name, arguments, session)
-        outputs.append({"type": "function_call_output", "call_id": call_id, "output": output})
-    return outputs
+    calls = outcome.function_calls
+    if (
+        config.FAST_TOOLS_ENABLED
+        and len(calls) > 1
+        and all(name in _READ_ONLY_TOOLS for _, name, _ in calls)
+    ):
+        results = await asyncio.gather(*(_execute_tool(n, a, session) for _, n, a in calls))
+    else:
+        results = [await _execute_tool(n, a, session) for _, n, a in calls]
+    return [
+        {"type": "function_call_output", "call_id": call_id, "output": output}
+        for (call_id, _, _), output in zip(calls, results)
+    ]
+
+
+# Safe to run concurrently within one round: no writes, no ordering needs.
+_READ_ONLY_TOOLS = frozenset({"listCatalog", "checkAvailability", "listCustomers", "findReservations"})
+
+
+async def prefetch_booqable(session: GuideSession) -> None:
+    """Fill the per-call catalog and location caches in the background right
+    after call setup, so the first listCatalog/checkAvailability turn doesn't
+    wait on ~2-3 s of Booqable reads. Best effort; never raises."""
+    try:
+        client = BooqableClient()
+        catalog, location = await asyncio.gather(
+            reservations.list_catalog(client), reservations.resolve_location(client, None)
+        )
+        if session.catalog_cache is None:
+            session.catalog_cache = catalog
+        if session.location_cache is None:
+            session.location_cache = location
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.info("Booqable prefetch skipped: %s", type(exc).__name__)
 
 
 # Leading whitespace/sentence punctuation trimmed off whatever immediately

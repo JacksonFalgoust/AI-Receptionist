@@ -109,9 +109,12 @@ async def list_catalog(client: BooqableClient) -> list[dict[str, Any]]:
     """Live rentable product catalog, for the receptionist to browse/search."""
     groups = await _load_product_groups(client)
     catalog: list[dict[str, Any]] = []
-    for group in groups:
+    if config.FAST_TOOLS_ENABLED:
+        products = await asyncio.gather(*(_product_for_group(client, g) for g in groups))
+    else:
+        products = [await _product_for_group(client, g) for g in groups]
+    for group, product in zip(groups, products):
         attrs = client.attrs(group)
-        product = await _product_for_group(client, group)
         if not product:
             continue
         catalog.append(
