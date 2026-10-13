@@ -119,6 +119,49 @@ local tool timing harness against live read-only Booqable calls.
   all 10 client tools are live. GuideAnts' derived `toolCount` is ignored
   when a source is added or replaced.
 
+### Cancel handling, spoken times, goodbye and known callers (Oct 13 17:52 test call)
+
+Problems seen on the 17:52 call, and their fixes:
+
+- **"No, I need to cancel" after a booking recap cancelled an older order.**
+  The guide treated "cancel" as "cancel an existing reservation", looked one up
+  and cancelled it on "cancel that too". The instructions now have a
+  DECLINING A PENDING BOOKING rule: a no/cancel after the recap just drops the
+  pending request (nothing was booked, and no lookup or cancel tool runs). An
+  existing reservation is only cancelled when the caller separately asks for
+  that and says yes to that specific reservation. The findReservations and
+  cancelReservation tool descriptions say the same thing.
+- **Wrong reservation time ("1 PM" for a 9 AM order).** Booqable returns UTC,
+  and the guide read it as-is. findReservations, cancelReservation and
+  createReservation now also return `date_spoken` ("Saturday, October 17th"),
+  `start_time_spoken` / `end_time_spoken` (local, `BOOQABLE_TIMEZONE`) and
+  `starts_local` / `stops_local`, and the guide is told to say only those.
+  This also fixes ordinals being split ("sevent e enth").
+- **Booking filler while cancelling** ("Just a moment while I get that
+  booked"). cancelReservation now has its own filler pool ("One moment while I
+  cancel that.").
+- **"I have you down for…" before a booking existed.** Added to the phrases
+  the guide must not use before createReservation succeeds.
+- **"Peachtree Pedals" mispronounced.** There is a new `{{business.spoken_name}}`
+  template slot (the business name after `SPOKEN_NAME_ALIASES`, default
+  `Peachtree=Peach tree`), which the guide uses whenever it says the name.
+- **No ready-made goodbye after "Okay, thank you."** Leading acknowledgments
+  (okay, alright, great…) are now stripped before matching done-phrases. More
+  phrases count as done, and "any other questions" counts as "anything else?".
+- **Double goodbye** (17:49:48 call). The guide said goodbye, called endCall,
+  then said goodbye again in the follow-up round. When a round has already
+  spoken a goodbye and calls only endCall, the follow-up round is now consumed
+  silently.
+- **Known caller asked for their name.** The greeting's Booqable lookup
+  happens in `/twiml` and was never passed to the guide. The guide was told to
+  call get_caller_phone_number before asking for a name, but it asked first
+  ("Can I get your full name…?") and only called the tool after the caller
+  said "You have my name". Now the call-setup step starts the same lookup
+  (`lookup_known_caller`), and the caller's first turn carries a one-time note
+  naming the known customer (last four digits only), so the guide confirms
+  the name instead of asking for it. The instructions also say never to ask a
+  known customer's name. `KNOWN_CALLER_NOTE_ENABLED` turns this off.
+
 ## Configuration
 
 | Variable | Default | Effect |
@@ -137,6 +180,8 @@ local tool timing harness against live read-only Booqable calls.
 | `AUTO_END_CALL_ENABLED` | true | Server-side hang-up backup |
 | `CANNED_GOODBYE_ENABLED` | true | Ready-made goodbye after "anything else?" → done |
 | `CANNED_GOODBYE_TEXT` | "You're welcome! Thanks for calling…" | The goodbye text |
+| `SPOKEN_NAME_ALIASES` | Peachtree=Peach tree | `word=spoken` pairs for the business name the guide says |
+| `KNOWN_CALLER_NOTE_ENABLED` | true | Tell the guide who a known caller is on the first turn |
 | `ACCESSORY_KEYWORDS` | helmet,lock,basket,light,bell,accessory,child seat | Accessory detection |
 | `FAST_TOOLS_ENABLED` | true | Parallel/prefetched Booqable reads |
 | `GUIDE_WARMUP_ON_STARTUP` | true | GuideAnts warm-up at startup |
