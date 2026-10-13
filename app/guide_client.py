@@ -146,11 +146,6 @@ class GuideSession:
     # Background known-caller lookup started at call setup (see
     # lookup_known_caller); the first turn's input carries its result.
     caller_lookup_task: Any = None
-    # Email payment-link guard: the previous turn's agent text and this
-    # turn's caller text, plus addresses already confirmed this call.
-    prev_round_text: str = ""
-    turn_user_text: str = ""
-    confirmed_emails: set = field(default_factory=set)
     known_caller_note_sent: bool = False
     # Business-language log of every reservation tool this call actually
     # ran, in call order -- persisted as ConversationAction rows by
@@ -374,65 +369,25 @@ async def _run_reservation_tool(
                          "their answer, then call sendPaymentLink.",
                 "sent": False,
             }
-        if session is not None and (args.get("channel") or "").lower() == "email":
-            if not email_confirmed(session, args.get("email")):
-                return {
-                    "error": "NOT SENT: the email address hasn't been confirmed. Read the address back "
-                             "to the caller, spelled out (for example 'j, o, h, n at example dot com'), "
-                             "ask if it's right, and only call sendPaymentLink with that address after "
-                             "they clearly say yes in their next reply.",
-                    "sent": False,
-                }
+        if (args.get("channel") or "sms").strip().lower() not in ("sms", "text") or args.get("email"):
+            # Email payment links were removed (spelled addresses are misheard
+            # on the phone, and the 18:46 test call took ~90 s and still failed).
+            return {
+                "error": "NOT SENT: payment links are only sent by text message, never by email. Tell the "
+                         "caller you can text it to the number they're calling from (or a number they "
+                         "give you), and call sendPaymentLink with channel sms once they agree.",
+                "sent": False,
+            }
         return await payments.send_payment_link(
             client,
             order_id=args["order_id"],
-            channel=args.get("channel"),
+            channel="sms",
             phone=args.get("phone"),
-            email=args.get("email"),
             # SMS with no number from the guide: payments falls back to the
             # order's phone, then to the number this call came from.
             fallback_phone=session.caller_phone if session is not None else None,
         )
     raise KeyError(name)
-
-
-_EMAIL_FILLER_WORDS = {"at", "dot", "underscore", "dash", "hyphen", "period"}
-_AFFIRMATIVE = re.compile(
-    r"^(yes|yeah|yep|yup|yes sir|yes ma'?am|correct|that'?s (right|correct|it)|right|sure|uh huh|"
-    r"mm hmm|exactly|perfect|you got it|that is (right|correct))\b"
-)
-
-
-def _letters(text: str) -> str:
-    words = re.split(r"[^a-z0-9]+", (text or "").lower())
-    return "".join(w for w in words if w and w not in _EMAIL_FILLER_WORDS)
-
-
-def _email_key(email: str | None) -> str:
-    return re.sub(r"[^a-z0-9]+", "", (email or "").lower())
-
-
-def _is_affirmative(user_text: str) -> bool:
-    text = re.sub(r"\[[^\]]*\]", " ", user_text or "")  # drop app notes
-    norm = " ".join(re.sub(r"[^a-z' ]+", " ", text.lower()).split())
-    return bool(_AFFIRMATIVE.match(norm))
-
-
-def email_confirmed(session: "GuideSession", email: str | None) -> bool:
-    """True when `email` was read back to the caller in the previous turn and
-    the caller answered yes, or it was already confirmed earlier this call."""
-    key = _email_key(email)
-    if not key or "@" not in (email or ""):
-        return False
-    if key in session.confirmed_emails:
-        return True
-    local, _, domain = (email or "").lower().partition("@")
-    spoken = _letters(session.prev_round_text)
-    read_back = _letters(local) in spoken and _letters(domain) in spoken
-    if read_back and _is_affirmative(session.turn_user_text):
-        session.confirmed_emails.add(key)
-        return True
-    return False
 
 
 async def _execute_tool(name: str, arguments: str, session: GuideSession) -> str:
@@ -940,8 +895,6 @@ async def _stream_reply_with_tools(
         outcome = _TurnOutcome()
         gate = _SentinelGate()
         if i == 0:
-            session.prev_round_text = session.round_text
-            session.turn_user_text = user_text if isinstance(user_text, str) else ""
             session.round_text = ""
         async with contextlib.aclosing(_stream_turn(client, next_input, session, outcome)) as gen:
             async for delta in gen:

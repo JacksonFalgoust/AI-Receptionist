@@ -547,6 +547,8 @@ async def get_order_contact(client: BooqableClient, order_id: str) -> dict[str, 
         "phone": _customer_phone(customer_attrs),
         "email": customer_attrs.get("email"),
         "grand_total_usd": (order_attrs.get("grand_total_in_cents") or 0) / 100,
+        # Booqable's human order number (e.g. 54) -- the caller's confirmation ID.
+        "order_number": order_attrs.get("number"),
     }
 
 
