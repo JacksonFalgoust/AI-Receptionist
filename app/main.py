@@ -88,6 +88,7 @@ from .concierge_api import router as concierge_router
 from .conversations_api import router as conversations_router
 from .dashboard_api import router as dashboard_router
 from . import call_end
+from .spoken_text import PhraseJoiner
 from .db import init_db
 from . import guide_client, stt_fixups
 from .guide_client import Delta, GuideSession, ToolCallStarted, build_input, stream_reply
@@ -433,6 +434,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         # module docstring for the GuideAnts-side half of this picture.
         twilio_send_start: float | None = None
         twilio_frame_count = 0
+        joiner = PhraseJoiner(config.SPOKEN_JOIN_PHRASES)
 
         def _queued_audio_seconds() -> float:
             """Best-effort estimate of TTS audio still unplayed from what's
@@ -521,6 +523,12 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 if event is None:
                     break
                 if isinstance(event, ToolCallStarted):
+                    if held := joiner.flush():
+                        await websocket.send_json(
+                            {"type": "text", "token": held, "last": False, "preemptible": True}
+                        )
+                        reply_text += held
+                        st.partial_reply = reply_text
                     # The guide (or narration ahead of it) may already have
                     # gone quiet by the time this arrives -- the caller
                     # hears silence until the next Delta, which can be
@@ -549,7 +557,9 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 working_sound_on = False  # this text preempts the sound
                 if st.working_play_sent:
                     st.reply_text_after_play = True
-                token = event.text
+                token = joiner.feed(event.text)
+                if not token:
+                    continue  # held: part of a protected phrase still arriving
                 if reply_text and not reply_text[-1].isspace() and not token[:1].isspace():
                     # Round boundary (e.g. narration, then a tool call, then
                     # the final answer): without this, adjacent rounds run
@@ -571,6 +581,16 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 if audio_started_at is None:
                     audio_started_at = asyncio.get_event_loop().time()
                 reply_text += token
+                st.partial_reply = reply_text
+            if held := joiner.flush():
+                if twilio_send_start is None:
+                    twilio_send_start = asyncio.get_event_loop().time()
+                    st.reply_first_frame_at = twilio_send_start
+                await websocket.send_json({"type": "text", "token": held, "last": False, "preemptible": True})
+                twilio_frame_count += 1
+                if audio_started_at is None:
+                    audio_started_at = asyncio.get_event_loop().time()
+                reply_text += held
                 st.partial_reply = reply_text
             await websocket.send_json({"type": "text", "token": "", "last": True, "preemptible": True})
             if reply_text and twilio_send_start is not None:
@@ -675,6 +695,11 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 await asyncio.sleep(remaining)
         if st.guide.end_call_requested and reply_text:
             await _end_call()
+        elif st.guide.end_call_requested:
+            # The guide hung up without saying anything (18:46 false start:
+            # the caller heard silence) -- say the ready-made goodbye first.
+            logger.info("endCall with no spoken goodbye; playing the ready-made goodbye first")
+            await _canned_goodbye()
         elif reply_text and config.AUTO_END_CALL_ENABLED:
             # Backup when the guide said goodbye but didn't call endCall.
             assistants = [x["content"] for x in st.messages if x["role"] == "assistant"]

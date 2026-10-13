@@ -178,10 +178,13 @@ ACTION_FILLERS: dict[str, list[str]] = {
         "Okay, cancelling that for you now.",
         "Just a moment while I take care of that cancellation.",
     ],
+    # Neutral on purpose: a send can still be refused (NOT SENT, e.g. the
+    # caller hasn't answered yet), so the filler must never claim it's
+    # being sent -- the guide's own reply says so once it actually went out.
     "message": [
-        "Sending that now.",
-        "Okay, sending that over now.",
-        "One moment while I send that.",
+        "One moment.",
+        "Just a moment.",
+        "Bear with me one second.",
     ],
     "lookup": [
         "Let me check.",

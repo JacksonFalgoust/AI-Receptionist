@@ -146,6 +146,10 @@ class GuideSession:
     # Background known-caller lookup started at call setup (see
     # lookup_known_caller); the first turn's input carries its result.
     caller_lookup_task: Any = None
+    # Booking-confirmation guard: the previous turn's agent text and this
+    # turn's caller text (see booking_confirmed).
+    prev_round_text: str = ""
+    turn_user_text: str = ""
     known_caller_note_sent: bool = False
     # Business-language log of every reservation tool this call actually
     # ran, in call order -- persisted as ConversationAction rows by
@@ -310,6 +314,18 @@ async def _run_reservation_tool(
         )
     if name == "createReservation":
         if (
+            config.BOOKING_CONFIRM_GUARD_ENABLED
+            and session is not None
+            and not booking_confirmed(session)
+        ):
+            return {
+                "error": "NOT BOOKED: confirm details with caller first. Read back the item, day, start "
+                         "time, total price and name, ending with 'Booking under <name>, shall I go "
+                         "ahead?', wait for their answer, and only call createReservation after they "
+                         "clearly say yes.",
+                "booked": False,
+            }
+        if (
             session is not None
             and not args.get("customer_email")
             and not args.get("customer_phone")
@@ -388,6 +404,33 @@ async def _run_reservation_tool(
             fallback_phone=session.caller_phone if session is not None else None,
         )
     raise KeyError(name)
+
+
+_AFFIRMATIVE = re.compile(
+    r"^(yes|yeah|yep|yup|yes please|correct|that'?s (right|correct|it|fine)|right|sure|ok(ay)? yes|"
+    r"go ahead|please do|do it|book it|let'?s do it|let'?s book it|sounds good|absolutely|"
+    r"of course|perfect|uh huh|mm hmm|you got it)\b"
+)
+_LEADING_ACKS_RE = re.compile(r"^(ok(ay)?|alright|all right|well|um|uh|great|perfect)\s+")
+_RECAP_QUESTION = re.compile(
+    r"(shall i|should i|can i|may i|do you want me to|would you like me to|want me to|ready for me to|"
+    r"okay to|ok to)\b[^?]*\b(book|reserve|go ahead|lock|confirm)|booking under[^?]*\?|"
+    r"go ahead and (book|reserve)[^?]*\?|book (it|that|this)[^?]*\?"
+)
+
+
+def _is_affirmative(user_text: str) -> bool:
+    text = re.sub(r"\[[^\]]*\]", " ", user_text or "")  # drop app notes
+    norm = " ".join(re.sub(r"[^a-z' ]+", " ", text.lower()).split())
+    norm = _LEADING_ACKS_RE.sub("", norm) if not _AFFIRMATIVE.match(norm) else norm
+    return bool(_AFFIRMATIVE.match(norm))
+
+
+def booking_confirmed(session: "GuideSession") -> bool:
+    """True when the previous agent turn asked the recap/book-it question and
+    the caller's reply this turn is a clear yes."""
+    prev = (session.prev_round_text or "").lower()
+    return "?" in prev and bool(_RECAP_QUESTION.search(prev)) and _is_affirmative(session.turn_user_text)
 
 
 async def _execute_tool(name: str, arguments: str, session: GuideSession) -> str:
@@ -532,7 +575,9 @@ def known_caller_note(session: GuideSession) -> str | None:
         f"They were already greeted by first name. Never ask for their name, and don't call "
         f"get_caller_phone_number for them: to book, call createReservation with customer_name "
         f"'{name}' and leave customer_phone empty (the number they're calling from is used). "
-        f"Still include 'Booking under {name}?' in the recap.]"
+        f"Skipping the name and phone questions does NOT skip the recap: before booking, always read "
+        f"back the item, day, start time and total, ending with 'Booking under {name}, shall I go "
+        f"ahead?', and book only after they say yes.]"
     )
 
 
@@ -895,6 +940,8 @@ async def _stream_reply_with_tools(
         outcome = _TurnOutcome()
         gate = _SentinelGate()
         if i == 0:
+            session.prev_round_text = session.round_text
+            session.turn_user_text = user_text if isinstance(user_text, str) else ""
             session.round_text = ""
         async with contextlib.aclosing(_stream_turn(client, next_input, session, outcome)) as gen:
             async for delta in gen:

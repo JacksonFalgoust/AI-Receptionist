@@ -481,9 +481,19 @@ CANNED_GOODBYE_ENABLED = os.getenv("CANNED_GOODBYE_ENABLED", "true").lower() not
 # "Paf-tree"). The written name (business.name) is unchanged.
 SPOKEN_NAME_ALIASES = dict(
     pair.split("=", 1)
-    for pair in os.getenv("SPOKEN_NAME_ALIASES", "Peachtree=Peach tree,Pedals=Peddles").split(",")
+    for pair in os.getenv("SPOKEN_NAME_ALIASES", "Peachtree=Peach tree").split(",")
     if "=" in pair
 )
+# Phrases always sent to TTS in one frame (never split into sub-word tokens),
+# comma-separated. Default: the business name, written and spoken forms.
+SPOKEN_JOIN_PHRASES = [
+    p.strip()
+    for p in os.getenv("SPOKEN_JOIN_PHRASES", "Peach tree Pedals,Peachtree Pedals").split(",")
+    if p.strip()
+]
+# createReservation is refused unless the previous agent turn was a recap /
+# "shall I book it?" question and the caller said yes.
+BOOKING_CONFIRM_GUARD_ENABLED = os.getenv("BOOKING_CONFIRM_GUARD_ENABLED", "true").lower() not in ("0", "false", "no")
 # Tell the guide on the caller's first turn who a known caller is (from the
 # call-setup Booqable lookup), so it confirms the name instead of asking.
 KNOWN_CALLER_NOTE_ENABLED = os.getenv("KNOWN_CALLER_NOTE_ENABLED", "true").lower() not in ("0", "false", "no")
