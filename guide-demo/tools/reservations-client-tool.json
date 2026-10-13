@@ -129,7 +129,7 @@
       "get": {
         "operationId": "findReservations",
         "summary": "Find a caller's active reservations by the email or phone they booked with",
-        "description": "Use this to cancel a rental without asking the caller for a confirmation number -- pass the phone number or email they booked with (get_caller_phone_number for their own number). Returns customer_found=false and no reservations if nothing matches. Each reservation includes the order_id needed for cancelReservation, plus the items, dates, and price to read back and confirm with the caller before canceling.",
+        "description": "Use this to cancel a rental without asking the caller for a confirmation number -- pass the phone number or email they booked with (get_caller_phone_number for their own number). Returns customer_found=false and no reservations if nothing matches. Each reservation includes the order_id needed for cancelReservation, plus the items, dates, and price to read back and confirm with the caller before canceling. Each reservation includes date_spoken and start_time_spoken in local time -- say only those; starts_at/stops_at are UTC and must never be read aloud. Never use this when the caller is only declining a booking you were about to make.",
         "parameters": [
           {
             "name": "customer_email",
@@ -340,7 +340,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Cancels an existing reservation. Only call this after the caller has clearly said yes to cancelling this specific reservation (its item, date_spoken and start_time_spoken read back to them). Never call it when the caller is just declining a booking that hasn't been made."
       }
     },
     "/{order_id}/send-payment-link": {
