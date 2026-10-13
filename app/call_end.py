@@ -68,3 +68,11 @@ def should_end(previous_agent_text: str, user_text: str, reply_text: str) -> boo
     if caller_said_goodbye(user_text):
         return True
     return asked_anything_else(previous_agent_text) and caller_done(user_text)
+
+
+_BARE_GREETINGS = {"hi", "hello", "hey", "hi there", "hello there", "hey there", "hiya", "howdy", "good morning", "good afternoon", "good evening"}
+
+
+def is_bare_greeting(text: str) -> bool:
+    """A lone greeting with no request ("Hi.", "Hello?")."""
+    return _norm(text) in _BARE_GREETINGS

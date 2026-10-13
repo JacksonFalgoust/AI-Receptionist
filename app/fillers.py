@@ -191,7 +191,7 @@ ACTION_FILLERS: dict[str, list[str]] = {
 }
 
 # Tools that need no filler at all (hanging up, trivial local reads).
-NO_FILLER_TOOLS = frozenset({"endcall", "end_call"})
+NO_FILLER_TOOLS = frozenset({"endcall", "end_call", "get_caller_phone_number"})
 
 # Prefix-based so read-only tools like getOrder / lookupCustomerByEmail stay
 # in the "lookup" pool.

@@ -481,12 +481,21 @@ CANNED_GOODBYE_ENABLED = os.getenv("CANNED_GOODBYE_ENABLED", "true").lower() not
 # "Paf-tree"). The written name (business.name) is unchanged.
 SPOKEN_NAME_ALIASES = dict(
     pair.split("=", 1)
-    for pair in os.getenv("SPOKEN_NAME_ALIASES", "Peachtree=Peach tree").split(",")
+    for pair in os.getenv("SPOKEN_NAME_ALIASES", "Peachtree=Peach tree,Pedals=Peddles").split(",")
     if "=" in pair
 )
 # Tell the guide on the caller's first turn who a known caller is (from the
 # call-setup Booqable lookup), so it confirms the name instead of asking.
 KNOWN_CALLER_NOTE_ENABLED = os.getenv("KNOWN_CALLER_NOTE_ENABLED", "true").lower() not in ("0", "false", "no")
+# Refuse catalog/availability/booking windows outside the published business
+# hours (past start, before open, at/after close, closed day).
+BUSINESS_HOURS_GUARD_ENABLED = os.getenv("BUSINESS_HOURS_GUARD_ENABLED", "true").lower() not in ("0", "false", "no")
+# Give the guide the current local date/time and open/closed state on the
+# caller's first turn.
+NOW_NOTE_ENABLED = os.getenv("NOW_NOTE_ENABLED", "true").lower() not in ("0", "false", "no")
+# Ignore a bare "hi"/"hello" as the caller's first turn (the welcome greeting
+# already asked how to help) instead of greeting them a second time.
+IGNORE_FIRST_BARE_GREETING = os.getenv("IGNORE_FIRST_BARE_GREETING", "true").lower() not in ("0", "false", "no")
 CANNED_GOODBYE_TEXT = os.getenv(
     "CANNED_GOODBYE_TEXT", "You're welcome! Thanks for calling, and have a great day. Goodbye!"
 )

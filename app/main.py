@@ -315,6 +315,7 @@ class CallState:
     # that cancels a reply before it completes can't leave a stale question
     # flag from an earlier, unrelated turn in place.
     guide_awaiting_answer: bool = False
+    bare_greeting_ignored: bool = False
     # event-loop-clock timestamp of the last reply's final Twilio frame
     # (the closing `last: true` message) finishing its send -- diagnostic
     # only, see respond_to()'s TIMING logs. Lets the agent-start speaker
@@ -939,6 +940,17 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                         # is_backchannel() check below and treat it as a
                         # real turn.
                         schedule_turn(text)
+                    elif (
+                        config.IGNORE_FIRST_BARE_GREETING
+                        and not st.bare_greeting_ignored
+                        and not any(m["role"] == "user" for m in st.messages)
+                        and call_end.is_bare_greeting(text)
+                    ):
+                        # The welcome greeting already asked how to help; a
+                        # lone "hi" is the caller (or line noise) starting --
+                        # wait for the actual request instead of greeting again.
+                        st.bare_greeting_ignored = True
+                        logger.info("Ignored bare first-turn greeting (waiting for more speech): %r", text)
                     elif fillers.is_backchannel(text, config.EXTRA_BACKCHANNEL_PHRASES):
                         # STT can finish transcribing a short "ok" after the
                         # reply has already finished playing, so this branch
