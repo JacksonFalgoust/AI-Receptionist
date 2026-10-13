@@ -377,6 +377,12 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         # cause spurious resends.
         if wait <= 0 or not st.last_agent_start_at:
             return False
+        # Only a pending chime has ever stalled Twilio's queue. On other turns
+        # the reply often plays straight on from the filler with no fresh
+        # agent-start, which looked "stuck" and caused a repeated reply
+        # (2026-10-13 09:22 call).
+        if not st.working_play_sent:
+            return False
         loop = asyncio.get_event_loop()
         since = st.working_play_sent_at if st.working_play_sent else sent_from
         deadline = loop.time() + wait
@@ -463,7 +469,8 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 tool_call_seen or not config.FILLER_ONLY_FOR_TOOL_CALLS
             ):
                 done, _ = await asyncio.wait({pending}, timeout=config.FILLER_DELAY_SECONDS)
-                if pending not in done and _queued_audio_seconds() <= 0.0 and not working_sound_on:
+                if (pending not in done and _queued_audio_seconds() <= 0.0 and not working_sound_on
+                        and not reply_text.strip()):
                     phrase = fillers.pick_for_tools(
                         tool_names, config.FILLER_PHRASES, st.last_filler,
                         use_action_pools=config.FILLER_PHRASES == config._DEFAULT_FILLER_PHRASES,
@@ -673,7 +680,41 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 {"type": "end", "handoffData": json.dumps({"reasonCode": "caller-done"})}
             )
 
+    async def _canned_goodbye() -> None:
+        """Speak the ready-made goodbye, wait for it to finish playing, then
+        hang up the same way endCall does."""
+        text = config.CANNED_GOODBYE_TEXT
+        st.reply_first_frame_at = asyncio.get_event_loop().time()
+        await websocket.send_json({"type": "text", "token": text, "last": True, "preemptible": True})
+        st.messages.append({"role": "assistant", "content": text})
+        estimated = speech_timing.estimate_seconds(text, config.TTS_WORDS_PER_SECOND)
+        if st.agent_stop_seen:
+            st.playback_done.clear()
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(st.playback_done.wait(), timeout=estimated * 1.5 + 2.0)
+        else:
+            await asyncio.sleep(estimated)
+        await _end_call()
+
+    def _wants_canned_goodbye(user_text: str) -> bool:
+        if not config.CANNED_GOODBYE_ENABLED:
+            return False
+        assistants = [x["content"] for x in st.messages if x["role"] == "assistant"]
+        last_agent = assistants[-1] if assistants else ""
+        # Only right after "anything else?" -- anywhere else (mid-booking) the
+        # model handles it. caller_done() also covers "bye"/"goodbye".
+        return call_end.asked_anything_else(last_agent) and call_end.caller_done(user_text)
+
     def start_reply(user_text: str) -> None:
+        if _wants_canned_goodbye(user_text):
+            st.messages.append({"role": "user", "content": user_text})
+            st.interrupted_reply = None
+            st.partial_reply = ""
+            st.playback_text = ""
+            st.guide_awaiting_answer = False
+            logger.info("Caller is done after 'anything else?'; ready-made goodbye, no model turn")
+            st.task = asyncio.create_task(_canned_goodbye())
+            return
         input_text = build_input(user_text, st.interrupted_reply)
         if st.interrupted_reply:
             logger.info("Folding interruption note into next turn: %r", input_text)

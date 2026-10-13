@@ -66,6 +66,8 @@ def test_backup_hangup_after_anything_else_then_no(monkeypatch):
 
 
 def test_no_backup_hangup_when_reply_asks_a_question(monkeypatch):
+    # Exercise the model-reply backup path, not the ready-made goodbye.
+    monkeypatch.setattr(config, "CANNED_GOODBYE_ENABLED", False)
     replies = iter(["Is there anything else I can help you with?", "Sure, what day would you like?"])
 
     async def fake(input_text, guide):

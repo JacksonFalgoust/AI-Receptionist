@@ -473,4 +473,10 @@ STT_HINTS = os.getenv(
 STUCK_AUDIO_RECOVERY_SECONDS = float(os.getenv("STUCK_AUDIO_RECOVERY_SECONDS", "3.0"))
 # Send one throwaway GuideAnts request at startup so the first call's first
 # turn isn't a cold start.
+# Ready-made goodbye: after the agent asked "anything else?" and the caller
+# clearly says they're done, speak this and hang up without a model round trip.
+CANNED_GOODBYE_ENABLED = os.getenv("CANNED_GOODBYE_ENABLED", "true").lower() not in ("0", "false", "no")
+CANNED_GOODBYE_TEXT = os.getenv(
+    "CANNED_GOODBYE_TEXT", "You're welcome! Thanks for calling, and have a great day. Goodbye!"
+)
 GUIDE_WARMUP_ON_STARTUP = os.getenv("GUIDE_WARMUP_ON_STARTUP", "true").lower() not in ("0", "false", "no")
