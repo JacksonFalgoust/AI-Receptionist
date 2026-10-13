@@ -461,5 +461,16 @@ STT_HINTS = os.getenv(
     "STT_HINTS",
     "nine AM,ten AM,eleven AM,noon,one PM,two PM,three PM,four PM,five PM,six PM,"
     "nine,ten,eleven,twelve,o'clock,Downtown Dash,Lake Loop,Urban Cruiser,Weekend Warrior,"
-    "text,email,yes,no",
+    "text,email,yes,no,"
+    "Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday,today,tomorrow,"
+    "this weekend,next week,next Monday,next Saturday,next Sunday,"
+    "January,February,March,April,May,June,July,August,September,October,November,December,"
+    "first,second,third,fifteenth,twentieth,thirtieth",
 )
+# Stuck-audio recovery: if Twilio hasn't started playing a sent reply within
+# this many seconds (or a pending chime is blocking it), resend the reply as a
+# fresh talk cycle without the chime. 0 disables.
+STUCK_AUDIO_RECOVERY_SECONDS = float(os.getenv("STUCK_AUDIO_RECOVERY_SECONDS", "3.0"))
+# Send one throwaway GuideAnts request at startup so the first call's first
+# turn isn't a cold start.
+GUIDE_WARMUP_ON_STARTUP = os.getenv("GUIDE_WARMUP_ON_STARTUP", "true").lower() not in ("0", "false", "no")

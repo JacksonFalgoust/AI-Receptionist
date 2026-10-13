@@ -108,6 +108,19 @@ def mask_phone(value: str | None) -> str:
     return f"***{digits[-4:]}" if len(digits) >= 4 else ("***" if value else "none")
 
 
+async def _warm_up_guide() -> None:
+    """One throwaway GuideAnts turn at startup so the first real call's first
+    reply isn't a cold start (4.3s seen on the first call after a reboot).
+    Never raises; failures are only logged."""
+    try:
+        t0 = asyncio.get_event_loop().time()
+        async for _ in stream_reply("(system warm-up, no caller) Say OK.", GuideSession()):
+            pass
+        logger.info("GuideAnts warm-up done in %.2fs", asyncio.get_event_loop().time() - t0)
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.warning("GuideAnts warm-up failed: %s", type(exc).__name__)
+
+
 @contextlib.asynccontextmanager
 async def _lifespan(app: FastAPI):
     # E6 slice 1: creates the SQLite tables (conversations, auth_sessions,
@@ -116,7 +129,10 @@ async def _lifespan(app: FastAPI):
     # the deprecated @app.on_event("startup") handler for fastapi>=0.115
     # (confirmed via find-docs against the pinned version).
     init_db()
+    warmup = asyncio.create_task(_warm_up_guide()) if config.GUIDE_WARMUP_ON_STARTUP else None
     yield
+    if warmup and not warmup.done():
+        warmup.cancel()
 
 
 app = FastAPI(lifespan=_lifespan)
@@ -318,6 +334,12 @@ class CallState:
     # sent, and reply text has since gone out. If Twilio only starts the
     # sound after that (mediaPlaying on), it is cut immediately.
     working_play_sent: bool = False
+    # Event-loop time of the latest chime `play` sent, and of the latest
+    # agent-start speaker event (for stuck-audio detection).
+    working_play_sent_at: float = 0.0
+    last_agent_start_at: float = 0.0
+    # Set after a stuck-audio recovery: no more chimes this call.
+    chime_disabled: bool = False
     # Last filler phrase spoken this call, so the next one differs.
     last_filler: str | None = None
     reply_text_after_play: bool = False
@@ -340,6 +362,41 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
     st = CallState()
     public_host = websocket.headers.get("host", "")
     working_sound_url = f"https://{public_host}{config.WORKING_SOUND_PATH}" if public_host else ""
+
+    async def _recover_stuck_audio(reply_text: str, sent_from: float) -> bool:
+        """Twilio gives no ack for text frames; its agent-start speaker event is
+        the only sign playback began. If none arrives within
+        STUCK_AUDIO_RECOVERY_SECONDS -- after the chime `play`, if one was sent
+        this turn, otherwise after the reply's first frame -- the TTS queue is
+        treated as stuck (seen 2026-10-13: a chime that Twilio never fetched
+        silenced every later reply). Resend the reply as a fresh talk cycle,
+        which preempts the stuck media, and stop using the chime this call."""
+        wait = config.STUCK_AUDIO_RECOVERY_SECONDS
+        # Only once Twilio has shown it sends speaker events on this call
+        # (the greeting's agent-start), so a missing event stream can't
+        # cause spurious resends.
+        if wait <= 0 or not st.last_agent_start_at:
+            return False
+        loop = asyncio.get_event_loop()
+        since = st.working_play_sent_at if st.working_play_sent else sent_from
+        deadline = loop.time() + wait
+        while loop.time() < deadline:
+            if st.last_agent_start_at >= since:
+                return False
+            await asyncio.sleep(0.05)
+        if st.last_agent_start_at >= since:
+            return False
+        logger.warning(
+            "No Twilio playback %.1fs after reply%s; resending without chime",
+            wait, " (chime pending)" if st.working_play_sent else "",
+        )
+        st.chime_disabled = True
+        st.working_play_sent = False
+        st.reply_text_after_play = False
+        await websocket.send_json(
+            {"type": "text", "token": reply_text, "last": True, "preemptible": True}
+        )
+        return True
 
     async def respond_to(input_text: str, filler_eligible: bool) -> None:
         # Every frame is marked preemptible so that if this turn is still
@@ -415,6 +472,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                         st.last_filler = phrase
                     play_working = bool(
                         slow_tool_seen and config.WORKING_SOUND_ENABLED and working_sound_url
+                        and not st.chime_disabled
                     )
                     if phrase:
                         filler = phrase
@@ -436,9 +494,10 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                         if pending not in done:
                             await websocket.send_json(
                                 {"type": "play", "source": working_sound_url, "loop": 1,
-                                 "preemptible": True, "interruptible": False}
+                                 "preemptible": True, "interruptible": True}
                             )
                             st.working_play_sent = True
+                            st.working_play_sent_at = asyncio.get_event_loop().time()
                             st.reply_text_after_play = False
                             logger.info("Working sound started (tool wait)")
             try:
@@ -493,6 +552,8 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 reply_text += token
                 st.partial_reply = reply_text
             await websocket.send_json({"type": "text", "token": "", "last": True, "preemptible": True})
+            if reply_text and twilio_send_start is not None:
+                await _recover_stuck_audio(reply_text, twilio_send_start)
             if twilio_send_start is not None:
                 # "last frame sent" is the honest number here -- Twilio gives
                 # no application-level ack that it received a text frame, so
@@ -841,7 +902,10 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 if speaker_kind == "agent-stop":
                     st.agent_stop_seen = True
                     st.playback_done.set()
+                elif speaker_kind == "agent-start" and not st.reply_first_frame_at:
+                    st.last_agent_start_at = asyncio.get_event_loop().time()
                 elif speaker_kind == "agent-start" and st.reply_first_frame_at:
+                    st.last_agent_start_at = asyncio.get_event_loop().time()
                     # Closest thing to a receipt Twilio gives back for a
                     # reply's text frames: not an ack of receiving them, but
                     # confirmation it has started speaking them, which it
