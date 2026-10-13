@@ -318,6 +318,8 @@ class CallState:
     # sent, and reply text has since gone out. If Twilio only starts the
     # sound after that (mediaPlaying on), it is cut immediately.
     working_play_sent: bool = False
+    # Last filler phrase spoken this call, so the next one differs.
+    last_filler: str | None = None
     reply_text_after_play: bool = False
     # Event-loop time a client-side tool call started this turn, or 0.0 if
     # none is currently pending. guide_client streams every round's text
@@ -351,6 +353,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         filler = None
         tool_call_seen = False
         slow_tool_seen = False
+        tool_names: tuple = ()
         working_sound_on = False
         # The caller said something new, so any earlier endCall is void.
         st.guide.end_call_requested = False
@@ -395,7 +398,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         # gets its own filler, so the caller is never sitting in true
         # silence for long.
         async def next_event():
-            nonlocal pending, filler, tool_call_seen, working_sound_on
+            nonlocal pending, filler, tool_call_seen, working_sound_on, tool_names
             pending = asyncio.ensure_future(gen.__anext__())
             # Known-slow tools always get the filler (+ working sound), even
             # when the caller's turn wasn't a question ("Yes." before a booking).
@@ -404,7 +407,12 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
             ):
                 done, _ = await asyncio.wait({pending}, timeout=config.FILLER_DELAY_SECONDS)
                 if pending not in done and _queued_audio_seconds() <= 0.0 and not working_sound_on:
-                    phrase = fillers.pick(config.FILLER_PHRASES)
+                    phrase = fillers.pick_for_tools(
+                        tool_names, config.FILLER_PHRASES, st.last_filler,
+                        use_action_pools=config.FILLER_PHRASES == config._DEFAULT_FILLER_PHRASES,
+                    )
+                    if phrase:
+                        st.last_filler = phrase
                     play_working = bool(
                         slow_tool_seen and config.WORKING_SOUND_ENABLED and working_sound_url
                     )
@@ -452,6 +460,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                     # handler below.
                     st.tool_call_started_at = asyncio.get_event_loop().time()
                     tool_call_seen = True
+                    tool_names = tuple(event.names)
                     if set(event.names) & config.WORKING_SOUND_TOOLS:
                         slow_tool_seen = True
                     logger.info("Client tool call(s) in flight: %s", ", ".join(event.names))

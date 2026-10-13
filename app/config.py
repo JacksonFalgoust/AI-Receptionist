@@ -337,12 +337,9 @@ TOOL_CALL_BARGE_IN_GRACE_SECONDS = float(os.environ.get("TOOL_CALL_BARGE_IN_GRAC
 # Filler phrases spoken before the real answer, to mask GuideAnts lookup
 # latency. Pipe-separated in the env var since phrases contain commas/periods.
 _DEFAULT_FILLER_PHRASES = [
-    "Let me look that up for you.",
-    "One moment while I check on that.",
-    "Sure, give me just a second.",
-    "Let me find that for you.",
-    "Okay, let me pull that up.",
-    "Happy to help — one second while I check.",
+    "Let me check.",
+    "One moment while I check.",
+    "Let me take a quick look.",
 ]
 
 FILLER_PHRASES = [
