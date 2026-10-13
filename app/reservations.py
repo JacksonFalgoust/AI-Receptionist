@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from . import config
+from . import business_hours, config
 from .booqable_client import BooqableClient, BooqableError
 
 RECEPTIONIST_TAG = "ai-receptionist"
@@ -416,6 +416,11 @@ async def create_reservation(
 ) -> dict[str, Any]:
     if not items:
         raise BooqableError("At least one item is required to create a reservation")
+
+    if config.BUSINESS_HOURS_GUARD_ENABLED:
+        problem = business_hours.check_window(starts_at, stops_at, for_booking=True)
+        if problem:
+            raise BooqableError(business_hours.not_booked_message(problem))
 
     if location is None:
         location = await resolve_location(client, location_id)
