@@ -525,7 +525,10 @@ def test_execute_tool_list_catalog(monkeypatch):
 
     result = asyncio.run(guide_client._execute_tool("listCatalog", "{}", GuideSession()))
 
-    assert json.loads(result) == {"products": fake_catalog}
+    body = json.loads(result)
+    # Undated: main items listed, but explicitly not stock-checked.
+    assert body["products"] == fake_catalog and body["accessories"] == []
+    assert body["availability_checked"] is False
 
 
 def test_execute_tool_check_availability(monkeypatch):

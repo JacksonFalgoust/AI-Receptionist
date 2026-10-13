@@ -465,7 +465,7 @@ STT_HINTS = os.getenv(
     "Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday,today,tomorrow,"
     "this weekend,next week,next Monday,next Saturday,next Sunday,"
     "January,February,March,April,May,June,July,August,September,October,November,December,"
-    "first,second,third,fifteenth,twentieth,thirtieth",
+    "first,second,third,fifteenth,twentieth,thirtieth,by text,text message,by email",
 )
 # Stuck-audio recovery: if Twilio hasn't started playing a sent reply within
 # this many seconds (or a pending chime is blocking it), resend the reply as a
@@ -478,5 +478,12 @@ STUCK_AUDIO_RECOVERY_SECONDS = float(os.getenv("STUCK_AUDIO_RECOVERY_SECONDS", "
 CANNED_GOODBYE_ENABLED = os.getenv("CANNED_GOODBYE_ENABLED", "true").lower() not in ("0", "false", "no")
 CANNED_GOODBYE_TEXT = os.getenv(
     "CANNED_GOODBYE_TEXT", "You're welcome! Thanks for calling, and have a great day. Goodbye!"
+)
+# Catalog items whose names contain any of these words are accessories: listed
+# separately by listCatalog, never offered or counted as the main rentable items.
+ACCESSORY_KEYWORDS = tuple(
+    w.strip().lower()
+    for w in os.getenv("ACCESSORY_KEYWORDS", "helmet,lock,basket,light,bell,accessory,child seat").split(",")
+    if w.strip()
 )
 GUIDE_WARMUP_ON_STARTUP = os.getenv("GUIDE_WARMUP_ON_STARTUP", "true").lower() not in ("0", "false", "no")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -125,6 +127,75 @@ async def list_catalog(client: BooqableClient) -> list[dict[str, Any]]:
             }
         )
     return catalog
+
+
+def is_accessory(name: str | None) -> bool:
+    lowered = (name or "").lower()
+    return any(word in lowered for word in config.ACCESSORY_KEYWORDS)
+
+
+async def list_available_catalog(
+    client: BooqableClient,
+    catalog: list[dict[str, Any]],
+    *,
+    location_id: str,
+    starts_at: str,
+    stops_at: str,
+    quantity: int = 1,
+) -> dict[str, Any]:
+    """Split the catalog for one date range: main items that are actually in
+    stock (checked in parallel), main items that aren't, and accessories."""
+    main = [p for p in catalog if not is_accessory(p.get("name"))]
+    accessories = [p for p in catalog if is_accessory(p.get("name"))]
+
+    async def check(product: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return await check_product_availability(
+                client, product_id=product["product_id"], location_id=location_id,
+                starts_at=starts_at, stops_at=stops_at, quantity=quantity,
+            )
+        except BooqableError:
+            return {"status": "unknown"}
+
+    results = await asyncio.gather(*(check(p) for p in main))
+    available, unavailable = [], []
+    for product, result in zip(main, results):
+        if result.get("status") == "available":
+            available.append({**product, "available": result.get("available")})
+        else:
+            unavailable.append(product.get("name"))
+    return {
+        "products": available,
+        "unavailable": unavailable,
+        "accessories": accessories,
+        "availability_checked_for": {"starts_at": starts_at, "stops_at": stops_at, "quantity": quantity},
+        "note": "Only items in 'products' are in stock for these times. Offer only those; never offer "
+                "anything in 'unavailable'. 'accessories' are add-ons, not main items -- don't count them.",
+    }
+
+
+async def ensure_items_available(
+    client: BooqableClient, *, location_id: str, starts_at: str, stops_at: str, items: list[dict[str, Any]]
+) -> None:
+    """Server-side guard: refuse a booking if any item isn't in stock."""
+    results = await asyncio.gather(*(
+        check_product_availability(
+            client, product_id=item["product_id"], location_id=location_id,
+            starts_at=starts_at, stops_at=stops_at, quantity=int(item.get("quantity") or 1),
+        )
+        for item in items
+    ))
+    short = [
+        f"{item['product_id']} (available {r.get('available')}, requested {r.get('requested')})"
+        for item, r in zip(items, results)
+        if r.get("status") != "available"
+    ]
+    if short:
+        raise BooqableError(
+            "NOT BOOKED: these items are not available for that time: " + "; ".join(short)
+            + ". No reservation was made. Tell the caller and offer an item that checkAvailability "
+            "or listCatalog shows as available, or a different time."
+        )
 
 
 def _normalize_phone(value: str) -> str:
@@ -297,6 +368,11 @@ async def create_reservation(
     stops_dt = _parse_datetime(stops_at)
     starts_api = _order_timestamp(starts_dt)
     stops_api = _order_timestamp(stops_dt)
+
+    # Never create an order for something that's out of stock.
+    await ensure_items_available(
+        client, location_id=location["id"], starts_at=starts_at, stops_at=stops_at, items=items
+    )
 
     customer_record = await find_or_create_customer(
         client,

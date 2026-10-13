@@ -271,6 +271,7 @@ def test_no_filler_without_a_tool_call_by_default(monkeypatch):
 
 def test_round_boundary_inserts_a_separating_space(monkeypatch):
     monkeypatch.setattr(config, "TWILIO_AUTH_TOKEN", "test-ws-secret")
+    monkeypatch.setattr(config, "TTS_WORDS_PER_SECOND", 1000.0)  # not a timing test
     monkeypatch.setattr(config, "TURN_PAUSE_SECONDS", 0.01)
     monkeypatch.setattr(config, "FILLER_DELAY_SECONDS", 5.0)
 

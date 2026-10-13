@@ -134,6 +134,9 @@ class GuideSession:
     # catalog (listCatalog) and the resolved default location. Saves the
     # repeat product_groups/locations GETs on later tool turns.
     catalog_cache: list | None = None
+    # All text the model produced so far in the current caller turn (every
+    # round, spoken or not) -- used by the sendPaymentLink guard.
+    round_text: str = ""
     # Set when the guide calls endCall; app/main.py ends the ConversationRelay
     # session once the current reply's playback finishes.
     end_call_requested: bool = False
@@ -243,11 +246,26 @@ async def _run_reservation_tool(
     client = BooqableClient()
     if name == "listCatalog":
         if session is not None and session.catalog_cache is not None:
-            return {"products": session.catalog_cache}
-        catalog = await reservations.list_catalog(client)
-        if session is not None:
-            session.catalog_cache = catalog
-        return {"products": catalog}
+            catalog = session.catalog_cache
+        else:
+            catalog = await reservations.list_catalog(client)
+            if session is not None:
+                session.catalog_cache = catalog
+        if args.get("starts_at") and args.get("stops_at"):
+            location = await _default_location(client, session, args.get("location_id"))
+            return await reservations.list_available_catalog(
+                client, catalog, location_id=location["id"],
+                starts_at=args["starts_at"], stops_at=args["stops_at"],
+                quantity=int(args.get("quantity") or 1),
+            )
+        main = [p for p in catalog if not reservations.is_accessory(p.get("name"))]
+        return {
+            "products": main,
+            "accessories": [p for p in catalog if reservations.is_accessory(p.get("name"))],
+            "availability_checked": False,
+            "note": "Availability NOT checked. Don't say any item is available until you've called "
+                    "listCatalog with starts_at/stops_at or checkAvailability.",
+        }
     if name == "checkAvailability":
         location = await _default_location(client, session, args.get("location_id"))
         result = await reservations.check_product_availability(
@@ -306,6 +324,14 @@ async def _run_reservation_tool(
     if name == "cancelReservation":
         return await reservations.cancel_reservation(client, args["order_id"])
     if name == "sendPaymentLink":
+        if session is not None and "?" in (session.round_text or ""):
+            # Guard: the model asked the caller something in this same turn
+            # (e.g. "by text to the number ending in ...?") -- wait for the answer.
+            return {
+                "error": "NOT SENT: you asked the caller a question in this same turn. Wait for "
+                         "their answer, then call sendPaymentLink.",
+                "sent": False,
+            }
         return await payments.send_payment_link(
             client,
             order_id=args["order_id"],
@@ -733,8 +759,11 @@ async def _stream_reply_with_tools(
     for i in range(_MAX_TOOL_ITERATIONS):
         outcome = _TurnOutcome()
         gate = _SentinelGate()
+        if i == 0:
+            session.round_text = ""
         async with contextlib.aclosing(_stream_turn(client, next_input, session, outcome)) as gen:
             async for delta in gen:
+                session.round_text += delta
                 if text := gate.feed(delta):
                     yield Delta(text)
 

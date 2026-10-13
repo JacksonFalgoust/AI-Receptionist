@@ -89,6 +89,7 @@ from .conversations_api import router as conversations_router
 from .dashboard_api import router as dashboard_router
 from . import call_end
 from .db import init_db
+from . import stt_fixups
 from .guide_client import Delta, GuideSession, ToolCallStarted, build_input, stream_reply
 from .knowledge_api import router as knowledge_router
 from .reservations_api import router as reservations_router
@@ -417,6 +418,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         tool_call_seen = False
         slow_tool_seen = False
         tool_names: tuple = ()
+        after_tool = False
         working_sound_on = False
         # The caller said something new, so any earlier endCall is void.
         st.guide.end_call_requested = False
@@ -530,7 +532,18 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                     if set(event.names) & config.WORKING_SOUND_TOOLS:
                         slow_tool_seen = True
                     logger.info("Client tool call(s) in flight: %s", ", ".join(event.names))
+                    after_tool = True
                     continue
+                if after_tool:
+                    # Every frame is preemptible, so text arriving after a
+                    # tool call would cut off whatever is still playing (the
+                    # filler or words spoken before the tool) mid-sentence.
+                    # Let that finish first (bounded).
+                    after_tool = False
+                    waited = 0.0
+                    while _queued_audio_seconds() > 0.05 and waited < 10.0:
+                        await asyncio.sleep(0.05)
+                        waited += 0.05
                 st.tool_call_started_at = 0.0
                 working_sound_on = False  # this text preempts the sound
                 if st.working_play_sent:
@@ -614,6 +627,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         # see module docstring).
         if reply_text:
             st.messages.append({"role": "assistant", "content": reply_text})
+            logger.info("Agent said: %r", reply_text[:400])
             st.guide_awaiting_answer = reply_text.rstrip().endswith("?")
             # Cleared so a later barge-in cancellation (which lands during
             # the pacing sleep below, not during generation) doesn't re-append
@@ -706,6 +720,11 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         return call_end.asked_anything_else(last_agent) and call_end.caller_done(user_text)
 
     def start_reply(user_text: str) -> None:
+        _agent_lines = [x["content"] for x in st.messages if x["role"] == "assistant"]
+        fixed = stt_fixups.fix_choice(_agent_lines[-1] if _agent_lines else "", user_text)
+        if fixed != user_text:
+            logger.info("Heard %r after 'text or email?'; treating it as %r", user_text, fixed)
+            user_text = fixed
         if _wants_canned_goodbye(user_text):
             st.messages.append({"role": "user", "content": user_text})
             st.interrupted_reply = None
