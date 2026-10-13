@@ -24,3 +24,4 @@ def _time_independent_defaults(monkeypatch):
     monkeypatch.setattr(config, "BUSINESS_HOURS_GUARD_ENABLED", False)
     monkeypatch.setattr(config, "NOW_NOTE_ENABLED", False)
     monkeypatch.setattr(config, "IGNORE_FIRST_BARE_GREETING", False)
+    monkeypatch.setattr(config, "BOOKING_CONFIRM_GUARD_ENABLED", False)

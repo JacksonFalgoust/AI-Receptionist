@@ -219,6 +219,32 @@ Postmark rejected the send (HTTP 401, invalid server token). Now:
   and a secure payment link", and says the confirmation number after
   sending. It never calls it just "a payment link".
 
+### Recap before booking, goodbye before hang-up, neutral send filler, business name (Oct 13 18:46 review)
+
+- **Booked without a recap or a yes.** For a known caller, the guide called
+  createReservation right after the caller gave a time. The known-caller
+  note now says skipping the name and phone questions does not skip the
+  recap. The recap ends "Booking under <name>, shall I go ahead?". Server
+  guard: createReservation returns `NOT BOOKED: confirm details with caller
+  first` unless the previous agent turn was a recap or book-it question and
+  the caller's reply is a clear yes (`BOOKING_CONFIRM_GUARD_ENABLED`).
+- **Hung up without a goodbye.** When the guide calls endCall and says
+  nothing, the ready-made goodbye now plays before the session ends.
+- **"Sending that now" before a refused send.** Send fillers are now neutral
+  ("One moment."), and the guide's own reply says the text went out once it
+  actually did.
+- **Business name mispronounced** ("Ped-allies", "P. had less"). The cause
+  was the name arriving at TTS split into sub-word frames ("Ped" + "als",
+  "P" + "edd" + "les"), not the spelling. Offline, every candidate spelling
+  ("Pedals", "Peddles", "Peddals", "Pedduls", "Pedalls", "Peddulls") came
+  out the same and transcribed back as "Peachtree Petals". That test used a
+  local Piper voice, because the ElevenLabs voice runs inside Twilio and
+  there is no ElevenLabs key to call it directly. Now the app holds back
+  text until any `SPOKEN_JOIN_PHRASES` phrase is complete, so the business
+  name always reaches TTS in one frame. The alias is back to
+  `Peachtree=Peach tree` only ("Peach tree" sounded right on the 18:19 call),
+  so the spoken name is "Peach tree Pedals".
+
 ## Configuration
 
 | Variable | Default | Effect |
@@ -237,10 +263,12 @@ Postmark rejected the send (HTTP 401, invalid server token). Now:
 | `AUTO_END_CALL_ENABLED` | true | Server-side hang-up backup |
 | `CANNED_GOODBYE_ENABLED` | true | Ready-made goodbye after "anything else?" → done |
 | `CANNED_GOODBYE_TEXT` | "You're welcome! Thanks for calling…" | The goodbye text |
-| `SPOKEN_NAME_ALIASES` | Peachtree=Peach tree,Pedals=Peddles | `word=spoken` pairs for the business name the guide says |
+| `SPOKEN_NAME_ALIASES` | Peachtree=Peach tree | `word=spoken` pairs for the business name the guide says |
 | `BUSINESS_HOURS_GUARD_ENABLED` | true | Refuse catalog/availability/booking outside business hours |
 | `NOW_NOTE_ENABLED` | true | Current local date/time and open state in the first-turn note |
 | `IGNORE_FIRST_BARE_GREETING` | true | Don't answer a lone "hi" first turn with another greeting |
+| `SPOKEN_JOIN_PHRASES` | Peach tree Pedals,Peachtree Pedals | Phrases always sent to TTS in one frame |
+| `BOOKING_CONFIRM_GUARD_ENABLED` | true | Refuse a booking without a recap + yes |
 | `KNOWN_CALLER_NOTE_ENABLED` | true | Tell the guide who a known caller is on the first turn |
 | `ACCESSORY_KEYWORDS` | helmet,lock,basket,light,bell,accessory,child seat | Accessory detection |
 | `FAST_TOOLS_ENABLED` | true | Parallel/prefetched Booqable reads |

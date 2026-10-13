@@ -151,7 +151,7 @@ def test_known_caller_note_says_book_directly():
     s = GuideSession(caller_phone="+15550003374")
     s.known_customer = {"id": "c1", "attributes": {"name": "Eric Smith"}}
     note = guide_client.known_caller_note(s)
-    assert "don't call get_caller_phone_number" in note and "Booking under Eric Smith?" in note
+    assert "don't call get_caller_phone_number" in note and "Booking under Eric Smith, shall I go ahead?" in note
 
 
 def test_caller_phone_lookup_has_no_filler():
@@ -174,7 +174,7 @@ def test_template_rules():
 
 
 def test_spoken_name_default_aliases():
-    assert render.spoken_name("Peachtree Pedals") == "Peach tree Peddles"
+    assert render.spoken_name("Peachtree Pedals") == "Peach tree Pedals"
 
 
 # --- unclear 'text' and bare greeting ------------------------------------------------
