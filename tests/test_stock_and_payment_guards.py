@@ -133,7 +133,7 @@ def test_round_text_collects_all_rounds(monkeypatch):
     assert "by text?" in s.round_text and "Done." in s.round_text
 
 
-@pytest.mark.parametrize("heard", ["6.", "Six", "Tex.", "next", "by tex"])
+@pytest.mark.parametrize("heard", ["Tex.", "by tex", "Texts"])  # unclear "6"/"next": see test_hours_email_known_booking.py
 def test_text_mishearing_fixed_after_text_or_email(heard):
     assert stt_fixups.fix_choice("Would you like it by text or by email?", heard) == "Text."
 

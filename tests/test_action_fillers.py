@@ -7,7 +7,7 @@ def test_action_classification():
     assert fillers.action_for_tools(["sendPaymentLink"]) == "message"
     assert fillers.action_for_tools(["listCatalog"]) == "lookup"
     assert fillers.action_for_tools(["checkAvailability"]) == "lookup"
-    assert fillers.action_for_tools(["get_caller_phone_number"]) == "lookup"
+    assert fillers.action_for_tools(["get_caller_phone_number"]) is None  # cached lookup, no filler
     assert fillers.action_for_tools(["getOrder"]) == "lookup"
     assert fillers.action_for_tools(["lookupCustomerByEmail"]) == "lookup"
     assert fillers.action_for_tools(["endCall"]) is None

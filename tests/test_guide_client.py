@@ -708,6 +708,13 @@ def test_execute_tool_send_payment_link_passes_phone_override(monkeypatch):
     assert send_mock.call_args.kwargs["phone"] == "+15559998888"
 
 
+def _confirmed_email_session(email: str) -> GuideSession:
+    # The email guard needs a confirmed address (see test_hours_email_known_booking.py).
+    s = GuideSession()
+    s.confirmed_emails.add("".join(ch for ch in email.lower() if ch.isalnum()))
+    return s
+
+
 def test_execute_tool_send_payment_link_passes_channel_and_email(monkeypatch):
     monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
     send_mock = AsyncMock(return_value={"order_id": "order_1", "sent_to": "jane@example.com", "payment_link": "x"})
@@ -717,7 +724,7 @@ def test_execute_tool_send_payment_link_passes_channel_and_email(monkeypatch):
         guide_client._execute_tool(
             "sendPaymentLink",
             json.dumps({"order_id": "order_1", "channel": "email", "email": "jane@example.com"}),
-            GuideSession(),
+            _confirmed_email_session("jane@example.com"),
         )
     )
 

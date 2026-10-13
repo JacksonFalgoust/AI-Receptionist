@@ -162,6 +162,46 @@ Problems seen on the 17:52 call, and their fixes:
   the name instead of asking for it. The instructions also say never to ask a
   known customer's name. `KNOWN_CALLER_NOTE_ENABLED` turns this off.
 
+### Business hours, direct booking for known callers, email confirmation (Oct 13 18:20 test call)
+
+- **A booking was offered for "today" after closing.** At 6:20 PM (the shop
+  closes at 6 PM) the guide checked stock for 9 AM-6 PM today, Booqable said
+  in stock, and the agent offered bikes "available today". Hours were only in
+  the instructions; no tool checked them. Now `app/business_hours.py` checks
+  windows against the published business profile's hours in
+  `BOOQABLE_TIMEZONE`:
+  - createReservation refuses a start in the past (15 min grace), before
+    opening, at or after closing, a closed day, or a return after closing:
+    `NOT BOOKED: outside business hours -- … Next open: Wednesday, October
+    14th at 9 AM.`
+  - Dated listCatalog/checkAvailability return `closed: true` with no items
+    and `next_open_spoken` for a closed day, a past day, or today once it's
+    past closing. A whole-day check earlier today is still fine while the
+    shop is open.
+  - The caller's first turn carries a note with the current local date and
+    time and whether the shop is open, closed for today or not yet open (with
+    the next opening). The instructions say: closed today means say so and
+    offer the next open day.
+- **Known callers book directly.** The first-turn note tells the guide to
+  call createReservation with the known name and no phone. The app fills in
+  the calling number, so there's no separate get_caller_phone_number turn
+  (about 1.5 s saved). get_caller_phone_number never gets a filler.
+- **Recap:** it ends with "Booking under <name>?". After a decline and a
+  change of mind, the details are read back again before booking.
+- **Unclear "text":** "6", "six", "next", "tax" and "tech" after "text or
+  email?" no longer become "Text."; the guide is told to ask once "By text,
+  right?". Clear forms ("tex", "texts") are still mapped.
+- **Bare first greeting:** a lone "hi"/"hello" as the first caller turn is
+  ignored once (`IGNORE_FIRST_BARE_GREETING`), so the agent doesn't greet
+  twice over a caller who is just starting.
+- **Pronunciation:** `SPOKEN_NAME_ALIASES` default adds `Pedals=Peddles`
+  ("Pedals" came out as "Pen-o-lose").
+- **Email payment links are confirmed like names.** The guide reads the
+  address back spelled out and sends only after a clear yes. Server guard:
+  sendPaymentLink by email returns `NOT SENT` unless the previous turn read
+  that address back and the caller's reply was a yes (or it was confirmed
+  earlier in the call).
+
 ## Configuration
 
 | Variable | Default | Effect |
@@ -180,7 +220,10 @@ Problems seen on the 17:52 call, and their fixes:
 | `AUTO_END_CALL_ENABLED` | true | Server-side hang-up backup |
 | `CANNED_GOODBYE_ENABLED` | true | Ready-made goodbye after "anything else?" → done |
 | `CANNED_GOODBYE_TEXT` | "You're welcome! Thanks for calling…" | The goodbye text |
-| `SPOKEN_NAME_ALIASES` | Peachtree=Peach tree | `word=spoken` pairs for the business name the guide says |
+| `SPOKEN_NAME_ALIASES` | Peachtree=Peach tree,Pedals=Peddles | `word=spoken` pairs for the business name the guide says |
+| `BUSINESS_HOURS_GUARD_ENABLED` | true | Refuse catalog/availability/booking outside business hours |
+| `NOW_NOTE_ENABLED` | true | Current local date/time and open state in the first-turn note |
+| `IGNORE_FIRST_BARE_GREETING` | true | Don't answer a lone "hi" first turn with another greeting |
 | `KNOWN_CALLER_NOTE_ENABLED` | true | Tell the guide who a known caller is on the first turn |
 | `ACCESSORY_KEYWORDS` | helmet,lock,basket,light,bell,accessory,child seat | Accessory detection |
 | `FAST_TOOLS_ENABLED` | true | Parallel/prefetched Booqable reads |
