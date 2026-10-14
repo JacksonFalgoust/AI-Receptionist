@@ -44,6 +44,35 @@ def _published_hours() -> list[dict] | None:
     return None
 
 
+_NAME_CACHE: dict[str, Any] = {"at": 0.0, "name": None}
+
+
+def _published_name() -> str | None:
+    try:
+        from . import db as db_module
+        from .guide_publish import publisher
+
+        session = db_module.SessionLocal()
+        try:
+            pub = publisher.latest_succeeded(session)
+            if pub:
+                return ((pub.published_config or {}).get("business_profile") or {}).get("name")
+        finally:
+            session.close()
+    except Exception:  # noqa: BLE001 -- fall back to defaults
+        logger.info("Business name: using default (published profile unavailable)")
+    return None
+
+
+def business_name() -> str:
+    """Written business name from the last published profile (cached 60 s)."""
+    now = time.monotonic()
+    if _NAME_CACHE["name"] is None or now - _NAME_CACHE["at"] > _CACHE_SECONDS:
+        _NAME_CACHE["name"] = (_published_name() or config.DEFAULT_BUSINESS_PROFILE.get("name") or "").strip()
+        _NAME_CACHE["at"] = now
+    return _NAME_CACHE["name"]
+
+
 def current_hours() -> list[dict]:
     now = time.monotonic()
     if _CACHE["hours"] is None or now - _CACHE["at"] > _CACHE_SECONDS:

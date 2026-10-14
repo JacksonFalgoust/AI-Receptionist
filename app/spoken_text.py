@@ -46,3 +46,26 @@ class PhraseJoiner:
     def flush(self) -> str:
         out, self._held = self._held, ""
         return out
+
+
+def canned_goodbye_text(template: str | None = None, name: str | None = None) -> str:
+    """The ready-made goodbye with the business name filled in, spoken form
+    ("Peach tree Pedals"). Sent as one text frame, so the name is never split
+    into sub-word tokens. Without a name, " {business}" is dropped."""
+    from . import config
+
+    template = config.CANNED_GOODBYE_TEXT if template is None else template
+    if "{business}" not in template:
+        return template
+    if name is None:
+        try:
+            from . import business_hours
+
+            name = business_hours.business_name()
+        except Exception:  # noqa: BLE001
+            name = ""
+    if name:
+        from .guide_publish.render import spoken_name
+
+        return template.replace("{business}", spoken_name(name))
+    return template.replace(" {business}", "").replace("{business}", "")

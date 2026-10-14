@@ -88,7 +88,7 @@ from .concierge_api import router as concierge_router
 from .conversations_api import router as conversations_router
 from .dashboard_api import router as dashboard_router
 from . import call_end
-from .spoken_text import PhraseJoiner
+from .spoken_text import PhraseJoiner, canned_goodbye_text
 from .db import init_db
 from . import guide_client, stt_fixups
 from .guide_client import Delta, GuideSession, ToolCallStarted, build_input, stream_reply
@@ -723,7 +723,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
     async def _canned_goodbye() -> None:
         """Speak the ready-made goodbye, wait for it to finish playing, then
         hang up the same way endCall does."""
-        text = config.CANNED_GOODBYE_TEXT
+        text = canned_goodbye_text()
         st.reply_first_frame_at = asyncio.get_event_loop().time()
         await websocket.send_json({"type": "text", "token": text, "last": True, "preemptible": True})
         st.messages.append({"role": "assistant", "content": text})

@@ -168,10 +168,13 @@ def pick(phrases: list[str], avoid: str | None = None) -> str | None:
 # Per-action filler pools: a booking or a text message shouldn't be covered
 # by "let me look that up". Matched against client tool names (lowercased).
 ACTION_FILLERS: dict[str, list[str]] = {
+    # Neutral on purpose: createReservation can still be refused (NOT BOOKED
+    # by the confirm guard, hours guard or availability), so the filler must
+    # never claim it's booking -- the guide says so once the order exists.
     "booking": [
-        "One moment while I book that.",
-        "Okay, booking that for you now.",
-        "Just a moment while I get that booked.",
+        "One moment.",
+        "Just a moment.",
+        "Bear with me one second.",
     ],
     "cancel": [
         "One moment while I cancel that.",

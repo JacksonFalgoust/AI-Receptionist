@@ -507,8 +507,9 @@ NOW_NOTE_ENABLED = os.getenv("NOW_NOTE_ENABLED", "true").lower() not in ("0", "f
 # already asked how to help) instead of greeting them a second time.
 IGNORE_FIRST_BARE_GREETING = os.getenv("IGNORE_FIRST_BARE_GREETING", "true").lower() not in ("0", "false", "no")
 CANNED_GOODBYE_TEXT = os.getenv(
-    "CANNED_GOODBYE_TEXT", "You're welcome! Thanks for calling, and have a great day. Goodbye!"
-)
+    "CANNED_GOODBYE_TEXT",
+    "You're welcome! Thanks for calling {business}, and have a great day. Goodbye!",
+)  # {business} = spoken business name (SPOKEN_NAME_ALIASES applied); dropped if unknown
 # Catalog items whose names contain any of these words are accessories: listed
 # separately by listCatalog, never offered or counted as the main rentable items.
 ACCESSORY_KEYWORDS = tuple(
