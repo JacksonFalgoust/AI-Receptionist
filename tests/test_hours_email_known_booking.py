@@ -174,7 +174,7 @@ def test_template_rules():
 
 
 def test_spoken_name_default_aliases():
-    assert render.spoken_name("Peachtree Pedals") == "Peach tree Pedals"
+    assert render.spoken_name("Atlanta Bikes") == "Atlanta Bikes"
 
 
 # --- unclear 'text' and bare greeting ------------------------------------------------

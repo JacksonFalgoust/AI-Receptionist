@@ -50,7 +50,7 @@ class PhraseJoiner:
 
 def canned_goodbye_text(template: str | None = None, name: str | None = None) -> str:
     """The ready-made goodbye with the business name filled in, spoken form
-    ("Peach tree Pedals"). Sent as one text frame, so the name is never split
+    (e.g. "Atlanta Bikes", or its SPOKEN_NAME_ALIASES form). Sent as one text frame, so the name is never split
     into sub-word tokens. Without a name, " {business}" is dropped."""
     from . import config
 

@@ -66,7 +66,7 @@ def test_get_configuration_seeds_and_returns_camel_case(db_session_factory):
     response = client.get("/api/concierge/configuration")
     assert response.status_code == 200
     body = response.json()
-    assert body["businessProfile"]["name"] == "Peachtree Pedals"
+    assert body["businessProfile"]["name"] == "Atlanta Bikes"
     assert body["hasUnpublishedChanges"] is False
     assert "business_profile" not in body
 
@@ -93,7 +93,7 @@ def test_preview_returns_instructions_without_publishing(db_session_factory):
     response = client.post("/api/concierge/configuration/preview")
     assert response.status_code == 200
     body = response.json()
-    assert "Peachtree Pedals" in body["instructions"]
+    assert "Atlanta Bikes" in body["instructions"]
     assert body["changed"] is True
     assert client.get("/api/concierge/publications").json() == []
 

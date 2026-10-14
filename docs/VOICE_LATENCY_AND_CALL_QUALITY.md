@@ -263,11 +263,11 @@ Postmark rejected the send (HTTP 401, invalid server token). Now:
 | `AUTO_END_CALL_ENABLED` | true | Server-side hang-up backup |
 | `CANNED_GOODBYE_ENABLED` | true | Ready-made goodbye after "anything else?" → done |
 | `CANNED_GOODBYE_TEXT` | "You're welcome! Thanks for calling {business}, …" | The goodbye text; `{business}` = spoken business name (one TTS frame) |
-| `SPOKEN_NAME_ALIASES` | Peachtree=Peach tree | `word=spoken` pairs for the business name the guide says |
+| `SPOKEN_NAME_ALIASES` | (empty) | `word=spoken` pairs for the business name the guide says |
 | `BUSINESS_HOURS_GUARD_ENABLED` | true | Refuse catalog/availability/booking outside business hours |
 | `NOW_NOTE_ENABLED` | true | Current local date/time and open state in the first-turn note |
 | `IGNORE_FIRST_BARE_GREETING` | true | Don't answer a lone "hi" first turn with another greeting |
-| `SPOKEN_JOIN_PHRASES` | Peach tree Pedals,Peachtree Pedals | Phrases always sent to TTS in one frame |
+| `SPOKEN_JOIN_PHRASES` | Atlanta Bikes | Phrases always sent to TTS in one frame |
 | `BOOKING_CONFIRM_GUARD_ENABLED` | true | Refuse a booking without a recap + yes |
 | `KNOWN_CALLER_NOTE_ENABLED` | true | Tell the guide who a known caller is on the first turn |
 | `ACCESSORY_KEYWORDS` | helmet,lock,basket,light,bell,accessory,child seat | Accessory detection |
@@ -296,3 +296,10 @@ and the template stays generic ("item"). Republish after changing either.
 - **Booking filler is neutral.** On the 21:20 call "Just a moment while I get that booked" played, and then the confirm guard refused the booking. The booking pool is now "One moment." / "Just a moment." / "Bear with me one second." (same as the send pool). Only the guide's reply after a real order says it's booked.
 - **No separate time confirmation.** Booking step 4 now takes a clear time as given. The guide asks a clarifying question only when something is actually ambiguous (an hour that could be morning or evening, a time outside opening hours). Step 8's recap ending "Booking under <name>, shall I go ahead?" is the single confirmation, which saves one round (about 12 s on the 21:20 call).
 - **Goodbye names the business.** `CANNED_GOODBYE_TEXT` takes `{business}`, filled with the published business name in its spoken form (`SPOKEN_NAME_ALIASES`: "Peach tree Pedals"). The name is cached for 60 s and falls back to the default profile. It goes out in one text frame, so it is never split into sub-word tokens. Every call that ends with "no, that's all" now speaks the name, which makes pronunciation checkable on each recording.
+
+### Demo business renamed to "Atlanta Bikes" (Oct 13, 21:49)
+- The demo shop is now **Atlanta Bikes** (it was "Peachtree Pedals"). The code was already generic: the guide instructions, greeting, ready-made goodbye (`{business}`) and SMS confirmation all take the name from the published business profile. Only data and defaults changed:
+  - default business profile, receptionist identity name and the location knowledge item (`app/config.py`)
+  - the live console configuration and knowledge items in the database, then a republish (the guide's instructions and vector store are replaced on publish)
+  - `SPOKEN_NAME_ALIASES` now defaults to empty (the Peachtree alias is gone) and `SPOKEN_JOIN_PHRASES` to `Atlanta Bikes`
+- The Peachtree notes above are kept as history. The alias mechanism is still available for any future name that TTS mispronounces.

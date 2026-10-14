@@ -115,21 +115,21 @@ def _stream(joiner, tokens):
 
 
 def test_joiner_sends_name_in_one_frame():
-    j = PhraseJoiner(["Peach tree Pedals"])
-    frames = _stream(j, ["Thanks for calling ", "Pe", "ach", " tree", " Ped", "als", ". Goodbye."])
-    assert "".join(frames) == "Thanks for calling Peach tree Pedals. Goodbye."
-    assert any("Peach tree Pedals" in f for f in frames)
+    j = PhraseJoiner(["Atlanta Bikes"])
+    frames = _stream(j, ["Thanks for calling ", "At", "lan", "ta", " Bi", "kes", ". Goodbye."])
+    assert "".join(frames) == "Thanks for calling Atlanta Bikes. Goodbye."
+    assert any("Atlanta Bikes" in f for f in frames)
 
 
 def test_joiner_releases_non_matching_text():
-    j = PhraseJoiner(["Peach tree Pedals"])
-    frames = _stream(j, ["I love ", "Pe", "aches", " and more."])
-    assert "".join(frames) == "I love Peaches and more."
+    j = PhraseJoiner(["Atlanta Bikes"])
+    frames = _stream(j, ["I love ", "At", "lantis", " and more."])
+    assert "".join(frames) == "I love Atlantis and more."
 
 
 def test_joiner_flushes_partial_at_end():
-    j = PhraseJoiner(["Peach tree Pedals"])
-    assert "".join(_stream(j, ["Thanks, Pe"])) == "Thanks, Pe"
+    j = PhraseJoiner(["Atlanta Bikes"])
+    assert "".join(_stream(j, ["Thanks, At"])) == "Thanks, At"
 
 
 def test_joiner_no_phrases_passthrough():
@@ -137,7 +137,9 @@ def test_joiner_no_phrases_passthrough():
 
 
 def test_spoken_name_default():
-    assert render.spoken_name("Peachtree Pedals") == "Peach tree Pedals"
+    assert render.spoken_name("Atlanta Bikes") == "Atlanta Bikes"
+    assert config.SPOKEN_NAME_ALIASES == {}
+    assert config.SPOKEN_JOIN_PHRASES == ["Atlanta Bikes"]
 
 
 # --- 2) goodbye before hanging up (websocket) -------------------------------------------

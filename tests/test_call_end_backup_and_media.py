@@ -15,7 +15,7 @@ client = TestClient(app)
 
 def test_should_end_rules():
     asked = "You're all set. Is there anything else I can help you with?"
-    bye = "Thanks for calling Peachtree Pedals. Have a wonderful day!"
+    bye = "Thanks for calling Atlanta Bikes. Have a wonderful day!"
     assert call_end.should_end(asked, "No.", bye)
     assert call_end.should_end(asked, "No, that's it.", bye)
     assert call_end.should_end(asked, "Thank you.", bye)

@@ -283,8 +283,8 @@ def test_confirmation_sms_includes_confirmation_id(monkeypatch):
 
 
 def test_confirmation_sms_wording():
-    assert payments.confirmation_sms("Eric", 54, "https://x/pay", "Peachtree Pedals") == (
-        "Hi Eric, your reservation with Peachtree Pedals is confirmed. Confirmation number: #54. "
+    assert payments.confirmation_sms("Eric", 54, "https://x/pay", "Atlanta Bikes") == (
+        "Hi Eric, your reservation with Atlanta Bikes is confirmed. Confirmation number: #54. "
         "You can pay securely ahead of your visit here: https://x/pay Thank you!"
     )
     assert payments.confirmation_sms(None, None, "L") == (

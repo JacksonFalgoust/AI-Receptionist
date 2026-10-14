@@ -77,7 +77,7 @@ def push_fails(monkeypatch):
 
 def test_preview_renders_without_touching_the_network(db):
     preview = publisher.render_preview(db)
-    assert "Peachtree Pedals" in preview.instructions
+    assert "Atlanta Bikes" in preview.instructions
     assert preview.content_hash
     assert preview.changed is True  # nothing published yet
 
@@ -137,7 +137,7 @@ def test_configuration_only_change_publishes_without_a_push(db, push_ok):
 
     row = configuration_store.get_configuration(db)
     configuration_store.save_draft(
-        db, row, {"identity": {**row.identity, "greeting": "Peachtree Pedals, howdy!"}}
+        db, row, {"identity": {**row.identity, "greeting": "Atlanta Bikes, howdy!"}}
     )
     db.commit()
     assert configuration_store.get_configuration(db).has_unpublished_changes is True
@@ -147,7 +147,7 @@ def test_configuration_only_change_publishes_without_a_push(db, push_ok):
     # (a) a NEW succeeded publication carrying the new snapshot, no push
     assert second.id != first.id
     assert second.status == "succeeded"
-    assert second.published_config["identity"]["greeting"] == "Peachtree Pedals, howdy!"
+    assert second.published_config["identity"]["greeting"] == "Atlanta Bikes, howdy!"
     assert second.content_hash == first.content_hash
     assert second.bundle_bytes == first.bundle_bytes
     assert second.instructions_text == first.instructions_text
@@ -160,7 +160,7 @@ def test_configuration_only_change_publishes_without_a_push(db, push_ok):
     # (c) the greeting app/main.py reads is the new one
     latest = publisher.latest_succeeded(db)
     assert latest.id == second.id
-    assert latest.published_config["identity"]["greeting"] == "Peachtree Pedals, howdy!"
+    assert latest.published_config["identity"]["greeting"] == "Atlanta Bikes, howdy!"
 
 
 def test_configuration_only_change_does_not_mutate_the_earlier_snapshot(db, push_ok):

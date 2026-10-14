@@ -38,7 +38,7 @@ WELCOME_BACK_GREETING_TEMPLATE = os.environ.get(
 # identity slots. The template itself is generic (any business); these
 # values are just the demo shop it ships configured for.
 DEFAULT_BUSINESS_PROFILE = {
-    "name": "Peachtree Pedals",
+    "name": "Atlanta Bikes",
     "description": "a bike rental shop in Atlanta, Georgia",
     # Obviously-fake placeholders (555 is the reserved fiction exchange), not
     # blanks: the Configuration console's businessProfileFormSchema requires a
@@ -57,7 +57,7 @@ DEFAULT_BUSINESS_PROFILE = {
 }
 
 DEFAULT_IDENTITY = {
-    "name": "Peachtree Pedals Receptionist",
+    "name": "Atlanta Bikes Receptionist",
     "greeting": WELCOME_GREETING,
     "closing": "Thanks for calling. Have a great ride!",
     # One of frontend/src/lib/voices.ts's VOICE_OPTIONS, for the same reason
@@ -97,7 +97,7 @@ DEFAULT_KNOWLEDGE_ITEMS = [
         "title": "Location, Contact, and Hours",
         "type": "location",
         "content": (
-            "Peachtree Pedals is located at 1234 Road Pkwy, Atlanta, GA, with a lot "
+            "Atlanta Bikes is located at 1234 Road Pkwy, Atlanta, GA, with a lot "
             "behind the shop and a gate that opens directly onto the Atlanta BeltLine "
             "trail. Open every day, 9:00 AM to 6:00 PM, including weekends and "
             "holidays except Thanksgiving Day and Christmas Day, when the shop is "
@@ -477,18 +477,19 @@ STUCK_AUDIO_RECOVERY_SECONDS = float(os.getenv("STUCK_AUDIO_RECOVERY_SECONDS", "
 # clearly says they're done, speak this and hang up without a model round trip.
 CANNED_GOODBYE_ENABLED = os.getenv("CANNED_GOODBYE_ENABLED", "true").lower() not in ("0", "false", "no")
 # "Word=Spoken form" pairs (comma-separated) applied to the business name the
-# guide is told to SAY, so TTS pronounces it right ("Peachtree" was read as
-# "Paf-tree"). The written name (business.name) is unchanged.
+# guide is told to SAY, for names TTS mispronounces (e.g. "Peachtree=Peach tree"
+# when the demo shop was Peachtree Pedals). The written name (business.name) is
+# unchanged. Default: none ("Atlanta Bikes" is read correctly as written).
 SPOKEN_NAME_ALIASES = dict(
     pair.split("=", 1)
-    for pair in os.getenv("SPOKEN_NAME_ALIASES", "Peachtree=Peach tree").split(",")
+    for pair in os.getenv("SPOKEN_NAME_ALIASES", "").split(",")
     if "=" in pair
 )
 # Phrases always sent to TTS in one frame (never split into sub-word tokens),
 # comma-separated. Default: the business name, written and spoken forms.
 SPOKEN_JOIN_PHRASES = [
     p.strip()
-    for p in os.getenv("SPOKEN_JOIN_PHRASES", "Peach tree Pedals,Peachtree Pedals").split(",")
+    for p in os.getenv("SPOKEN_JOIN_PHRASES", "Atlanta Bikes").split(",")
     if p.strip()
 ]
 # createReservation is refused unless the previous agent turn was a recap /

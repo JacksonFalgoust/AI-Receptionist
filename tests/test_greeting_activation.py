@@ -53,8 +53,8 @@ def test_no_publication_falls_back_to_the_env_greeting(session_factory):
 
 
 def test_published_greeting_is_used(session_factory):
-    _publish(session_factory, "Thanks for calling Peachtree Pedals!")
-    assert asyncio.run(_greeting_for("")) == "Thanks for calling Peachtree Pedals!"
+    _publish(session_factory, "Thanks for calling Atlanta Bikes!")
+    assert asyncio.run(_greeting_for("")) == "Thanks for calling Atlanta Bikes!"
 
 
 def test_failed_publication_is_ignored(session_factory):
