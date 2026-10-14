@@ -1,5 +1,6 @@
 ﻿"""Ready-made goodbye, no filler after the model's own lead-in, recovery only on chime turns."""
 
+from app.spoken_text import canned_goodbye_text
 import asyncio
 import json
 
@@ -61,7 +62,7 @@ def test_canned_goodbye_after_anything_else(monkeypatch):
         calls, frames = _two_turns(monkeypatch, said, f"CA_bye_{i}")
         assert len(calls) == 1, said  # no model round trip for the goodbye
         texts = [f for f in frames if f["type"] == "text"]
-        assert texts and texts[0]["token"] == config.CANNED_GOODBYE_TEXT and texts[0]["last"]
+        assert texts and texts[0]["token"] == canned_goodbye_text() and texts[0]["last"]
         end = [f for f in frames if f["type"] == "end"]
         assert end and json.loads(end[0]["handoffData"])["reasonCode"] == "caller-done"
 

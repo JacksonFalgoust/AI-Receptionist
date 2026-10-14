@@ -262,7 +262,7 @@ Postmark rejected the send (HTTP 401, invalid server token). Now:
 | `END_CALL_AFTER_PLAYBACK_SECONDS` | 0.4 | Margin after the goodbye before hanging up |
 | `AUTO_END_CALL_ENABLED` | true | Server-side hang-up backup |
 | `CANNED_GOODBYE_ENABLED` | true | Ready-made goodbye after "anything else?" → done |
-| `CANNED_GOODBYE_TEXT` | "You're welcome! Thanks for calling…" | The goodbye text |
+| `CANNED_GOODBYE_TEXT` | "You're welcome! Thanks for calling {business}, …" | The goodbye text; `{business}` = spoken business name (one TTS frame) |
 | `SPOKEN_NAME_ALIASES` | Peachtree=Peach tree | `word=spoken` pairs for the business name the guide says |
 | `BUSINESS_HOURS_GUARD_ENABLED` | true | Refuse catalog/availability/booking outside business hours |
 | `NOW_NOTE_ENABLED` | true | Current local date/time and open state in the first-turn note |
@@ -291,3 +291,8 @@ and the template stays generic ("item"). Republish after changing either.
 - **The first model round** to a tool call takes 1.8–2.5 s (model-bound).
 - **One test is flaky:** the greeting-activation test occasionally fails in a
   full run and passes on rerun.
+
+### Neutral booking filler, one confirmation, business name in the goodbye (Oct 13 21:20 review)
+- **Booking filler is neutral.** On the 21:20 call "Just a moment while I get that booked" played, and then the confirm guard refused the booking. The booking pool is now "One moment." / "Just a moment." / "Bear with me one second." (same as the send pool). Only the guide's reply after a real order says it's booked.
+- **No separate time confirmation.** Booking step 4 now takes a clear time as given. The guide asks a clarifying question only when something is actually ambiguous (an hour that could be morning or evening, a time outside opening hours). Step 8's recap ending "Booking under <name>, shall I go ahead?" is the single confirmation, which saves one round (about 12 s on the 21:20 call).
+- **Goodbye names the business.** `CANNED_GOODBYE_TEXT` takes `{business}`, filled with the published business name in its spoken form (`SPOKEN_NAME_ALIASES`: "Peach tree Pedals"). The name is cached for 60 s and falls back to the default profile. It goes out in one text frame, so it is never split into sub-word tokens. Every call that ends with "no, that's all" now speaks the name, which makes pronunciation checkable on each recording.

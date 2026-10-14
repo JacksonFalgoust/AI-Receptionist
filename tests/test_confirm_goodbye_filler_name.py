@@ -1,6 +1,7 @@
 """18:46 review fixes: recap + yes before booking, goodbye before hanging
 up, neutral send filler, business name kept whole for TTS."""
 
+from app.spoken_text import canned_goodbye_text
 import asyncio
 import json
 from pathlib import Path
@@ -167,7 +168,7 @@ def test_silent_endcall_plays_ready_made_goodbye(monkeypatch):
         ws.send_json({"type": "prompt", "voicePrompt": "Let me call you back.", "last": True})
         frames = _drain(ws)
     texts = [f["token"] for f in frames if f["type"] == "text" and f["token"].strip()]
-    assert config.CANNED_GOODBYE_TEXT in texts
+    assert canned_goodbye_text() in texts
     assert any(f["type"] == "end" for f in frames)
-    assert frames.index(next(f for f in frames if f.get("token") == config.CANNED_GOODBYE_TEXT)) < \
+    assert frames.index(next(f for f in frames if f.get("token") == canned_goodbye_text())) < \
         frames.index(next(f for f in frames if f["type"] == "end"))
