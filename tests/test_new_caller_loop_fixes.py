@@ -161,10 +161,12 @@ def test_openapi_documents_new_caller_number_and_carry_over():
 # --- B: greeting with the business name -------------------------------------------
 
 def test_default_greeting_names_business():
-    assert config.WELCOME_GREETING == "Thanks for calling {business}! How can I help you today?"
-    assert fill_business(config.WELCOME_GREETING, name="Atlanta Bikes") == \
+    src = (ROOT / "app/config.py").read_text(encoding="utf-8")  # code default (.env may override)
+    assert '"WELCOME_GREETING", "Thanks for calling {business}! How can I help you today?"' in src
+    tpl = "Thanks for calling {business}! How can I help you today?"
+    assert fill_business(tpl, name="Atlanta Bikes") == \
         "Thanks for calling Atlanta Bikes! How can I help you today?"
-    assert fill_business(config.WELCOME_GREETING, name="") == "Thanks for calling! How can I help you today?"
+    assert fill_business(tpl, name="") == "Thanks for calling! How can I help you today?"
     assert fill_business("Hello there!", name="Atlanta Bikes") == "Hello there!"
 
 
