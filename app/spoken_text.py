@@ -48,6 +48,14 @@ class PhraseJoiner:
         return out
 
 
+def fill_business(text: str, name: str | None = None) -> str:
+    """Replace {business} with the published business name (spoken form);
+    without a name, " {business}" is dropped."""
+    if "{business}" not in (text or ""):
+        return text
+    return canned_goodbye_text(template=text, name=name)
+
+
 def canned_goodbye_text(template: str | None = None, name: str | None = None) -> str:
     """The ready-made goodbye with the business name filled in, spoken form
     (e.g. "Atlanta Bikes", or its SPOKEN_NAME_ALIASES form). Sent as one text frame, so the name is never split

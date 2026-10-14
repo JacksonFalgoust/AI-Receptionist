@@ -23,7 +23,7 @@ GUIDEANTS_TIMEOUT_SECONDS = float(os.environ.get("GUIDEANTS_TIMEOUT_SECONDS", "3
 TTS_WORDS_PER_SECOND = float(os.environ.get("TTS_WORDS_PER_SECOND", "2.5"))
 
 WELCOME_GREETING = os.environ.get(
-    "WELCOME_GREETING", "Thanks for calling! How can I help you today?"
+    "WELCOME_GREETING", "Thanks for calling {business}! How can I help you today?"
 )
 WELCOME_BACK_GREETING_TEMPLATE = os.environ.get(
     "WELCOME_BACK_GREETING_TEMPLATE", "Hi {name}, welcome back! How can I help you today?"

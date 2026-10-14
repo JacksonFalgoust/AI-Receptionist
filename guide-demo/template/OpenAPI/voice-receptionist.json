@@ -233,7 +233,7 @@
       "post": {
         "operationId": "createReservation",
         "summary": "Create a reservation for a caller",
-        "description": "Finds or creates the customer, creates the order, books the requested items, and — unless auto_reserve is set to false — immediately reserves it. Only call this after confirming the products, dates, and price with the caller. Before calling: you must have collected customer_name plus at least one of customer_email or customer_phone — ask the caller for whichever they haven't given you yet. If the response shows reserved=false with a reserve_error (e.g. items became unavailable), tell the caller and offer alternatives rather than retrying blindly. The server re-checks stock and refuses (error starting NOT BOOKED, no order made) if any item is unavailable. Refused with 'NOT BOOKED: outside business hours' for a start in the past, before opening, at or after closing, a closed day, or a return after closing; the error gives the next open time. For a known caller, customer_phone may be left empty (the calling number is used). Refused with 'NOT BOOKED: confirm details with caller first' unless your previous reply was the recap ending 'Booking under <name>, shall I go ahead?' and the caller's reply is a clear yes.",
+        "description": "Finds or creates the customer, creates the order, books the requested items, and — unless auto_reserve is set to false — immediately reserves it. Only call this after confirming the products, dates, and price with the caller. Before calling: you must have collected customer_name plus at least one of customer_email or customer_phone — ask the caller for whichever they haven't given you yet. If the response shows reserved=false with a reserve_error (e.g. items became unavailable), tell the caller and offer alternatives rather than retrying blindly. The server re-checks stock and refuses (error starting NOT BOOKED, no order made) if any item is unavailable. Refused with 'NOT BOOKED: outside business hours' for a start in the past, before opening, at or after closing, a closed day, or a return after closing; the error gives the next open time. If the caller chose the number they're calling from (known or new caller), customer_phone may be left empty: the calling number is used. Refused with 'NOT BOOKED: confirm details with caller first' unless your previous reply was the recap ending 'Booking under <name>, shall I go ahead?' and the caller's reply is a clear yes. A yes to that recap still counts after a phone or email side question, as long as the details are unchanged: call createReservation right after the caller answers, with no new recap.",
         "requestBody": {
           "required": true,
           "content": {
@@ -257,7 +257,7 @@
                   },
                   "customer_phone": {
                     "type": "string",
-                    "description": "The caller's phone number. Optional only if customer_email is provided instead. For a known caller (named in the call's first note) leave empty: the number they're calling from is used."
+                    "description": "The caller's phone number. Optional only if customer_email is provided instead. Leave empty when the caller chose the number they're calling from (known or new caller): that number is used."
                   },
                   "starts_at": {
                     "type": "string",
@@ -348,7 +348,7 @@
       "post": {
         "operationId": "sendPaymentLink",
         "summary": "Text the caller a booking confirmation (confirmation number + secure payment link)",
-        "description": "Texts the caller their booking confirmation -- the confirmation number (Booqable order number) and a link to pay before arrival; describe it to the caller as 'a booking confirmation with your confirmation number and a secure payment link'. Returns confirmation_id (e.g. '#54') when known (SMS only -- email is not offered and is refused with NOT SENT). This is currently a placeholder/test link -- no real charge is processed yet. Sends to the number they're calling from unless phone is given. Never call this in the same turn as asking the caller a question; wait for their answer. If it returns NOT SENT, ask/confirm, then call it after they reply.",
+        "description": "Texts the caller their booking confirmation -- the confirmation number (Booqable order number) and a link to pay before arrival; describe it to the caller as 'a booking confirmation with your confirmation number and a secure payment link'. Returns confirmation_id (e.g. '#54') when known (SMS only -- email is not offered and is refused with NOT SENT). This is currently a placeholder/test link -- no real charge is processed yet. Sends to the number they're calling from unless phone is given. Never call this in the same reply that asks whether they want the text; ask, end your reply, and call it only after they say yes. If it returns NOT SENT, ask/confirm, then call it after they reply.",
         "parameters": [
           {
             "name": "order_id",

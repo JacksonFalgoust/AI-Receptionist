@@ -150,6 +150,10 @@ class GuideSession:
     # turn's caller text (see booking_confirmed).
     prev_round_text: str = ""
     turn_user_text: str = ""
+    # Set when the caller said yes to a recap: the booking details it covered
+    # (see _booking_key). Lets createReservation through after a phone/email
+    # side question without a second recap, if the details are unchanged.
+    recap_yes_key: str | None = None
     known_caller_note_sent: bool = False
     # Business-language log of every reservation tool this call actually
     # ran, in call order -- persisted as ConversationAction rows by
@@ -313,27 +317,30 @@ async def _run_reservation_tool(
             note=args.get("note"),
         )
     if name == "createReservation":
-        if (
-            config.BOOKING_CONFIRM_GUARD_ENABLED
-            and session is not None
-            and not booking_confirmed(session)
-        ):
-            return {
-                "error": "NOT BOOKED: confirm details with caller first. Read back the item, day, start "
-                         "time, total price and name, ending with 'Booking under <name>, shall I go "
-                         "ahead?', wait for their answer, and only call createReservation after they "
-                         "clearly say yes.",
-                "booked": False,
-            }
+        if config.BOOKING_CONFIRM_GUARD_ENABLED and session is not None:
+            key = _booking_key(args)
+            if booking_confirmed(session):
+                session.recap_yes_key = key
+            elif not (session.recap_yes_key == key and _after_contact_question(session)):
+                return {
+                    "error": "NOT BOOKED: confirm details with caller first. Read back the item, day, start "
+                             "time, total price and name, ending with 'Booking under <name>, shall I go "
+                             "ahead?', wait for their answer, and only call createReservation after they "
+                             "clearly say yes. If they already said yes to that recap and you only asked "
+                             "for a phone number or email since, call createReservation right after they "
+                             "answer, with the same details -- no new recap.",
+                    "booked": False,
+                }
         if (
             session is not None
             and not args.get("customer_email")
             and not args.get("customer_phone")
-            and session.known_customer
             and session.caller_phone
         ):
-            # Known caller (named in the first-turn note): book with the
-            # number they're calling from, no separate lookup turn needed.
+            # No contact given: book with the number they're calling from --
+            # known callers, and new callers who chose "the number I'm
+            # calling from" (22:14 call: the guide left it out and the
+            # booking failed, forcing a re-ask and a second recap).
             args = {**args, "customer_phone": session.caller_phone}
         if (
             session is not None
@@ -342,7 +349,12 @@ async def _run_reservation_tool(
         ):
             args = {**args, "customer_name": BooqableClient.attrs(session.known_customer).get("name") or ""}
         if not args.get("customer_email") and not args.get("customer_phone"):
-            raise BooqableError("customer_email or customer_phone is required")
+            return {
+                "error": "NOT BOOKED: a phone number or email is needed. Ask the caller for one, then "
+                         "call createReservation right after they answer, with the same details -- "
+                         "they already confirmed the recap, so no new recap.",
+                "booked": False,
+            }
         extra: dict[str, Any] = {}
         if not args.get("location_id") and session is not None and session.location_cache:
             # Resolved earlier this call (checkAvailability always runs first).
@@ -424,6 +436,30 @@ def _is_affirmative(user_text: str) -> bool:
     norm = " ".join(re.sub(r"[^a-z' ]+", " ", text.lower()).split())
     norm = _LEADING_ACKS_RE.sub("", norm) if not _AFFIRMATIVE.match(norm) else norm
     return bool(_AFFIRMATIVE.match(norm))
+
+
+_CONTACT_QUESTION = re.compile(r"\b(phone|number|email|e-mail|calling from|reach you)\b")
+
+
+def _booking_key(args: dict) -> str:
+    """The booking details a recap covers: items, times and name."""
+    return json.dumps(
+        [
+            args.get("items"),
+            args.get("starts_at"),
+            args.get("stops_at"),
+            " ".join((args.get("customer_name") or "").lower().split()),
+        ],
+        sort_keys=True,
+        default=str,
+    )
+
+
+def _after_contact_question(session: "GuideSession") -> bool:
+    """The previous agent turn was a phone/email side question (not a change
+    of the booking), so a recap yes from before it still stands."""
+    prev = (session.prev_round_text or "").lower()
+    return "?" in prev and bool(_CONTACT_QUESTION.search(prev))
 
 
 def booking_confirmed(session: "GuideSession") -> bool:
@@ -973,6 +1009,20 @@ async def _stream_reply_with_tools(
             logger.info("Goodbye spoken in the same round as endCall; the follow-up round stays silent")
             mute = True
             yield ToolCallStarted(tuple(names))
+            next_input = await _tool_outputs(outcome, session)
+            continue
+        if (
+            gate.emitted_any
+            and names
+            and all(n == "sendPaymentLink" for n in names)
+            and "?" in spoken_so_far
+        ):
+            # The guide asked "shall I text you…?" and called sendPaymentLink
+            # in the same round. The send guard refuses it (NOT SENT); the
+            # follow-up round stays silent so the question isn't asked twice
+            # and the caller's answer isn't talked over (22:14 call).
+            logger.info("Text offer asked in the same round as sendPaymentLink; waiting for the answer")
+            mute = True  # no ToolCallStarted either: no "One moment." filler after the question
             next_input = await _tool_outputs(outcome, session)
             continue
 

@@ -303,3 +303,11 @@ and the template stays generic ("item"). Republish after changing either.
   - the live console configuration and knowledge items in the database, then a republish (the guide's instructions and vector store are replaced on publish)
   - `SPOKEN_NAME_ALIASES` now defaults to empty (the Peachtree alias is gone) and `SPOKEN_JOIN_PHRASES` to `Atlanta Bikes`
 - The Peachtree notes above are kept as history. The alias mechanism is still available for any future name that TTS mispronounces.
+
+### New-caller loop fixes and the business-name greeting (Oct 13 22:14 review)
+The 22:14 call, a new caller, needed about 8 yeses instead of 4. These changes fix it:
+- **Calling number for new callers.** Before, createReservation filled in the calling number only for known callers. Now it does so whenever the guide sends no phone or email. If there is no number at all, the result is a guided `NOT BOOKED` ("ask, then book right after they answer, no new recap") instead of a raw error.
+- **A recap yes survives a contact side question.** The confirm guard remembers the booking details (items, times, name) the caller said yes to (`recap_yes_key`). If the agent then only asked a phone, number or email question, the next createReservation with unchanged details goes through without a second recap. Changed details still need a new recap. The refusal text now tells the guide to book right after the answer.
+- **No text send in the reply that asks.** When a spoken reply contains a question and the same round calls sendPaymentLink, the send guard refuses it (as before). The follow-up model round is now silent, with no filler, so the offer isn't asked twice and the caller's "yes" isn't talked over. The instructions and OpenAPI also tell the guide to ask, end the reply, and send only after the yes.
+- **"The one I'm calling from".** The instructions say "the one / the number I'm calling from" or "this number" means yes to the calling number, even without a "yes" and even if it is transcribed as a question.
+- **Greeting names the business.** `WELCOME_GREETING` and the console's identity.greeting accept `{business}`, filled with the published business name in its spoken form at answer time: "Thanks for calling Atlanta Bikes! How can I help you today?" Without a name, " {business}" is dropped.

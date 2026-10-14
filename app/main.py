@@ -88,7 +88,7 @@ from .concierge_api import router as concierge_router
 from .conversations_api import router as conversations_router
 from .dashboard_api import router as dashboard_router
 from . import call_end
-from .spoken_text import PhraseJoiner, canned_goodbye_text
+from .spoken_text import PhraseJoiner, canned_goodbye_text, fill_business
 from .db import init_db
 from . import guide_client, stt_fixups
 from .guide_client import Delta, GuideSession, ToolCallStarted, build_input, stream_reply
@@ -181,12 +181,12 @@ def _published_greeting() -> str:
                     "greeting"
                 )
                 if greeting:
-                    return greeting
+                    return fill_business(greeting)
         finally:
             session.close()
     except Exception:  # noqa: BLE001 -- never block answering a call
         logger.warning("could not read published greeting; using the default", exc_info=True)
-    return config.WELCOME_GREETING
+    return fill_business(config.WELCOME_GREETING)
 
 
 async def _greeting_for(from_number: str) -> str:
