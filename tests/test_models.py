@@ -189,7 +189,7 @@ def test_concierge_configuration_defaults_describe_the_bike_shop():
     """The seed must match today's authored instructions.md so that the
     first publish is a verifiable no-op. The frontend mock describes a
     different fictional business entirely -- do not seed from it."""
-    assert config.DEFAULT_BUSINESS_PROFILE["name"] == "Peachtree Pedals"
+    assert config.DEFAULT_BUSINESS_PROFILE["name"] == "Atlanta Bikes"
     assert config.DEFAULT_BUSINESS_PROFILE["address"] == "1234 Road Pkwy, Atlanta, GA"
     assert len(config.DEFAULT_BUSINESS_PROFILE["hours"]) == 7
     assert config.DEFAULT_IDENTITY["customTone"] == "warm, upbeat, and polite"
@@ -205,7 +205,7 @@ def test_concierge_configuration_model_roundtrips(db_session):
     db_session.add(row)
     db_session.commit()
     stored = db_session.query(models.ConciergeConfiguration).one()
-    assert stored.business_profile["name"] == "Peachtree Pedals"
+    assert stored.business_profile["name"] == "Atlanta Bikes"
     assert stored.has_unpublished_changes is False
     assert stored.last_published_at is None
 

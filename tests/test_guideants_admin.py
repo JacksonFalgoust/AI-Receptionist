@@ -54,6 +54,21 @@ def load_detail():
     # no test can reproduce. Point it at EXISTING_BYTES so "the console is
     # publishing exactly what the guide already holds" is expressible.
     detail["files"][0]["markdownShadow"]["contentHash"] = sha(EXISTING_BYTES)
+    # Make the recorded tool sources match the current template exactly, so
+    # these tests describe a guide whose tools are already up to date (the
+    # publisher now replaces a source whose spec differs).
+    from app.guide_publish import template as _template
+    sources = _template.load_tool_sources()
+    for tool in detail["customTools"]:
+        if tool["name"] in sources:
+            tool["openApiSpec"] = sources[tool["name"]]
+        if tool["name"] == "caller-phone" and not any(
+            op["operationId"] == "endCall" for op in tool["operations"]
+        ):
+            tool["operations"].append(
+                {**tool["operations"][0], "id": "op-endcall", "operationId": "endCall",
+                 "method": "POST", "path": "/end-call"}
+            )
     return detail
 
 
@@ -733,3 +748,40 @@ def test_added_tools_that_come_back_without_operations_fail_verification():
         asyncio.run(guideants_admin.update_guide("NEW", KNOWLEDGE))
 
     assert "expected operations" in str(excinfo.value)
+
+
+def test_a_changed_tool_source_is_replaced_and_verified():
+    before = load_detail()
+    stale = copy.deepcopy(before)
+    caller = next(t for t in stale["customTools"] if t["name"] == "caller-phone")
+    caller["openApiSpec"] = '{"openapi": "3.0.3", "paths": {"/get-caller-phone-number": {"get": {"operationId": "get_caller_phone_number"}}}}'
+    caller["operations"] = [op for op in caller["operations"] if op["operationId"] != "endCall"]
+    after = copy.deepcopy(before)
+    after["instructions"] = "New instructions"
+    after["guide"]["toolCount"] = 10
+    stale["guide"]["toolCount"] = 9
+    FakeAsyncClient.responses = [
+        LOGIN_OK(), GUIDE_LIST(), FakeResponse(200, stale), FakeResponse(200, {}), FakeResponse(200, after),
+    ]
+    result = asyncio.run(guideants_admin.update_guide("New instructions", KNOWLEDGE))
+    put = next(c for c in FakeAsyncClient.calls if c["method"] == "PUT")
+    sent = next(t for t in put["json"]["customTools"] if t["name"] == "caller-phone")
+    assert "endCall" in sent["openApiSpec"] and sent["operations"] == []
+    assert any("Updated tool source" in w for w in result["warnings"])
+
+
+def test_publish_fails_when_an_expected_tool_is_not_live():
+    before = load_detail()
+    after = copy.deepcopy(before)
+    after["instructions"] = "New instructions"
+    for t in after["customTools"]:
+        t["operations"] = [op for op in t["operations"] if op["operationId"] != "endCall"]
+    before_no_end = copy.deepcopy(after)
+    before_no_end["instructions"] = before["instructions"]
+    FakeAsyncClient.responses = [
+        LOGIN_OK(), GUIDE_LIST(), FakeResponse(200, before_no_end), FakeResponse(200, {}),
+        FakeResponse(200, after), FakeResponse(200, {}), FakeResponse(200, before_no_end),
+    ]
+    with pytest.raises(guideants_admin.GuideAntsAdminError) as exc:
+        asyncio.run(guideants_admin.update_guide("New instructions", KNOWLEDGE))
+    assert "endCall" in str(exc.value)

@@ -25,7 +25,7 @@ def db():
 
 def test_first_read_seeds_the_bike_shop(db):
     row = configuration_store.get_configuration(db)
-    assert row.business_profile["name"] == "Peachtree Pedals"
+    assert row.business_profile["name"] == "Atlanta Bikes"
     assert row.has_unpublished_changes is False
     assert row.last_published_at is None
 

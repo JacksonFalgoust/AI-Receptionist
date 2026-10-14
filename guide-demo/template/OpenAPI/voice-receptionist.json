@@ -16,26 +16,112 @@
       "get": {
         "operationId": "listCatalog",
         "summary": "List rentable products the caller can book",
-        "description": "Use this to look up the product_id needed for availability checks and reservations. Prices are in USD.",
+        "description": "Use this to look up product_ids and prices. Pass starts_at and stops_at (and quantity) once you know the day and time: the response then lists in 'products' ONLY the items in stock for that time, and 'unavailable' the ones that aren't. Without dates, availability is not checked. 'accessories' are add-ons, never main items. Prices are in USD. Outside business hours (closed day, after closing today, or a past day) it returns closed: true with no items and next_open_spoken -- tell the caller and offer that time.",
         "responses": {
-          "200": { "description": "Live product catalog", "content": { "application/json": { "schema": { "type": "object" } } } }
-        }
+          "200": {
+            "description": "Live product catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "starts_at",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ISO 8601 date/time, e.g. 2026-08-01T09:00:00"
+          },
+          {
+            "name": "stops_at",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ISO 8601 date/time, e.g. 2026-08-01T18:00:00"
+          },
+          {
+            "name": "quantity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          }
+        ]
       }
     },
     "/availability": {
       "get": {
         "operationId": "checkAvailability",
         "summary": "Check whether a product is available for a date range and quantity",
-        "description": "Call this before promising a reservation, and again immediately before creating one, since stock can be taken by another booking in between.",
+        "description": "Call this before promising a reservation, and again immediately before creating one, since stock can be taken by another booking in between. Outside business hours (closed day, after closing today, or a past day) it returns closed: true with no items and next_open_spoken -- tell the caller and offer that time.",
         "parameters": [
-          { "name": "product_id", "in": "query", "required": true, "schema": { "type": "string" } },
-          { "name": "starts_at", "in": "query", "required": true, "schema": { "type": "string" }, "description": "ISO 8601 date/time, e.g. 2026-08-01T09:00:00" },
-          { "name": "stops_at", "in": "query", "required": true, "schema": { "type": "string" }, "description": "ISO 8601 date/time, e.g. 2026-08-02T17:00:00" },
-          { "name": "quantity", "in": "query", "required": false, "schema": { "type": "integer", "default": 1 } },
-          { "name": "location_id", "in": "query", "required": false, "schema": { "type": "string" }, "description": "Defaults to the account's existing location" }
+          {
+            "name": "product_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "starts_at",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ISO 8601 date/time, e.g. 2026-08-01T09:00:00"
+          },
+          {
+            "name": "stops_at",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ISO 8601 date/time, e.g. 2026-08-02T17:00:00"
+          },
+          {
+            "name": "quantity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "location_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Defaults to the account's existing location"
+          }
         ],
         "responses": {
-          "200": { "description": "Availability status: available, partial, unavailable, or unknown", "content": { "application/json": { "schema": { "type": "object" } } } }
+          "200": {
+            "description": "Availability status: available, partial, unavailable, or unknown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -43,13 +129,36 @@
       "get": {
         "operationId": "findReservations",
         "summary": "Find a caller's active reservations by the email or phone they booked with",
-        "description": "Use this to cancel a rental without asking the caller for a confirmation number -- pass the phone number or email they booked with (get_caller_phone_number for their own number). Returns customer_found=false and no reservations if nothing matches. Each reservation includes the order_id needed for cancelReservation, plus the items, dates, and price to read back and confirm with the caller before canceling.",
+        "description": "Use this to cancel a rental without asking the caller for a confirmation number -- pass the phone number or email they booked with (get_caller_phone_number for their own number). Returns customer_found=false and no reservations if nothing matches. Each reservation includes the order_id needed for cancelReservation, plus the items, dates, and price to read back and confirm with the caller before canceling. Each reservation includes date_spoken and start_time_spoken in local time -- say only those; starts_at/stops_at are UTC and must never be read aloud. Never use this when the caller is only declining a booking you were about to make.",
         "parameters": [
-          { "name": "customer_email", "in": "query", "required": false, "schema": { "type": "string" } },
-          { "name": "customer_phone", "in": "query", "required": false, "schema": { "type": "string" } }
+          {
+            "name": "customer_email",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "customer_phone",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Matching customer and their active reservations", "content": { "application/json": { "schema": { "type": "object" } } } }
+          "200": {
+            "description": "Matching customer and their active reservations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -59,7 +168,16 @@
         "summary": "List existing customers",
         "description": "Use this to look someone up by name, phone, or email. Never read the full list back to a caller -- only use it to find a specific match.",
         "responses": {
-          "200": { "description": "Live customer list", "content": { "application/json": { "schema": { "type": "object" } } } }
+          "200": {
+            "description": "Live customer list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
         }
       },
       "post": {
@@ -72,19 +190,42 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["customer_name"],
+                "required": [
+                  "customer_name"
+                ],
                 "properties": {
-                  "customer_name": { "type": "string", "description": "The caller's full name" },
-                  "customer_email": { "type": "string", "description": "The caller's email, if given" },
-                  "customer_phone": { "type": "string", "description": "The caller's phone number, if given" },
-                  "note": { "type": "string", "description": "Why the caller wants follow-up, e.g. 'wants to buy an e-bike' or 'asked to speak to a person'" }
+                  "customer_name": {
+                    "type": "string",
+                    "description": "The caller's full name"
+                  },
+                  "customer_email": {
+                    "type": "string",
+                    "description": "The caller's email, if given"
+                  },
+                  "customer_phone": {
+                    "type": "string",
+                    "description": "The caller's phone number, if given"
+                  },
+                  "note": {
+                    "type": "string",
+                    "description": "Why the caller wants follow-up, e.g. 'wants to buy an e-bike' or 'asked to speak to a person'"
+                  }
                 }
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "The registered customer, including customer_id and whether the note was recorded", "content": { "application/json": { "schema": { "type": "object" } } } }
+          "200": {
+            "description": "The registered customer, including customer_id and whether the note was recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -92,40 +233,85 @@
       "post": {
         "operationId": "createReservation",
         "summary": "Create a reservation for a caller",
-        "description": "Finds or creates the customer, creates the order, books the requested items, and — unless auto_reserve is set to false — immediately reserves it. Only call this after confirming the products, dates, and price with the caller. Before calling: you must have collected customer_name plus at least one of customer_email or customer_phone — ask the caller for whichever they haven't given you yet. If the response shows reserved=false with a reserve_error (e.g. items became unavailable), tell the caller and offer alternatives rather than retrying blindly.",
+        "description": "Finds or creates the customer, creates the order, books the requested items, and — unless auto_reserve is set to false — immediately reserves it. Only call this after confirming the products, dates, and price with the caller. Before calling: you must have collected customer_name plus at least one of customer_email or customer_phone — ask the caller for whichever they haven't given you yet. If the response shows reserved=false with a reserve_error (e.g. items became unavailable), tell the caller and offer alternatives rather than retrying blindly. The server re-checks stock and refuses (error starting NOT BOOKED, no order made) if any item is unavailable. Refused with 'NOT BOOKED: outside business hours' for a start in the past, before opening, at or after closing, a closed day, or a return after closing; the error gives the next open time. If the caller chose the number they're calling from (known or new caller), customer_phone may be left empty: the calling number is used. Refused with 'NOT BOOKED: confirm details with caller first' unless your previous reply was the recap ending 'Booking under <name>, shall I go ahead?' and the caller's reply is a clear yes. A yes to that recap still counts after a phone or email side question, as long as the details are unchanged: call createReservation right after the caller answers, with no new recap.",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["customer_name", "starts_at", "stops_at", "items"],
+                "required": [
+                  "customer_name",
+                  "starts_at",
+                  "stops_at",
+                  "items"
+                ],
                 "properties": {
-                  "customer_name": { "type": "string", "description": "The caller's full name" },
-                  "customer_email": { "type": "string", "description": "The caller's email. Optional only if customer_phone is provided instead." },
-                  "customer_phone": { "type": "string", "description": "The caller's phone number. Optional only if customer_email is provided instead." },
-                  "starts_at": { "type": "string", "description": "ISO 8601 date/time" },
-                  "stops_at": { "type": "string", "description": "ISO 8601 date/time" },
+                  "customer_name": {
+                    "type": "string",
+                    "description": "The caller's full name"
+                  },
+                  "customer_email": {
+                    "type": "string",
+                    "description": "The caller's email. Optional only if customer_phone is provided instead."
+                  },
+                  "customer_phone": {
+                    "type": "string",
+                    "description": "The caller's phone number. Optional only if customer_email is provided instead. Leave empty when the caller chose the number they're calling from (known or new caller): that number is used."
+                  },
+                  "starts_at": {
+                    "type": "string",
+                    "description": "ISO 8601 date/time"
+                  },
+                  "stops_at": {
+                    "type": "string",
+                    "description": "ISO 8601 date/time"
+                  },
                   "items": {
                     "type": "array",
                     "items": {
                       "type": "object",
-                      "required": ["product_id", "quantity"],
+                      "required": [
+                        "product_id",
+                        "quantity"
+                      ],
                       "properties": {
-                        "product_id": { "type": "string", "description": "From listCatalog" },
-                        "quantity": { "type": "integer", "minimum": 1 }
+                        "product_id": {
+                          "type": "string",
+                          "description": "From listCatalog"
+                        },
+                        "quantity": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
                       }
                     }
                   },
-                  "location_id": { "type": "string", "description": "Defaults to the account's existing location" },
-                  "auto_reserve": { "type": "boolean", "default": true, "description": "Set false to leave as a draft order for staff review instead of reserving immediately" }
+                  "location_id": {
+                    "type": "string",
+                    "description": "Defaults to the account's existing location"
+                  },
+                  "auto_reserve": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Set false to leave as a draft order for staff review instead of reserving immediately"
+                  }
                 }
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Reservation result, including order_id, pricing, and whether it was actually reserved", "content": { "application/json": { "schema": { "type": "object" } } } }
+          "200": {
+            "description": "Reservation result, including order_id, pricing, and whether it was actually reserved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -134,20 +320,44 @@
         "operationId": "cancelReservation",
         "summary": "Cancel a reservation",
         "parameters": [
-          { "name": "order_id", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "order_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Cancellation result", "content": { "application/json": { "schema": { "type": "object" } } } }
-        }
+          "200": {
+            "description": "Cancellation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "description": "Cancels an existing reservation. Only call this after the caller has clearly said yes to cancelling this specific reservation (its item, date_spoken and start_time_spoken read back to them). Never call it when the caller is just declining a booking that hasn't been made."
       }
     },
     "/{order_id}/send-payment-link": {
       "post": {
         "operationId": "sendPaymentLink",
-        "summary": "Send the caller a payment link for their reservation",
-        "description": "Emails or texts a link so the caller can pay before arrival. This is currently a placeholder/test link -- no real charge is processed yet. Defaults to emailing the address already on file for the reservation unless channel is set to 'sms', in which case it texts the phone number on file. Pass email or phone to override the contact on file.",
+        "summary": "Text the caller a booking confirmation (confirmation number + secure payment link)",
+        "description": "Texts the caller their booking confirmation -- the confirmation number (Booqable order number) and a link to pay before arrival; describe it to the caller as 'a booking confirmation with your confirmation number and a secure payment link'. Returns confirmation_id (e.g. '#54') when known (SMS only -- email is not offered and is refused with NOT SENT). This is currently a placeholder/test link -- no real charge is processed yet. Sends to the number they're calling from unless phone is given. Never call this in the same reply that asks whether they want the text; ask, end your reply, and call it only after they say yes. If it returns NOT SENT, ask/confirm, then call it after they reply.",
         "parameters": [
-          { "name": "order_id", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "order_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": false,
@@ -156,16 +366,33 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "channel": { "type": "string", "enum": ["email", "sms"], "description": "Which channel to send the payment link over: 'email' (default) or 'sms'." },
-                  "email": { "type": "string", "description": "Override email address to send to, if different from the one on file" },
-                  "phone": { "type": "string", "description": "Override phone number to text, if different from the one on file" }
+                  "channel": {
+                    "type": "string",
+                    "enum": [
+                      "sms"
+                    ],
+                    "description": "Always 'sms'. Payment links are only sent by text."
+                  },
+                  "phone": {
+                    "type": "string",
+                    "description": "A different number to text, only if the caller asked for one and confirmed it; leave empty for the number they're calling from."
+                  }
                 }
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "order_id, the channel used, the address/number contacted, and the payment link sent", "content": { "application/json": { "schema": { "type": "object" } } } }
+          "200": {
+            "description": "order_id, the channel used, the address/number contacted, and the payment link sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
         }
       }
     }

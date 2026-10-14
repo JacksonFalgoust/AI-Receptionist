@@ -153,6 +153,86 @@ def is_backchannel(text: str, extra_phrases: Iterable[str] = ()) -> bool:
     return normalized in BACKCHANNEL_PHRASES or normalized in set(extra_phrases)
 
 
-def pick(phrases: list[str]) -> str | None:
-    """Return a random filler phrase, or None if there are none to pick from."""
-    return random.choice(phrases) if phrases else None
+def pick(phrases: list[str], avoid: str | None = None) -> str | None:
+    """Return a random filler phrase, or None if there are none to pick from.
+
+    `avoid` (usually the last filler spoken this call) is skipped when any
+    other phrase is available, so the same phrase never plays back to back.
+    """
+    if not phrases:
+        return None
+    choices = [p for p in phrases if p != avoid] or list(phrases)
+    return random.choice(choices)
+
+
+# Per-action filler pools: a booking or a text message shouldn't be covered
+# by "let me look that up". Matched against client tool names (lowercased).
+ACTION_FILLERS: dict[str, list[str]] = {
+    # Neutral on purpose: createReservation can still be refused (NOT BOOKED
+    # by the confirm guard, hours guard or availability), so the filler must
+    # never claim it's booking -- the guide says so once the order exists.
+    "booking": [
+        "One moment.",
+        "Just a moment.",
+        "Bear with me one second.",
+    ],
+    "cancel": [
+        "One moment while I cancel that.",
+        "Okay, cancelling that for you now.",
+        "Just a moment while I take care of that cancellation.",
+    ],
+    # Neutral on purpose: a send can still be refused (NOT SENT, e.g. the
+    # caller hasn't answered yet), so the filler must never claim it's
+    # being sent -- the guide's own reply says so once it actually went out.
+    "message": [
+        "One moment.",
+        "Just a moment.",
+        "Bear with me one second.",
+    ],
+    "lookup": [
+        "Let me check.",
+        "One moment while I check.",
+        "Let me take a quick look.",
+    ],
+}
+
+# Tools that need no filler at all (hanging up, trivial local reads).
+NO_FILLER_TOOLS = frozenset({"endcall", "end_call", "get_caller_phone_number"})
+
+# Prefix-based so read-only tools like getOrder / lookupCustomerByEmail stay
+# in the "lookup" pool.
+_BOOKING_PREFIXES = ("create", "book", "reserve", "update", "modify", "reschedule")
+_CANCEL_PREFIXES = ("cancel",)
+_MESSAGE_PREFIXES = ("send", "sms", "text", "email")
+
+
+def action_for_tools(names) -> str | None:
+    """Classify the in-flight tool call(s) into a filler pool key, or None
+    when every tool is filler-free. Messaging wins over cancel, then booking,
+    then lookup, when a round mixes several tools."""
+    lowered = [n.lower() for n in names or () if n]
+    lowered = [n for n in lowered if n not in NO_FILLER_TOOLS]
+    if not lowered and names:
+        return None
+    if any(n.startswith(_MESSAGE_PREFIXES) for n in lowered):
+        return "message"
+    if any(n.startswith(_CANCEL_PREFIXES) for n in lowered):
+        return "cancel"
+    if any(n.startswith(_BOOKING_PREFIXES) for n in lowered):
+        return "booking"
+    return "lookup"
+
+
+def pick_for_tools(
+    names, fallback: list[str], avoid: str | None = None, use_action_pools: bool = True
+) -> str | None:
+    """Filler phrase that fits the tool(s) in flight; `fallback` when no tool
+    name is known yet, or when `use_action_pools` is off (a custom
+    FILLER_PHRASES override is configured). Filler-free tools (endCall) get
+    None either way. Never repeats `avoid` back to back."""
+    if not names:
+        return pick(fallback, avoid)
+    action = action_for_tools(names)
+    if action is None:
+        return None
+    return pick(ACTION_FILLERS[action] if use_action_pools else fallback, avoid)

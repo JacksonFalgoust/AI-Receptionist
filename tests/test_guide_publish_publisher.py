@@ -77,7 +77,7 @@ def push_fails(monkeypatch):
 
 def test_preview_renders_without_touching_the_network(db):
     preview = publisher.render_preview(db)
-    assert "Peachtree Pedals" in preview.instructions
+    assert "Atlanta Bikes" in preview.instructions
     assert preview.content_hash
     assert preview.changed is True  # nothing published yet
 
@@ -137,7 +137,7 @@ def test_configuration_only_change_publishes_without_a_push(db, push_ok):
 
     row = configuration_store.get_configuration(db)
     configuration_store.save_draft(
-        db, row, {"identity": {**row.identity, "greeting": "Peachtree Pedals, howdy!"}}
+        db, row, {"identity": {**row.identity, "greeting": "Atlanta Bikes, howdy!"}}
     )
     db.commit()
     assert configuration_store.get_configuration(db).has_unpublished_changes is True
@@ -147,7 +147,7 @@ def test_configuration_only_change_publishes_without_a_push(db, push_ok):
     # (a) a NEW succeeded publication carrying the new snapshot, no push
     assert second.id != first.id
     assert second.status == "succeeded"
-    assert second.published_config["identity"]["greeting"] == "Peachtree Pedals, howdy!"
+    assert second.published_config["identity"]["greeting"] == "Atlanta Bikes, howdy!"
     assert second.content_hash == first.content_hash
     assert second.bundle_bytes == first.bundle_bytes
     assert second.instructions_text == first.instructions_text
@@ -160,7 +160,7 @@ def test_configuration_only_change_publishes_without_a_push(db, push_ok):
     # (c) the greeting app/main.py reads is the new one
     latest = publisher.latest_succeeded(db)
     assert latest.id == second.id
-    assert latest.published_config["identity"]["greeting"] == "Peachtree Pedals, howdy!"
+    assert latest.published_config["identity"]["greeting"] == "Atlanta Bikes, howdy!"
 
 
 def test_configuration_only_change_does_not_mutate_the_earlier_snapshot(db, push_ok):
@@ -314,7 +314,11 @@ def test_a_knowledge_only_change_is_pushed(db, push_ok):
     first = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
     assert len(push_ok) == 1
 
-    item = publisher._knowledge_items(db)[0]
+    # A non-core item (core-fact types are inlined into the instructions,
+    # see render.core_facts, so editing one of those does move a slot).
+    item = next(
+        i for i in publisher._knowledge_items(db) if i.type not in render.CORE_FACT_TYPES
+    )
     item.content = "We close an hour early in January."
     db.commit()
 
@@ -452,3 +456,17 @@ def test_adding_or_renaming_knowledge_changes_the_pushed_instructions(db, push_o
     assert len(push_ok) == 3
     assert "Holiday hours" in push_ok.instructions[2]
     assert "Winter hours" not in push_ok.instructions[2]
+
+
+def test_a_core_fact_edit_reaches_the_instructions(db, push_ok):
+    """Core-fact items (policies, hours, services) are inlined into the
+    instructions so common questions skip the knowledge search."""
+    first = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+    item = next(
+        i for i in publisher._knowledge_items(db) if i.type in render.CORE_FACT_TYPES
+    )
+    item.content = "We close an hour early in January."
+    db.commit()
+    second = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+    assert "close an hour early" not in first.instructions_text
+    assert "close an hour early" in second.instructions_text

@@ -140,6 +140,36 @@ def missing_custom_tools(detail: dict, sources: dict[str, str]) -> list[dict]:
     ]
 
 
+def _same_spec(a: str | None, b: str | None) -> bool:
+    try:
+        return json.loads(a or "null") == json.loads(b or "null")
+    except ValueError:
+        return (a or "") == (b or "")
+
+
+def changed_custom_tools(detail: dict, sources: dict[str, str]) -> list[dict]:
+    """Tool sources the guide already has whose stored spec differs from the
+    template's -- returned as the guide's own entry with `openApiSpec`
+    replaced and `operations` emptied, so GuideAnts re-derives every
+    operation from the new spec on write (the same mechanism an added source
+    relies on). Without this, a source the guide already had (e.g. the
+    caller-phone source gaining endCall) silently never changed."""
+    out = []
+    for tool in detail.get("customTools") or []:
+        text = sources.get(tool.get("name"))
+        if text is not None and not _same_spec(tool.get("openApiSpec"), text):
+            out.append({**tool, "openApiSpec": text, "operations": []})
+    return out
+
+
+def live_operation_ids(detail: dict) -> set[str]:
+    return {
+        str(op.get("operationId"))
+        for tool in detail.get("customTools") or []
+        for op in tool.get("operations") or []
+    }
+
+
 def spec_operation_ids(spec_text: str) -> list[str]:
     """Sorted operationIds declared by an OpenAPI document."""
     document = json.loads(spec_text)
@@ -278,6 +308,7 @@ def build_update_dto(
     instructions: str,
     plan: FileSyncPlan | None = None,
     new_tools: list[dict] | None = None,
+    changed_tools: list[dict] | None = None,
 ) -> dict:
     """The GET body of a guide, rebuilt as the PUT body that changes only
     its instructions and, with a plan, its vector-store files. `new_tools`
@@ -313,7 +344,10 @@ def build_update_dto(
         "topP": detail["topP"],
         "reasoningEffort": detail["reasoningEffort"],
         "toolIds": [tool["id"] for tool in detail["tools"]] if detail["tools"] else [],
-        "customTools": list(detail["customTools"] or []) + list(new_tools or []),
+        "customTools": [
+            {tool.get("name"): tool for tool in changed_tools or []}.get(t.get("name"), t)
+            for t in detail["customTools"] or []
+        ] + list(new_tools or []),
         "contextOptions": detail["contextOptions"],
         "authProviders": detail["authProviders"],
         "fileIdsToKeep": file_ids_to_keep,

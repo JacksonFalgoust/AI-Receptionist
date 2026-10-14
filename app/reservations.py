@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from . import config
+from . import business_hours, config
 from .booqable_client import BooqableClient, BooqableError
 
 RECEPTIONIST_TAG = "ai-receptionist"
@@ -19,6 +21,58 @@ def _parse_datetime(value: str) -> datetime:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=ZoneInfo(config.BOOQABLE_TIMEZONE))
     return dt.astimezone(ZoneInfo("UTC"))
+
+
+def _ordinal(n: int) -> str:
+    if 10 <= n % 100 <= 20:
+        return f"{n}th"
+    return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def to_local(value: str | None) -> datetime | None:
+    """Parse a Booqable timestamp (UTC, or naive = business-local) into
+    config.BOOQABLE_TIMEZONE. None/unparseable -> None."""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo(config.BOOQABLE_TIMEZONE))
+    return dt.astimezone(ZoneInfo(config.BOOQABLE_TIMEZONE))
+
+
+def spoken_date(value: str | None) -> str | None:
+    """'Saturday, October 17th' in the business's local time -- ready to say."""
+    dt = to_local(value)
+    return f"{dt:%A}, {dt:%B} {_ordinal(dt.day)}" if dt else None
+
+
+def spoken_time(value: str | None) -> str | None:
+    """'nine A M' style is left to the model; give '9 AM' / '3:30 PM' local."""
+    dt = to_local(value)
+    if not dt:
+        return None
+    hour = dt.hour % 12 or 12
+    suffix = "AM" if dt.hour < 12 else "PM"
+    return f"{hour} {suffix}" if dt.minute == 0 else f"{hour}:{dt.minute:02d} {suffix}"
+
+
+def spoken_when(starts_at: str | None, stops_at: str | None = None) -> dict[str, Any]:
+    """Local-time, speakable fields for a reservation's start/stop. The raw
+    starts_at/stops_at values are UTC -- never read those to a caller."""
+    out: dict[str, Any] = {}
+    start = to_local(starts_at)
+    if start:
+        out["starts_local"] = start.isoformat()
+        out["date_spoken"] = spoken_date(starts_at)
+        out["start_time_spoken"] = spoken_time(starts_at)
+    stop = to_local(stops_at)
+    if stop:
+        out["stops_local"] = stop.isoformat()
+        out["end_time_spoken"] = spoken_time(stops_at)
+    return out
 
 
 def _order_timestamp(dt: datetime) -> str:
@@ -107,9 +161,12 @@ async def list_catalog(client: BooqableClient) -> list[dict[str, Any]]:
     """Live rentable product catalog, for the receptionist to browse/search."""
     groups = await _load_product_groups(client)
     catalog: list[dict[str, Any]] = []
-    for group in groups:
+    if config.FAST_TOOLS_ENABLED:
+        products = await asyncio.gather(*(_product_for_group(client, g) for g in groups))
+    else:
+        products = [await _product_for_group(client, g) for g in groups]
+    for group, product in zip(groups, products):
         attrs = client.attrs(group)
-        product = await _product_for_group(client, group)
         if not product:
             continue
         catalog.append(
@@ -125,6 +182,75 @@ async def list_catalog(client: BooqableClient) -> list[dict[str, Any]]:
             }
         )
     return catalog
+
+
+def is_accessory(name: str | None) -> bool:
+    lowered = (name or "").lower()
+    return any(word in lowered for word in config.ACCESSORY_KEYWORDS)
+
+
+async def list_available_catalog(
+    client: BooqableClient,
+    catalog: list[dict[str, Any]],
+    *,
+    location_id: str,
+    starts_at: str,
+    stops_at: str,
+    quantity: int = 1,
+) -> dict[str, Any]:
+    """Split the catalog for one date range: main items that are actually in
+    stock (checked in parallel), main items that aren't, and accessories."""
+    main = [p for p in catalog if not is_accessory(p.get("name"))]
+    accessories = [p for p in catalog if is_accessory(p.get("name"))]
+
+    async def check(product: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return await check_product_availability(
+                client, product_id=product["product_id"], location_id=location_id,
+                starts_at=starts_at, stops_at=stops_at, quantity=quantity,
+            )
+        except BooqableError:
+            return {"status": "unknown"}
+
+    results = await asyncio.gather(*(check(p) for p in main))
+    available, unavailable = [], []
+    for product, result in zip(main, results):
+        if result.get("status") == "available":
+            available.append({**product, "available": result.get("available")})
+        else:
+            unavailable.append(product.get("name"))
+    return {
+        "products": available,
+        "unavailable": unavailable,
+        "accessories": accessories,
+        "availability_checked_for": {"starts_at": starts_at, "stops_at": stops_at, "quantity": quantity},
+        "note": "Only items in 'products' are in stock for these times. Offer only those; never offer "
+                "anything in 'unavailable'. 'accessories' are add-ons, not main items -- don't count them.",
+    }
+
+
+async def ensure_items_available(
+    client: BooqableClient, *, location_id: str, starts_at: str, stops_at: str, items: list[dict[str, Any]]
+) -> None:
+    """Server-side guard: refuse a booking if any item isn't in stock."""
+    results = await asyncio.gather(*(
+        check_product_availability(
+            client, product_id=item["product_id"], location_id=location_id,
+            starts_at=starts_at, stops_at=stops_at, quantity=int(item.get("quantity") or 1),
+        )
+        for item in items
+    ))
+    short = [
+        f"{item['product_id']} (available {r.get('available')}, requested {r.get('requested')})"
+        for item, r in zip(items, results)
+        if r.get("status") != "available"
+    ]
+    if short:
+        raise BooqableError(
+            "NOT BOOKED: these items are not available for that time: " + "; ".join(short)
+            + ". No reservation was made. Tell the caller and offer an item that checkAvailability "
+            "or listCatalog shows as available, or a different time."
+        )
 
 
 def _normalize_phone(value: str) -> str:
@@ -165,10 +291,21 @@ async def find_customer(
     return None
 
 
+_LOOKUP = object()  # sentinel: no prefetched lookup supplied, so look up now
+
+
 async def find_or_create_customer(
-    client: BooqableClient, *, name: str, email: str | None = None, phone: str | None = None
+    client: BooqableClient,
+    *,
+    name: str,
+    email: str | None = None,
+    phone: str | None = None,
+    prefetched: Any = _LOOKUP,
 ) -> dict[str, Any]:
-    existing = await find_customer(client, email=email, phone=phone)
+    """`prefetched` lets a caller that has already looked this contact up
+    (e.g. the call's get_caller_phone_number lookup) pass the result -- a
+    customer record or None for "no match" -- to skip a second customers GET."""
+    existing = await find_customer(client, email=email, phone=phone) if prefetched is _LOOKUP else prefetched
     if existing:
         return existing
 
@@ -274,18 +411,35 @@ async def create_reservation(
     stops_at: str,
     items: list[dict[str, Any]],
     auto_reserve: bool = True,
+    location: dict[str, Any] | None = None,
+    prefetched_customer: Any = _LOOKUP,
 ) -> dict[str, Any]:
     if not items:
         raise BooqableError("At least one item is required to create a reservation")
 
-    location = await resolve_location(client, location_id)
+    if config.BUSINESS_HOURS_GUARD_ENABLED:
+        problem = business_hours.check_window(starts_at, stops_at, for_booking=True)
+        if problem:
+            raise BooqableError(business_hours.not_booked_message(problem))
+
+    if location is None:
+        location = await resolve_location(client, location_id)
     starts_dt = _parse_datetime(starts_at)
     stops_dt = _parse_datetime(stops_at)
     starts_api = _order_timestamp(starts_dt)
     stops_api = _order_timestamp(stops_dt)
 
+    # Never create an order for something that's out of stock.
+    await ensure_items_available(
+        client, location_id=location["id"], starts_at=starts_at, stops_at=stops_at, items=items
+    )
+
     customer_record = await find_or_create_customer(
-        client, name=customer["name"], email=customer.get("email"), phone=customer.get("phone")
+        client,
+        name=customer["name"],
+        email=customer.get("email"),
+        phone=customer.get("phone"),
+        prefetched=prefetched_customer,
     )
 
     order_payload = client.resource(
@@ -352,14 +506,17 @@ async def create_reservation(
         "reserved": reserved,
         "booking_error": booking_error,
         "reserve_error": reserve_error,
+        **spoken_when(starts_api, stops_api),
     }
 
 
 async def cancel_reservation(client: BooqableClient, order_id: str) -> dict[str, Any]:
     order = (await client.get(f"orders/{order_id}"))["data"]
-    status = client.attrs(order).get("status")
+    order_attrs = client.attrs(order)
+    status = order_attrs.get("status")
+    when = spoken_when(order_attrs.get("starts_at"), order_attrs.get("stops_at"))
     if status in {"canceled", "archived"}:
-        return {"order_id": order_id, "status": status, "already_canceled": True}
+        return {"order_id": order_id, "status": status, "already_canceled": True, **when}
     if status not in CANCELABLE_STATUSES:
         raise BooqableError(f"Order {order_id} in status '{status}' cannot be canceled")
 
@@ -370,7 +527,7 @@ async def cancel_reservation(client: BooqableClient, order_id: str) -> dict[str,
             {"order_id": order_id, "transition_from": status, "transition_to": "canceled"},
         ),
     )
-    return {"order_id": order_id, "previous_status": status, "status": "canceled"}
+    return {"order_id": order_id, "previous_status": status, "status": "canceled", **when}
 
 
 async def get_order_contact(client: BooqableClient, order_id: str) -> dict[str, Any]:
@@ -390,6 +547,8 @@ async def get_order_contact(client: BooqableClient, order_id: str) -> dict[str, 
         "phone": _customer_phone(customer_attrs),
         "email": customer_attrs.get("email"),
         "grand_total_usd": (order_attrs.get("grand_total_in_cents") or 0) / 100,
+        # Booqable's human order number (e.g. 54) -- the caller's confirmation ID.
+        "order_number": order_attrs.get("number"),
     }
 
 
@@ -430,6 +589,7 @@ async def find_reservations(
                 "stops_at": attrs.get("stops_at"),
                 "items": _order_line_items(client, detail.get("included") or []),
                 "price_usd": (attrs.get("grand_total_in_cents") or 0) / 100,
+                **spoken_when(attrs.get("starts_at"), attrs.get("stops_at")),
             }
         )
     found.sort(key=lambda r: r["starts_at"] or "")
@@ -438,4 +598,7 @@ async def find_reservations(
         "customer_found": True,
         "customer_name": client.attrs(customer).get("name"),
         "reservations": found,
+        "note": "starts_at/stops_at are UTC. When speaking, use only date_spoken and "
+                "start_time_spoken (local time). Never cancel any of these unless the caller "
+                "says yes to that specific reservation.",
     }

@@ -442,7 +442,7 @@ def test_execute_tool_returns_caller_phone(monkeypatch):
 
     session = GuideSession(caller_phone="+15551234567")
     result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
-    assert json.loads(result) == {"phone_number": "+15551234567"}
+    assert json.loads(result) == {"phone_number": "+15551234567", "last_four": "4567", "last_four_spoken": "4, 5, 6, 7"}
 
 
 def test_execute_tool_returns_null_when_caller_phone_unknown():
@@ -462,7 +462,7 @@ def test_execute_tool_caller_phone_includes_known_customer_info(monkeypatch):
     session = GuideSession(caller_phone="+15551234567")
     result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
     assert json.loads(result) == {
-        "phone_number": "+15551234567",
+        "phone_number": "+15551234567", "last_four": "4567", "last_four_spoken": "4, 5, 6, 7",
         "customer_name": "Jane Doe",
         "customer_email": "jane@example.com",
     }
@@ -478,7 +478,7 @@ def test_execute_tool_caller_phone_lookup_raises_falls_back_gracefully(monkeypat
 
     session = GuideSession(caller_phone="+15551234567")
     result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
-    assert json.loads(result) == {"phone_number": "+15551234567"}
+    assert json.loads(result) == {"phone_number": "+15551234567", "last_four": "4567", "last_four_spoken": "4, 5, 6, 7"}
 
 
 def test_execute_tool_caller_phone_lookup_timeout_falls_back_gracefully(monkeypatch):
@@ -493,7 +493,7 @@ def test_execute_tool_caller_phone_lookup_timeout_falls_back_gracefully(monkeypa
 
     session = GuideSession(caller_phone="+15551234567")
     result = asyncio.run(guide_client._execute_tool("get_caller_phone_number", "{}", session))
-    assert json.loads(result) == {"phone_number": "+15551234567"}
+    assert json.loads(result) == {"phone_number": "+15551234567", "last_four": "4567", "last_four_spoken": "4, 5, 6, 7"}
 
 
 def test_execute_tool_caller_phone_caches_lookup_across_calls(monkeypatch):
@@ -525,7 +525,10 @@ def test_execute_tool_list_catalog(monkeypatch):
 
     result = asyncio.run(guide_client._execute_tool("listCatalog", "{}", GuideSession()))
 
-    assert json.loads(result) == {"products": fake_catalog}
+    body = json.loads(result)
+    # Undated: main items listed, but explicitly not stock-checked.
+    assert body["products"] == fake_catalog and body["accessories"] == []
+    assert body["availability_checked"] is False
 
 
 def test_execute_tool_check_availability(monkeypatch):
@@ -678,8 +681,8 @@ def test_execute_tool_send_payment_link(monkeypatch):
     monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
     fake_result = {
         "order_id": "order_1",
-        "channel": "email",
-        "sent_to": "jane@example.com",
+        "channel": "sms",
+        "sent_to": "+15559998888",
         "payment_link": "https://example.com/pay/order_1",
     }
     monkeypatch.setattr(guide_client.payments, "send_payment_link", AsyncMock(return_value=fake_result))
@@ -705,12 +708,12 @@ def test_execute_tool_send_payment_link_passes_phone_override(monkeypatch):
     assert send_mock.call_args.kwargs["phone"] == "+15559998888"
 
 
-def test_execute_tool_send_payment_link_passes_channel_and_email(monkeypatch):
+def test_execute_tool_send_payment_link_refuses_email(monkeypatch):
     monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
-    send_mock = AsyncMock(return_value={"order_id": "order_1", "sent_to": "jane@example.com", "payment_link": "x"})
+    send_mock = AsyncMock(return_value={"order_id": "order_1"})
     monkeypatch.setattr(guide_client.payments, "send_payment_link", send_mock)
 
-    asyncio.run(
+    result = asyncio.run(
         guide_client._execute_tool(
             "sendPaymentLink",
             json.dumps({"order_id": "order_1", "channel": "email", "email": "jane@example.com"}),
@@ -718,8 +721,8 @@ def test_execute_tool_send_payment_link_passes_channel_and_email(monkeypatch):
         )
     )
 
-    assert send_mock.call_args.kwargs["channel"] == "email"
-    assert send_mock.call_args.kwargs["email"] == "jane@example.com"
+    assert json.loads(result)["error"].startswith("NOT SENT")
+    send_mock.assert_not_called()
 
 
 def test_execute_tool_booqable_error_returns_error_json(monkeypatch):
@@ -918,7 +921,7 @@ def test_streamed_tool_call_round_trip_yields_tool_call_started_then_text(monkey
         {
             "type": "function_call_output",
             "call_id": "call_1",
-            "output": json.dumps({"phone_number": "+15551234567"}),
+            "output": json.dumps({"phone_number": "+15551234567", "last_four": "4567", "last_four_spoken": "4, 5, 6, 7"}),
         }
     ]
     assert tool_call_stream.closed

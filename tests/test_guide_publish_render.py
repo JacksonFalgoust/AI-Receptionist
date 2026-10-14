@@ -51,7 +51,7 @@ def test_seeded_configuration_fills_every_slot_and_keeps_the_contract():
         render.build_slots(_configuration(), ["Damage policy", "Bike Types"])
     )
 
-    assert "Peachtree Pedals" in rendered
+    assert "Atlanta Bikes" in rendered
     assert "a bike rental shop in Atlanta, Georgia" in rendered
     assert "every day, nine A M to six P M" in rendered
     assert "1234 Road Pkwy, Atlanta, GA" in rendered

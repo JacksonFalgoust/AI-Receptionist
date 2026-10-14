@@ -23,7 +23,7 @@ GUIDEANTS_TIMEOUT_SECONDS = float(os.environ.get("GUIDEANTS_TIMEOUT_SECONDS", "3
 TTS_WORDS_PER_SECOND = float(os.environ.get("TTS_WORDS_PER_SECOND", "2.5"))
 
 WELCOME_GREETING = os.environ.get(
-    "WELCOME_GREETING", "Thanks for calling! How can I help you today?"
+    "WELCOME_GREETING", "Thanks for calling, {business}! How can I help you today?"
 )
 WELCOME_BACK_GREETING_TEMPLATE = os.environ.get(
     "WELCOME_BACK_GREETING_TEMPLATE", "Hi {name}, welcome back! How can I help you today?"
@@ -38,7 +38,7 @@ WELCOME_BACK_GREETING_TEMPLATE = os.environ.get(
 # identity slots. The template itself is generic (any business); these
 # values are just the demo shop it ships configured for.
 DEFAULT_BUSINESS_PROFILE = {
-    "name": "Peachtree Pedals",
+    "name": "Atlanta Bikes",
     "description": "a bike rental shop in Atlanta, Georgia",
     # Obviously-fake placeholders (555 is the reserved fiction exchange), not
     # blanks: the Configuration console's businessProfileFormSchema requires a
@@ -57,7 +57,7 @@ DEFAULT_BUSINESS_PROFILE = {
 }
 
 DEFAULT_IDENTITY = {
-    "name": "Peachtree Pedals Receptionist",
+    "name": "Atlanta Bikes Receptionist",
     "greeting": WELCOME_GREETING,
     "closing": "Thanks for calling. Have a great ride!",
     # One of frontend/src/lib/voices.ts's VOICE_OPTIONS, for the same reason
@@ -97,7 +97,7 @@ DEFAULT_KNOWLEDGE_ITEMS = [
         "title": "Location, Contact, and Hours",
         "type": "location",
         "content": (
-            "Peachtree Pedals is located at 1234 Road Pkwy, Atlanta, GA, with a lot "
+            "Atlanta Bikes is located at 1234 Road Pkwy, Atlanta, GA, with a lot "
             "behind the shop and a gate that opens directly onto the Atlanta BeltLine "
             "trail. Open every day, 9:00 AM to 6:00 PM, including weekends and "
             "holidays except Thanksgiving Day and Christmas Day, when the shop is "
@@ -288,7 +288,11 @@ AUTH_TOKEN_TTL_SECONDS = int(os.environ.get("AUTH_TOKEN_TTL_SECONDS", str(60 * 6
 # How long to wait for GuideAnts' reply before speaking a filler phrase to
 # mask the lookup latency. If the reply arrives before this elapses, no
 # filler is spoken at all.
-FILLER_DELAY_SECONDS = float(os.environ.get("FILLER_DELAY_SECONDS", "1.0"))
+# When true (default), fillers are only spoken while a client-side tool
+# call (a real lookup) is in flight -- a plain answer starts streaming fast
+# enough that a canned "let me check" would just delay it.
+FILLER_ONLY_FOR_TOOL_CALLS = os.environ.get("FILLER_ONLY_FOR_TOOL_CALLS", "true").lower() not in ("0", "false", "no")
+FILLER_DELAY_SECONDS = float(os.environ.get("FILLER_DELAY_SECONDS", "0.3"))
 
 # Twilio finalizes a `prompt` at each pause in caller speech, so a caller who
 # takes a brief mid-sentence breath used to have their turn split in two: the
@@ -307,7 +311,7 @@ TURN_PAUSE_SECONDS = float(os.environ.get("TURN_PAUSE_SECONDS", "0.5"))
 # (instead of TURN_PAUSE_SECONDS) for the transcript before giving up and
 # committing the buffered text alone. Also bounds the extra dead air when
 # the "resume" was just untranscribable noise.
-TURN_RESUME_GRACE_SECONDS = float(os.environ.get("TURN_RESUME_GRACE_SECONDS", "1.5"))
+TURN_RESUME_GRACE_SECONDS = float(os.environ.get("TURN_RESUME_GRACE_SECONDS", "0.6"))
 
 # The literal phrase the guide is instructed (see guide-demo/Twillio demo
 # agent/instructions.md's "FINAL ANSWER MARKER" paragraph) to speak at the
@@ -333,12 +337,9 @@ TOOL_CALL_BARGE_IN_GRACE_SECONDS = float(os.environ.get("TOOL_CALL_BARGE_IN_GRAC
 # Filler phrases spoken before the real answer, to mask GuideAnts lookup
 # latency. Pipe-separated in the env var since phrases contain commas/periods.
 _DEFAULT_FILLER_PHRASES = [
-    "Let me look that up for you.",
-    "One moment while I check on that.",
-    "Sure, give me just a second.",
-    "Let me find that for you.",
-    "Okay, let me pull that up.",
-    "Happy to help — one second while I check.",
+    "Let me check.",
+    "One moment while I check.",
+    "Let me take a quick look.",
 ]
 
 FILLER_PHRASES = [
@@ -426,3 +427,102 @@ GUIDEANTS_ADMIN_PASSWORD = os.environ.get("GUIDEANTS_ADMIN_PASSWORD", "")
 # The update-match key: GuideAnts decides create-vs-update by matching
 # manifest.json's name against an existing guide's name.
 GUIDEANTS_GUIDE_NAME = os.environ.get("GUIDEANTS_GUIDE_NAME", "Twilio Demo Agent")
+
+
+# ConversationRelay speech-to-text (Deepgram). nova-3-general handles names
+# and short answers better than the provider default.
+STT_SPEECH_MODEL = os.getenv("STT_SPEECH_MODEL", "nova-3-general")
+STT_LANGUAGE = os.getenv("STT_LANGUAGE", "en-US")
+
+# Soft looping "working" sound played (after a short spoken filler) while a
+# known-slow client tool runs. Served by this app at WORKING_SOUND_PATH on the
+# same public host Twilio reached /twiml on.
+WORKING_SOUND_ENABLED = os.getenv("WORKING_SOUND_ENABLED", "true").lower() not in ("0", "false", "no")
+WORKING_SOUND_PATH = "/audio/working.mp3"
+WORKING_SOUND_TOOLS = frozenset(
+    t.strip()
+    for t in os.getenv(
+        "WORKING_SOUND_TOOLS",
+        "listCatalog,checkAvailability,createReservation,sendPaymentLink,findReservations,"
+        "cancelReservation,listCustomers,createCustomer",
+    ).split(",")
+    if t.strip()
+)
+# After the guide calls endCall, wait this long past the goodbye's playback
+# before ending the ConversationRelay session (so nothing is cut off).
+END_CALL_AFTER_PLAYBACK_SECONDS = float(os.getenv("END_CALL_AFTER_PLAYBACK_SECONDS", "0.4"))
+
+# Server-side hang-up backup (see app/call_end.py) when the guide says goodbye
+# without calling endCall.
+AUTO_END_CALL_ENABLED = os.getenv("AUTO_END_CALL_ENABLED", "true").lower() not in ("0", "false", "no")
+# Speech-to-text hints (ConversationRelay `hints`): times, numbers and product
+# names callers say, so e.g. "nine" isn't heard as "none". Empty disables.
+STT_HINTS = os.getenv(
+    "STT_HINTS",
+    "nine AM,ten AM,eleven AM,noon,one PM,two PM,three PM,four PM,five PM,six PM,"
+    "nine,ten,eleven,twelve,o'clock,Downtown Dash,Lake Loop,Urban Cruiser,Weekend Warrior,"
+    "text,email,yes,no,"
+    "Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday,today,tomorrow,"
+    "this weekend,next week,next Monday,next Saturday,next Sunday,"
+    "January,February,March,April,May,June,July,August,September,October,November,December,"
+    "first,second,third,fifteenth,twentieth,thirtieth,by text,text message,by email",
+)
+# Stuck-audio recovery: if Twilio hasn't started playing a sent reply within
+# this many seconds (or a pending chime is blocking it), resend the reply as a
+# fresh talk cycle without the chime. 0 disables.
+STUCK_AUDIO_RECOVERY_SECONDS = float(os.getenv("STUCK_AUDIO_RECOVERY_SECONDS", "3.0"))
+# Send one throwaway GuideAnts request at startup so the first call's first
+# turn isn't a cold start.
+# Ready-made goodbye: after the agent asked "anything else?" and the caller
+# clearly says they're done, speak this and hang up without a model round trip.
+CANNED_GOODBYE_ENABLED = os.getenv("CANNED_GOODBYE_ENABLED", "true").lower() not in ("0", "false", "no")
+# "Word=Spoken form" pairs (comma-separated) applied to the business name the
+# guide is told to SAY, for names TTS mispronounces (e.g. "Peachtree=Peach tree"
+# when the demo shop was Peachtree Pedals). The written name (business.name) is
+# unchanged. Default: none ("Atlanta Bikes" is read correctly as written).
+SPOKEN_NAME_ALIASES = dict(
+    pair.split("=", 1)
+    for pair in os.getenv("SPOKEN_NAME_ALIASES", "").split(",")
+    if "=" in pair
+)
+# Phrases always sent to TTS in one frame (never split into sub-word tokens),
+# comma-separated. Default: the business name, written and spoken forms.
+SPOKEN_JOIN_PHRASES = [
+    p.strip()
+    for p in os.getenv("SPOKEN_JOIN_PHRASES", "Atlanta Bikes").split(",")
+    if p.strip()
+]
+# createReservation is refused unless the previous agent turn was a recap /
+# "shall I book it?" question and the caller said yes.
+BOOKING_CONFIRM_GUARD_ENABLED = os.getenv("BOOKING_CONFIRM_GUARD_ENABLED", "true").lower() not in ("0", "false", "no")
+# Tell the guide on the caller's first turn who a known caller is (from the
+# call-setup Booqable lookup), so it confirms the name instead of asking.
+KNOWN_CALLER_NOTE_ENABLED = os.getenv("KNOWN_CALLER_NOTE_ENABLED", "true").lower() not in ("0", "false", "no")
+# Refuse catalog/availability/booking windows outside the published business
+# hours (past start, before open, at/after close, closed day).
+BUSINESS_HOURS_GUARD_ENABLED = os.getenv("BUSINESS_HOURS_GUARD_ENABLED", "true").lower() not in ("0", "false", "no")
+# Give the guide the current local date/time and open/closed state on the
+# caller's first turn.
+NOW_NOTE_ENABLED = os.getenv("NOW_NOTE_ENABLED", "true").lower() not in ("0", "false", "no")
+# Ignore a bare "hi"/"hello" as the caller's first turn (the welcome greeting
+# already asked how to help) instead of greeting them a second time.
+IGNORE_FIRST_BARE_GREETING = os.getenv("IGNORE_FIRST_BARE_GREETING", "true").lower() not in ("0", "false", "no")
+CANNED_GOODBYE_TEXT = os.getenv(
+    "CANNED_GOODBYE_TEXT",
+    "You're welcome! Thanks for calling {business}, and have a great day. Goodbye!",
+)  # {business} = spoken business name (SPOKEN_NAME_ALIASES applied); dropped if unknown
+# Catalog items whose names contain any of these words are accessories: listed
+# separately by listCatalog, never offered or counted as the main rentable items.
+ACCESSORY_KEYWORDS = tuple(
+    w.strip().lower()
+    for w in os.getenv("ACCESSORY_KEYWORDS", "helmet,lock,basket,light,bell,accessory,child seat").split(",")
+    if w.strip()
+)
+# Faster tool turns: fetch the catalog's product groups in parallel, prefetch
+# catalog + location at call setup, and run read-only tool calls of one round
+# concurrently. "false" restores the old sequential behaviour.
+FAST_TOOLS_ENABLED = os.getenv("FAST_TOOLS_ENABLED", "true").lower() not in ("0", "false", "no")
+# Extra wait before committing a one-word reply to "what's your full name?"
+# (callers pause between first and last name).
+NAME_EXTRA_WAIT_SECONDS = float(os.getenv("NAME_EXTRA_WAIT_SECONDS", "1.0"))
+GUIDE_WARMUP_ON_STARTUP = os.getenv("GUIDE_WARMUP_ON_STARTUP", "true").lower() not in ("0", "false", "no")

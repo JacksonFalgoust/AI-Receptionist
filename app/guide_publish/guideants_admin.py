@@ -59,7 +59,7 @@ import logging
 import httpx
 
 from .. import config
-from . import guide_dto, template
+from . import bundle, guide_dto, template
 
 logger = logging.getLogger(__name__)
 
@@ -315,12 +315,13 @@ async def update_guide(
 
         sources = template.load_tool_sources() if tools is None else tools
         new_tools = guide_dto.missing_custom_tools(before, sources)
+        changed_tools = guide_dto.changed_custom_tools(before, sources)
 
         await _request(
             client,
             "PUT",
             detail_path,
-            json=guide_dto.build_update_dto(before, instructions, plan, new_tools),
+            json=guide_dto.build_update_dto(before, instructions, plan, new_tools, changed_tools),
         )
 
         after = await _request(client, "GET", detail_path)
@@ -331,8 +332,12 @@ async def update_guide(
             )
 
         problem = _verification_problem(
-            before, after, instructions, plan, desired, new_tools
+            before, after, instructions, plan, desired, list(new_tools) + list(changed_tools)
         )
+        if not problem:
+            missing_ops = sorted(set(bundle.EXPECTED_OPERATION_IDS) - guide_dto.live_operation_ids(after))
+            if missing_ops:
+                problem = "tools missing from the live guide after publishing: " + ", ".join(missing_ops)
         if problem:
             restored = await _restore(client, detail_path, before, after)
             raise GuideAntsAdminError(
@@ -356,6 +361,11 @@ async def update_guide(
                     + "."
                 ]
                 if new_tools
+                else []
+            ) + (
+                ["Updated tool source(s) whose spec changed: "
+                 + ", ".join(tool["name"] for tool in changed_tools) + "."]
+                if changed_tools
                 else []
             ),
             "files": {
@@ -401,6 +411,15 @@ def _verification_problem(
     # An added tool is the one part of customTools that was meant to move.
     after_view["customTools"] = [
         tool for tool in after_view["customTools"] if tool.get("name") not in added
+    ]
+    # A tool source added or replaced moves GuideAnts' derived tool count too.
+    if added:
+        for view in (before_view, after_view):
+            if isinstance(view.get("guide"), dict):
+                view["guide"].pop("toolCount", None)
+    # A replaced (changed-spec) source was also meant to move.
+    before_view["customTools"] = [
+        tool for tool in before_view["customTools"] if tool.get("name") not in added
     ]
     if before_view != after_view:
         return (

@@ -30,7 +30,7 @@ from typing import Any, AsyncIterator
 import openai
 from openai import AsyncOpenAI
 
-from . import config, payments, reservations
+from . import business_hours, call_end, config, payments, reservations
 from .booqable_client import BooqableClient, BooqableError
 from .postmark_client import PostmarkError
 from .twilio_client import TwilioSmsError
@@ -130,6 +130,31 @@ class GuideSession:
     # The matched Booqable customer record from that lookup, or None if not
     # yet checked, no match was found, or the lookup failed/timed out.
     known_customer: dict | None = None
+    # Per-call caches for Booqable data that doesn't change mid-call: the
+    # catalog (listCatalog) and the resolved default location. Saves the
+    # repeat product_groups/locations GETs on later tool turns.
+    catalog_cache: list | None = None
+    # All text the model produced so far in the current caller turn (every
+    # round, spoken or not) -- used by the sendPaymentLink guard.
+    round_text: str = ""
+    # Background Booqable prefetch started at call setup (see prefetch_booqable).
+    prefetch_task: Any = None
+    # Set when the guide calls endCall; app/main.py ends the ConversationRelay
+    # session once the current reply's playback finishes.
+    end_call_requested: bool = False
+    location_cache: dict | None = None
+    # Background known-caller lookup started at call setup (see
+    # lookup_known_caller); the first turn's input carries its result.
+    caller_lookup_task: Any = None
+    # Booking-confirmation guard: the previous turn's agent text and this
+    # turn's caller text (see booking_confirmed).
+    prev_round_text: str = ""
+    turn_user_text: str = ""
+    # Set when the caller said yes to a recap: the booking details it covered
+    # (see _booking_key). Lets createReservation through after a phone/email
+    # side question without a second recap, if the details are unchanged.
+    recap_yes_key: str | None = None
+    known_caller_note_sent: bool = False
     # Business-language log of every reservation tool this call actually
     # ran, in call order -- persisted as ConversationAction rows by
     # app/call_recording.py at call end. Not sent to GuideAnts; purely an
@@ -213,16 +238,65 @@ _TOOL_ACTION_LABELS: dict[str, tuple[str, str]] = {
 }
 
 
-async def _run_reservation_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
+def _same_phone(a: str | None, b: str | None) -> bool:
+    return bool(a and b) and reservations._normalize_phone(a) == reservations._normalize_phone(b)
+
+
+async def _default_location(client, session: "GuideSession | None", location_id: str | None) -> dict[str, Any]:
+    if location_id or session is None:
+        return await reservations.resolve_location(client, location_id)
+    if session.location_cache is None:
+        session.location_cache = await reservations.resolve_location(client, None)
+    return session.location_cache
+
+
+async def _run_reservation_tool(
+    name: str, args: dict[str, Any], session: "GuideSession | None" = None
+) -> dict[str, Any]:
     """Execute one Booqable-backed reservation tool -- the same business
     logic the old /api/reservations/* routes wrapped (app/reservations.py,
     app/payments.py), called directly instead of over HTTP. Required
     arguments missing from `args` raise KeyError, caught by the caller."""
     client = BooqableClient()
     if name == "listCatalog":
-        return {"products": await reservations.list_catalog(client)}
+        if session is not None and session.prefetch_task is not None:
+            with contextlib.suppress(Exception):
+                await session.prefetch_task
+        if session is not None and session.catalog_cache is not None:
+            catalog = session.catalog_cache
+        else:
+            catalog = await reservations.list_catalog(client)
+            if session is not None:
+                session.catalog_cache = catalog
+        if args.get("starts_at") and args.get("stops_at"):
+            if config.BUSINESS_HOURS_GUARD_ENABLED:
+                problem = business_hours.check_window(
+                    args["starts_at"], args["stops_at"], for_booking=False
+                )
+                if problem:
+                    return business_hours.closed_result(problem)
+            location = await _default_location(client, session, args.get("location_id"))
+            return await reservations.list_available_catalog(
+                client, catalog, location_id=location["id"],
+                starts_at=args["starts_at"], stops_at=args["stops_at"],
+                quantity=int(args.get("quantity") or 1),
+            )
+        main = [p for p in catalog if not reservations.is_accessory(p.get("name"))]
+        return {
+            "products": main,
+            "accessories": [p for p in catalog if reservations.is_accessory(p.get("name"))],
+            "availability_checked": False,
+            "note": "Availability NOT checked. Don't say any item is available until you've called "
+                    "listCatalog with starts_at/stops_at or checkAvailability.",
+        }
     if name == "checkAvailability":
-        location = await reservations.resolve_location(client, args.get("location_id"))
+        if config.BUSINESS_HOURS_GUARD_ENABLED and args.get("starts_at"):
+            problem = business_hours.check_window(
+                args["starts_at"], args.get("stops_at"), for_booking=False
+            )
+            if problem:
+                return business_hours.closed_result(problem)
+        location = await _default_location(client, session, args.get("location_id"))
         result = await reservations.check_product_availability(
             client,
             product_id=args["product_id"],
@@ -243,8 +317,57 @@ async def _run_reservation_tool(name: str, args: dict[str, Any]) -> dict[str, An
             note=args.get("note"),
         )
     if name == "createReservation":
+        if config.BOOKING_CONFIRM_GUARD_ENABLED and session is not None:
+            key = _booking_key(args)
+            if booking_confirmed(session):
+                session.recap_yes_key = key
+            elif not (session.recap_yes_key == key and _after_contact_question(session)):
+                return {
+                    "error": "NOT BOOKED: confirm details with caller first. Read back the item, day, start "
+                             "time, total price and name, ending with 'Booking under <name>, shall I go "
+                             "ahead?', wait for their answer, and only call createReservation after they "
+                             "clearly say yes. If they already said yes to that recap and you only asked "
+                             "for a phone number or email since, call createReservation right after they "
+                             "answer, with the same details -- no new recap.",
+                    "booked": False,
+                }
+        if (
+            session is not None
+            and not args.get("customer_email")
+            and not args.get("customer_phone")
+            and session.caller_phone
+        ):
+            # No contact given: book with the number they're calling from --
+            # known callers, and new callers who chose "the number I'm
+            # calling from" (22:14 call: the guide left it out and the
+            # booking failed, forcing a re-ask and a second recap).
+            args = {**args, "customer_phone": session.caller_phone}
+        if (
+            session is not None
+            and not (args.get("customer_name") or "").strip()
+            and session.known_customer
+        ):
+            args = {**args, "customer_name": BooqableClient.attrs(session.known_customer).get("name") or ""}
         if not args.get("customer_email") and not args.get("customer_phone"):
-            raise BooqableError("customer_email or customer_phone is required")
+            return {
+                "error": "NOT BOOKED: a phone number or email is needed. Ask the caller for one, then "
+                         "call createReservation right after they answer, with the same details -- "
+                         "they already confirmed the recap, so no new recap.",
+                "booked": False,
+            }
+        extra: dict[str, Any] = {}
+        if not args.get("location_id") and session is not None and session.location_cache:
+            # Resolved earlier this call (checkAvailability always runs first).
+            extra["location"] = session.location_cache
+        if (
+            session is not None
+            and session.known_customer_checked
+            and not args.get("customer_email")
+            and _same_phone(args.get("customer_phone"), session.caller_phone)
+        ):
+            # get_caller_phone_number already looked this exact number up
+            # this call -- reuse that result instead of a second customers GET.
+            extra["prefetched_customer"] = session.known_customer
         return await reservations.create_reservation(
             client,
             customer={
@@ -257,6 +380,7 @@ async def _run_reservation_tool(name: str, args: dict[str, Any]) -> dict[str, An
             stops_at=args["stops_at"],
             items=args["items"],
             auto_reserve=args.get("auto_reserve", True),
+            **extra,
         )
     if name == "findReservations":
         return await reservations.find_reservations(
@@ -265,20 +389,93 @@ async def _run_reservation_tool(name: str, args: dict[str, Any]) -> dict[str, An
     if name == "cancelReservation":
         return await reservations.cancel_reservation(client, args["order_id"])
     if name == "sendPaymentLink":
+        if session is not None and "?" in (session.round_text or ""):
+            # Guard: the model asked the caller something in this same turn
+            # (e.g. "by text to the number ending in ...?") -- wait for the answer.
+            return {
+                "error": "NOT SENT: you asked the caller a question in this same turn. Wait for "
+                         "their answer, then call sendPaymentLink.",
+                "sent": False,
+            }
+        if (args.get("channel") or "sms").strip().lower() not in ("sms", "text") or args.get("email"):
+            # Email payment links were removed (spelled addresses are misheard
+            # on the phone, and the 18:46 test call took ~90 s and still failed).
+            return {
+                "error": "NOT SENT: payment links are only sent by text message, never by email. Tell the "
+                         "caller you can text it to the number they're calling from (or a number they "
+                         "give you), and call sendPaymentLink with channel sms once they agree.",
+                "sent": False,
+            }
         return await payments.send_payment_link(
             client,
             order_id=args["order_id"],
-            channel=args.get("channel"),
+            channel="sms",
             phone=args.get("phone"),
-            email=args.get("email"),
+            # SMS with no number from the guide: payments falls back to the
+            # order's phone, then to the number this call came from.
+            fallback_phone=session.caller_phone if session is not None else None,
         )
     raise KeyError(name)
+
+
+_AFFIRMATIVE = re.compile(
+    r"^(yes|yeah|yep|yup|yes please|correct|that'?s (right|correct|it|fine)|right|sure|ok(ay)? yes|"
+    r"go ahead|please do|do it|book it|let'?s do it|let'?s book it|sounds good|absolutely|"
+    r"of course|perfect|uh huh|mm hmm|you got it)\b"
+)
+_LEADING_ACKS_RE = re.compile(r"^(ok(ay)?|alright|all right|well|um|uh|great|perfect)\s+")
+_RECAP_QUESTION = re.compile(
+    r"(shall i|should i|can i|may i|do you want me to|would you like me to|want me to|ready for me to|"
+    r"okay to|ok to)\b[^?]*\b(book|reserve|go ahead|lock|confirm)|booking under[^?]*\?|"
+    r"go ahead and (book|reserve)[^?]*\?|book (it|that|this)[^?]*\?"
+)
+
+
+def _is_affirmative(user_text: str) -> bool:
+    text = re.sub(r"\[[^\]]*\]", " ", user_text or "")  # drop app notes
+    norm = " ".join(re.sub(r"[^a-z' ]+", " ", text.lower()).split())
+    norm = _LEADING_ACKS_RE.sub("", norm) if not _AFFIRMATIVE.match(norm) else norm
+    return bool(_AFFIRMATIVE.match(norm))
+
+
+_CONTACT_QUESTION = re.compile(r"\b(phone|number|email|e-mail|calling from|reach you)\b")
+
+
+def _booking_key(args: dict) -> str:
+    """The booking details a recap covers: items, times and name."""
+    return json.dumps(
+        [
+            args.get("items"),
+            args.get("starts_at"),
+            args.get("stops_at"),
+            " ".join((args.get("customer_name") or "").lower().split()),
+        ],
+        sort_keys=True,
+        default=str,
+    )
+
+
+def _after_contact_question(session: "GuideSession") -> bool:
+    """The previous agent turn was a phone/email side question (not a change
+    of the booking), so a recap yes from before it still stands."""
+    prev = (session.prev_round_text or "").lower()
+    return "?" in prev and bool(_CONTACT_QUESTION.search(prev))
+
+
+def booking_confirmed(session: "GuideSession") -> bool:
+    """True when the previous agent turn asked the recap/book-it question and
+    the caller's reply this turn is a clear yes."""
+    prev = (session.prev_round_text or "").lower()
+    return "?" in prev and bool(_RECAP_QUESTION.search(prev)) and _is_affirmative(session.turn_user_text)
 
 
 async def _execute_tool(name: str, arguments: str, session: GuideSession) -> str:
     """Run one client-side tool call and return its result as the string to
     send back as a function_call_output. Never raises -- an error result is
     still a well-formed reply the model can react to."""
+    if name == "endCall":
+        session.end_call_requested = True
+        return json.dumps({"ok": True, "note": "Say a brief goodbye now; the call ends right after it plays."})
     if name == "get_caller_phone_number":
         if not session.known_customer_checked:
             session.known_customer_checked = True
@@ -292,6 +489,11 @@ async def _execute_tool(name: str, arguments: str, session: GuideSession) -> str
                 except Exception:
                     session.known_customer = None
         result: dict[str, Any] = {"phone_number": session.caller_phone}
+        digits = "".join(ch for ch in (session.caller_phone or "") if ch.isdigit())
+        if len(digits) >= 4:
+            # Read this to the caller -- never work the digits out yourself.
+            result["last_four"] = digits[-4:]
+            result["last_four_spoken"] = ", ".join(digits[-4:])
         if session.known_customer:
             attrs = BooqableClient.attrs(session.known_customer)
             if attrs.get("name"):
@@ -308,7 +510,7 @@ async def _execute_tool(name: str, arguments: str, session: GuideSession) -> str
             result: dict[str, Any] = {"error": "malformed arguments"}
         else:
             try:
-                result = await _run_reservation_tool(name, args)
+                result = await _run_reservation_tool(name, args, session)
             except (BooqableError, TwilioSmsError, PostmarkError) as exc:
                 logger.warning("Reservation tool %r failed: %s", name, exc)
                 result = {"error": str(exc)}
@@ -357,11 +559,98 @@ def _collect_function_calls(output: Any, outcome: "_TurnOutcome") -> None:
 
 
 async def _tool_outputs(outcome: "_TurnOutcome", session: GuideSession) -> list[dict[str, str]]:
-    outputs = []
-    for call_id, name, arguments in outcome.function_calls:
-        output = await _execute_tool(name, arguments, session)
-        outputs.append({"type": "function_call_output", "call_id": call_id, "output": output})
-    return outputs
+    calls = outcome.function_calls
+    if (
+        config.FAST_TOOLS_ENABLED
+        and len(calls) > 1
+        and all(name in _READ_ONLY_TOOLS for _, name, _ in calls)
+    ):
+        results = await asyncio.gather(*(_execute_tool(n, a, session) for _, n, a in calls))
+    else:
+        results = [await _execute_tool(n, a, session) for _, n, a in calls]
+    return [
+        {"type": "function_call_output", "call_id": call_id, "output": output}
+        for (call_id, _, _), output in zip(calls, results)
+    ]
+
+
+# Safe to run concurrently within one round: no writes, no ordering needs.
+_READ_ONLY_TOOLS = frozenset({"listCatalog", "checkAvailability", "listCustomers", "findReservations"})
+
+
+async def lookup_known_caller(session: GuideSession) -> None:
+    """Look the caller's number up in Booqable right at call setup (the same
+    lookup get_caller_phone_number does), so the first turn can tell the guide
+    who is calling. Best effort; never raises."""
+    if session.known_customer_checked or not session.caller_phone:
+        return
+    try:
+        client = BooqableClient()
+        session.known_customer = await asyncio.wait_for(
+            reservations.find_customer(client, phone=session.caller_phone),
+            timeout=config.CALLER_LOOKUP_TIMEOUT_SECONDS,
+        )
+        session.known_customer_checked = True
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.info("Known-caller lookup skipped: %s", type(exc).__name__)
+
+
+def known_caller_note(session: GuideSession) -> str | None:
+    """One-time note for the guide naming a known caller. Never contains the
+    phone number itself -- only its last four digits, spoken."""
+    if not session.known_customer:
+        return None
+    name = (BooqableClient.attrs(session.known_customer).get("name") or "").strip()
+    if not name:
+        return None
+    digits = "".join(ch for ch in (session.caller_phone or "") if ch.isdigit())
+    last_four = ", ".join(digits[-4:]) if len(digits) >= 4 else ""
+    ending = f" (number ending in {last_four})" if last_four else ""
+    return (
+        f"[Note: this caller is a known customer, {name}, calling from the number on file{ending}. "
+        f"They were already greeted by first name. Never ask for their name, and don't call "
+        f"get_caller_phone_number for them: to book, call createReservation with customer_name "
+        f"'{name}' and leave customer_phone empty (the number they're calling from is used). "
+        f"Skipping the name and phone questions does NOT skip the recap: before booking, always read "
+        f"back the item, day, start time and total, ending with 'Booking under {name}, shall I go "
+        f"ahead?', and book only after they say yes.]"
+    )
+
+
+async def _with_known_caller_note(user_text: str, session: GuideSession) -> str:
+    if session.known_caller_note_sent:
+        return user_text
+    session.known_caller_note_sent = True
+    now_text = ""
+    if config.NOW_NOTE_ENABLED:
+        with contextlib.suppress(Exception):
+            now_text = business_hours.now_note()
+    if not config.KNOWN_CALLER_NOTE_ENABLED:
+        return f"{now_text} {user_text}" if now_text else user_text
+    task = session.caller_lookup_task
+    if task is not None and not task.done():
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(asyncio.shield(task), timeout=config.CALLER_LOOKUP_TIMEOUT_SECONDS)
+    note = known_caller_note(session)
+    prefix = " ".join(x for x in (now_text, note) if x)
+    return f"{prefix} {user_text}" if prefix else user_text
+
+
+async def prefetch_booqable(session: GuideSession) -> None:
+    """Fill the per-call catalog and location caches in the background right
+    after call setup, so the first listCatalog/checkAvailability turn doesn't
+    wait on ~2-3 s of Booqable reads. Best effort; never raises."""
+    try:
+        client = BooqableClient()
+        catalog, location = await asyncio.gather(
+            reservations.list_catalog(client), reservations.resolve_location(client, None)
+        )
+        if session.catalog_cache is None:
+            session.catalog_cache = catalog
+        if session.location_cache is None:
+            session.location_cache = location
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.info("Booqable prefetch skipped: %s", type(exc).__name__)
 
 
 # Leading whitespace/sentence punctuation trimmed off whatever immediately
@@ -678,15 +967,30 @@ async def _stream_reply_with_tools(
     and then cut off same as the buffering branches' worst case; this is
     logged as a warning since it means the guide said the marker too early."""
     next_input: Any = user_text
+    spoken_so_far = ""
+    # Set once a round has already spoken a goodbye and then called endCall:
+    # the follow-up round (the guide answering the endCall result) is
+    # consumed but not spoken, so the caller never hears the goodbye twice.
+    mute = False
     for i in range(_MAX_TOOL_ITERATIONS):
         outcome = _TurnOutcome()
         gate = _SentinelGate()
+        if i == 0:
+            session.prev_round_text = session.round_text
+            session.turn_user_text = user_text if isinstance(user_text, str) else ""
+            session.round_text = ""
         async with contextlib.aclosing(_stream_turn(client, next_input, session, outcome)) as gen:
             async for delta in gen:
-                if text := gate.feed(delta):
+                session.round_text += delta
+                if (text := gate.feed(delta)) and not mute:
+                    spoken_so_far += text
                     yield Delta(text)
+        if mute and not gate.open and gate.retained:
+            logger.info("Goodbye already spoken before endCall; not repeating it: %r", gate.retained)
 
         if not outcome.function_calls:  # final round
+            if mute:
+                return
             if not gate.open:  # FAILSAFE: phrase never arrived this turn
                 if text := _strip_sentinel(gate.retained):
                     yield Delta(text)
@@ -694,6 +998,33 @@ async def _stream_reply_with_tools(
                     "No trigger phrase this turn; speaking the round unstreamed (failsafe)"
                 )
             return
+
+        names = [name for _, name, _ in outcome.function_calls]
+        if (
+            gate.emitted_any
+            and names
+            and all(n == "endCall" for n in names)
+            and call_end.reply_is_goodbye(spoken_so_far)
+        ):
+            logger.info("Goodbye spoken in the same round as endCall; the follow-up round stays silent")
+            mute = True
+            yield ToolCallStarted(tuple(names))
+            next_input = await _tool_outputs(outcome, session)
+            continue
+        if (
+            gate.emitted_any
+            and names
+            and all(n == "sendPaymentLink" for n in names)
+            and "?" in spoken_so_far
+        ):
+            # The guide asked "shall I text you…?" and called sendPaymentLink
+            # in the same round. The send guard refuses it (NOT SENT); the
+            # follow-up round stays silent so the question isn't asked twice
+            # and the caller's answer isn't talked over (22:14 call).
+            logger.info("Text offer asked in the same round as sendPaymentLink; waiting for the answer")
+            mute = True  # no ToolCallStarted either: no "One moment." filler after the question
+            next_input = await _tool_outputs(outcome, session)
+            continue
 
         if i == _MAX_TOOL_ITERATIONS - 1:
             logger.warning(
@@ -741,6 +1072,8 @@ async def stream_reply(
     than opening fresh conversations forever.
     """
     client = _get_client()
+    if not _is_retry:
+        user_text = await _with_known_caller_note(user_text, session)
 
     if session.conversation_id is None and session.stream_missing_conversation:
         async for event in _start_conversation(client, user_text, session):

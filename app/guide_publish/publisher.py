@@ -150,7 +150,11 @@ def _render(db: Session) -> RenderResult:
     items = _knowledge_items(db)
     today = date.today()
     instructions = template.render_instructions(
-        render.build_slots(configuration, render.knowledge_topics(items, today))
+        render.build_slots(
+            configuration,
+            render.knowledge_topics(items, today),
+            render.core_facts(items, today),
+        )
     )
     knowledge = render.knowledge_files(items, today)
     zip_bytes, bundle_hash = bundle_module.build_bundle(

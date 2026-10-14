@@ -218,6 +218,7 @@ def test_filler_still_spoken_when_nothing_has_been_sent_yet(monkeypatch):
     monkeypatch.setattr(config, "TURN_PAUSE_SECONDS", 0.01)
     monkeypatch.setattr(config, "FILLER_DELAY_SECONDS", 0.05)
     monkeypatch.setattr(config, "FILLER_PHRASES", ["FILLERMARK"])
+    monkeypatch.setattr(config, "FILLER_ONLY_FOR_TOOL_CALLS", False)
 
     async def _fake_stream_reply(input_text, guide):
         await asyncio.sleep(0.2)  # slower than FILLER_DELAY_SECONDS
@@ -240,8 +241,37 @@ def test_filler_still_spoken_when_nothing_has_been_sent_yet(monkeypatch):
     assert any("FILLERMARK" in f["token"] for f in frames)
 
 
+def test_no_filler_without_a_tool_call_by_default(monkeypatch):
+    monkeypatch.setattr(config, "TWILIO_AUTH_TOKEN", "test-ws-secret")
+    monkeypatch.setattr(config, "TURN_PAUSE_SECONDS", 0.01)
+    monkeypatch.setattr(config, "FILLER_DELAY_SECONDS", 0.05)
+    monkeypatch.setattr(config, "FILLER_PHRASES", ["FILLERMARK"])
+    monkeypatch.setattr(config, "FILLER_ONLY_FOR_TOOL_CALLS", True)
+
+    async def _fake_stream_reply(input_text, guide):
+        await asyncio.sleep(0.2)  # slower than FILLER_DELAY_SECONDS
+        yield Delta("Here you go.")
+
+    monkeypatch.setattr(main, "stream_reply", _fake_stream_reply)
+
+    call_sid = "CA_no_filler_default"
+    token = twilio_auth.mint_ws_token(call_sid)
+
+    with client.websocket_connect(f"/ws?token={token}") as websocket:
+        websocket.send_json(
+            {"type": "setup", "callSid": call_sid, "from": "+15551234567", "to": "+15557654321"}
+        )
+        websocket.send_json(
+            {"type": "prompt", "voicePrompt": "is the cruiser available Saturday", "last": True}
+        )
+        frames = _drain_until_last(websocket, timeout=2.0)
+
+    assert not any("FILLERMARK" in f["token"] for f in frames)
+
+
 def test_round_boundary_inserts_a_separating_space(monkeypatch):
     monkeypatch.setattr(config, "TWILIO_AUTH_TOKEN", "test-ws-secret")
+    monkeypatch.setattr(config, "TTS_WORDS_PER_SECOND", 1000.0)  # not a timing test
     monkeypatch.setattr(config, "TURN_PAUSE_SECONDS", 0.01)
     monkeypatch.setattr(config, "FILLER_DELAY_SECONDS", 5.0)
 

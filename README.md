@@ -154,6 +154,10 @@ requires at least one of `customer_email`/`customer_phone`. See
 why, and for a couple of non-obvious Booqable v4 quirks around how phone
 numbers actually get stored.
 
+## Voice latency and call quality
+
+Turn-taking, fillers, hang-up, STT hints, stock/booking guards and fast tool calls are documented, with their `.env` switches and measured latency, in [docs/VOICE_LATENCY_AND_CALL_QUALITY.md](docs/VOICE_LATENCY_AND_CALL_QUALITY.md).
+
 ## Setup
 
 **See [docs/SETUP.md](docs/SETUP.md) for the complete, step-by-step guide** to getting
