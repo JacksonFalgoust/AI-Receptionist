@@ -162,10 +162,10 @@ def test_openapi_documents_new_caller_number_and_carry_over():
 
 def test_default_greeting_names_business():
     src = (ROOT / "app/config.py").read_text(encoding="utf-8")  # code default (.env may override)
-    assert '"WELCOME_GREETING", "Thanks for calling {business}! How can I help you today?"' in src
-    tpl = "Thanks for calling {business}! How can I help you today?"
+    assert '"WELCOME_GREETING", "Thanks for calling, {business}! How can I help you today?"' in src
+    tpl = "Thanks for calling, {business}! How can I help you today?"
     assert fill_business(tpl, name="Atlanta Bikes") == \
-        "Thanks for calling Atlanta Bikes! How can I help you today?"
+        "Thanks for calling, Atlanta Bikes! How can I help you today?"
     assert fill_business(tpl, name="") == "Thanks for calling! How can I help you today?"
     assert fill_business("Hello there!", name="Atlanta Bikes") == "Hello there!"
 
@@ -174,7 +174,33 @@ def test_published_greeting_template_filled(monkeypatch):
     monkeypatch.setattr(guide_client, "BooqableClient", lambda: object())
     from app import business_hours
     monkeypatch.setattr(business_hours, "business_name", lambda: "Atlanta Bikes")
-    monkeypatch.setattr(config, "WELCOME_GREETING", "Thanks for calling {business}! How can I help you today?")
+    monkeypatch.setattr(config, "WELCOME_GREETING", "Thanks for calling, {business}! How can I help you today?")
     import app.guide_publish.publisher as pub
     monkeypatch.setattr(pub, "latest_succeeded", lambda s: None)
-    assert main._published_greeting() == "Thanks for calling Atlanta Bikes! How can I help you today?"
+    assert main._published_greeting() == "Thanks for calling, Atlanta Bikes! How can I help you today?"
+
+
+# --- 22:35 review: no "closed for today" for a named future day; pause in the greeting ---
+
+def test_fill_business_drops_comma_without_name():
+    assert fill_business("Thanks for calling, {business}! How can I help you today?", name="") == \
+        "Thanks for calling! How can I help you today?"
+
+
+def test_now_note_after_hours_limits_closed_mention():
+    from datetime import datetime
+    from app import business_hours
+    tz = business_hours._tz()
+    hours = [{"day": d, "open": "09:00", "close": "18:00", "closed": False} for d in range(7)]
+    note = business_hours.now_note(datetime(2026, 10, 13, 22, 36, tzinfo=tz), hours)
+    assert "closed for today" in note
+    assert "Only mention this if the caller wants today or right now, or names no day" in note
+    assert "go straight to that day" in note
+    open_note = business_hours.now_note(datetime(2026, 10, 13, 12, 0, tzinfo=tz), hours)
+    assert "Only mention" not in open_note
+
+
+def test_instructions_named_day_goes_straight_to_it():
+    t = (ROOT / "guide-demo/template/instructions.template.md").read_text(encoding="utf-8")
+    assert "Mention that the shop is closed only when the caller asks for today or right now, or names no day" in t
+    assert "don't mention today at all - go straight to that day" in t

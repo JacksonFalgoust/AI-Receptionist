@@ -224,7 +224,13 @@ def now_note(now: datetime | None = None, hours: list[dict] | None = None) -> st
         state = f"The shop is open today until {_spoken_time(window[1])}."
     nxt = next_open(now, hours)
     tail = f" Next opening: {_spoken_date(nxt)} at {_spoken_time(nxt)}." if nxt and (window is None or now >= window[1] or now < window[0]) else ""
-    return f"{text} {state}{tail}]"
+    closed_now = window is None or now >= window[1] or now < window[0]
+    hint = (
+        " Only mention this if the caller wants today or right now, or names no day;"
+        " if they name another day, go straight to that day."
+        if closed_now else ""
+    )
+    return f"{text} {state}{tail}{hint}]"
 
 
 _REASON_TEXT = {

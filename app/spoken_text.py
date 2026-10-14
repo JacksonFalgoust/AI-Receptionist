@@ -76,4 +76,6 @@ def canned_goodbye_text(template: str | None = None, name: str | None = None) ->
         from .guide_publish.render import spoken_name
 
         return template.replace("{business}", spoken_name(name))
-    return template.replace(" {business}", "").replace("{business}", "")
+    import re
+
+    return re.sub(r",?\s*\{business\}", "", template)  # "calling, {business}!" -> "calling!"
