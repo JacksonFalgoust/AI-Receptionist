@@ -12,7 +12,7 @@ const WINDOWS: Record<'7d' | '30d', number> = {
  * BOOQABLE_TIMEZONE uses on the backend for reservation times, default
  * America/New_York. No shared config exists between the two runtimes, so
  * this must be kept in sync by hand with
- * app/dashboard_store.py's _today_start_utc().
+ * app/console/dashboard/store.py's _today_start_utc().
  */
 const BUSINESS_TIMEZONE = 'America/New_York'
 
@@ -73,7 +73,7 @@ function businessMidnightUtc(now: Date): Date {
  * window -- a call from 6pm the previous day must not count as today.
  * `7d`/`30d` stay rolling windows; only `today` had a
  * "yesterday's call shows up in today" problem to fix. Mirrored on the
- * backend by app/dashboard_store.py's range_bounds.
+ * backend by app/console/dashboard/store.py's range_bounds.
  */
 export function presetBounds(
   preset: DateRangePreset,

@@ -87,7 +87,7 @@ Replace mock implementations with live calls behind `VITE_USE_MOCKS=false`.
 - Define the API contract against the FastAPI app in `../app`; the HTTP impls
   currently assume endpoints that do not exist yet.
 - Conversation history is the natural first real feed — Conversation Relay
-  calls already flow through `app/main.py`.
+  calls already flow through `app/calls/relay.py`.
 - **Enforce every permission in `src/lib/permissions.ts` server-side** (PRD §40). This includes `src/lib/userGuards.ts`'s two lockout rules (self-protection, last active Owner) — both are currently enforced only in the mock `userService`, documented there and in `userGuards.ts` as client-side-only.
 - `TestConciergeDrawerContext` (E3) is mounted above `AppRoutes` and never resets on sign-out/session expiry — decide whether a real backend's 401-mid-`send()` path should clear it on auth transitions or leave the transcript to a full reload, same as every other client-only state in this app.
 - **Slice 1 shipped:** conversation history and login/logout are real,
@@ -102,7 +102,7 @@ its HTTP implementation already calls (paths below are relative to
 `API_BASE_URL`, `/api` by default), and scope every endpoint to the caller's
 organization.
 
-- [x] **auth** (`authService`): `POST /auth/login`, `POST /auth/logout`, `POST /auth/password-reset` (this last one is a no-op stub in `app/auth_api.py`; there is no real reset flow yet)
+- [x] **auth** (`authService`): `POST /auth/login`, `POST /auth/logout`, `POST /auth/password-reset` (this last one is a no-op stub in `app/console/auth/api.py`; there is no real reset flow yet)
 - [x] **conversations** (`conversationService`): `GET /conversations`, `GET /conversations/{id}`, `GET /conversations/filter-options`
 - [ ] **organizations** (`organizationService`): `GET /organizations`, `GET /organizations/current`
 - [ ] **users** (`userService`): `GET /users`, `POST /users/invite`, `PATCH /users/{id}/role`, `PATCH /users/{id}/status`, `DELETE /users/{id}`, `POST /users/{id}/resend-invitation`. The two `userGuards.ts` lockout rules must be enforced here on the server.

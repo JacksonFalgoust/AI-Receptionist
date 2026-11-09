@@ -54,7 +54,7 @@ def init_db() -> None:
 
 @contextmanager
 def session_scope() -> Generator[Session, None, None]:
-    """One unit of work for non-request callers (e.g. app/call_recording.py).
+    """One unit of work for non-request callers (e.g. app/calls/call_recording.py).
     Commits on success, rolls back and re-raises on any exception, always
     closes."""
     db = SessionLocal()

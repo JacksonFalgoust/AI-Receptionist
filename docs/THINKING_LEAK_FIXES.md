@@ -44,8 +44,8 @@ The leak path, end to end:
    delta as `response.output_text.delta` with `role:"assistant"`
    (`Services/Conversations/Streaming/ConversationStreamEngine.cs:303-312`). There is **no
    separate reasoning SSE event and no visibility filter anywhere** in GuideAnts.
-4. **This app speaks every delta.** `app/main.py`'s `respond_to()` sends each delta to Twilio
-   as a spoken token. `app/guide_client.py` buffers each tool-call round and discards
+4. **This app speaks every delta.** `app/calls/relay.py`'s `respond_to()` sends each delta to Twilio
+   as a spoken token. `app/guide/streaming.py` buffers each tool-call round and discards
    intermediate narration (`_stream_reply_with_tools`, commit `4e95865`), but the **final**
    round is flushed verbatim — so thinking that leads the final answer is spoken, and a
    following round's preemptible audio truncates it ("cut off").
@@ -58,7 +58,7 @@ finalized message that **excludes** thinking
 
 - Grep the running app logs for
   `Discarding intermediate-round narration ahead of another tool call:`
-  (`app/guide_client.py`). If the discarded text reads like reasoning or contains `<think>`,
+  (`app/guide/streaming.py`). If the discarded text reads like reasoning or contains `<think>`,
   the model is emitting thinking as content.
 - Or call the published `/v1/responses` endpoint directly with `stream:true` and a
   tool-triggering prompt, and inspect the raw `output_text` deltas.
@@ -147,10 +147,10 @@ reconstructs a clean finalized message that excludes thinking
 already removed live token streaming, switching `_stream_turn` to `stream:false` would
 eliminate leakage with little UX loss. The cleanest self-contained fix.
 
-**D3 — Keep the buffer-and-discard.** `_stream_reply_with_tools` in `app/guide_client.py`
+**D3 — Keep the buffer-and-discard.** `_stream_reply_with_tools` in `app/guide/streaming.py`
 already discards thinking that appears in intermediate tool-call rounds.
 
-**D4 — Trigger-phrase gating (`feature/trigger-phrase`, `_SentinelGate` in `app/guide_client.py`).**
+**D4 — Trigger-phrase gating (`feature/trigger-phrase`, `SentinelGate` in `app/guide/sentinel.py`).**
 The guide is instructed to open its actual final answer with a fixed marker phrase
 (`config.FINAL_ANSWER_SENTINEL`, "declare victory" by default — see
 `guide-demo/Twillio demo agent/instructions.md`'s "FINAL ANSWER MARKER" paragraph); this app
@@ -233,9 +233,9 @@ persisted and validated but never projected into the outgoing call).
 
 **This repo (Twilio demo)**
 - `guide-demo/Twillio demo agent/manifest.json` — `defaultModel: deepseek/deepseek-v4-flash:nitro`
-- `app/guide_client.py` — `_stream_turn` (yields only `output_text.delta`),
+- `app/guide/streaming.py` — `_stream_turn` (yields only `output_text.delta`),
   `_stream_reply_with_tools` (buffer rounds, discard intermediate narration; flush final round)
-- `app/main.py` — `respond_to()` sends every delta to Twilio as a spoken token
+- `app/calls/relay.py` — `respond_to()` sends every delta to Twilio as a spoken token
 - `app/config.py` — `GUIDEANTS_MODEL` default `"guide"` (alias only)
 - Commit `4e95865` — "Doesn't return assistant thinking when only one tool call used
   (removes token streaming)"
