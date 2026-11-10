@@ -385,6 +385,8 @@ STOP_ACK_PHRASES = [
 # book rentals through this app instead of talking to Booqable directly. The
 # guide never sees BOOQABLE_API_KEY -- these calls are resolved in-process,
 # never over HTTP, so there's no separate shared secret to gate them with.
+# (The one exception is the console's read-only GET /api/bookings, which is
+# behind console auth and only reads from Booqable.)
 BOOQABLE_COMPANY_URL = os.environ.get(
     "BOOQABLE_COMPANY_URL", "https://smart-apps-innovations.booqable.com"
 ).rstrip("/")

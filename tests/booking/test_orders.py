@@ -1,11 +1,12 @@
 import asyncio
+import types
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from app.booking import orders
-from app.booking.booqable_client import BooqableError
+from app.booking.booqable_client import BooqableClient, BooqableError
 
 from app.booking.orders import (
     Booking,
@@ -207,13 +208,19 @@ def _clear_cache():
 
 
 def test_load_orders_collects_included_from_every_page():
-    client = FakeClient(
-        pages=[
-            ([{"id": f"a{i}"} for i in range(50)], [{"id": "c1", "type": "customers"}]),
-            ([{"id": f"b{i}"} for i in range(13)], [{"id": "c2", "type": "customers"}]),
-        ]
-    )
-    data, included, _ = asyncio.run(load_orders(client))
+    # Runs the REAL BooqableClient.list_all_with_included over canned pages.
+    pages = {
+        1: {"data": [{"id": f"a{i}"} for i in range(50)], "included": [{"id": "c1", "type": "customers"}]},
+        2: {"data": [{"id": f"b{i}"} for i in range(13)], "included": [{"id": "c2", "type": "customers"}]},
+    }
+
+    class PagedClient:
+        async def get(self, path, params=None):
+            return pages[params["page[number]"]]
+
+    fake = PagedClient()
+    fake.list_all_with_included = types.MethodType(BooqableClient.list_all_with_included, fake)
+    data, included, _ = asyncio.run(load_orders(fake))
     assert len(data) == 63
     assert {c["id"] for c in included} == {"c1", "c2"}
 

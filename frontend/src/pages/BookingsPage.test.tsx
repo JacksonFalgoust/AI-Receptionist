@@ -73,6 +73,24 @@ describe('BookingsPage', () => {
     expect(spy.mock.calls.filter(([p]) => p?.refresh === true)).toHaveLength(1)
   })
 
+  it('reloads another tab after Refresh instead of showing its stale cache', async () => {
+    const user = userEvent.setup()
+    const spy = vi.spyOn(bookingService, 'list')
+    renderWithProviders(<BookingsPage />)
+    await screen.findByText('Dana Whitfield')
+    await user.click(screen.getByRole('tab', { name: 'Past' }))
+    await screen.findByText('Returned')
+    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled())
+
+    const upcomingBefore = spy.mock.calls.filter(([p]) => p?.view === 'upcoming').length
+    await user.click(screen.getByRole('tab', { name: 'Upcoming' }))
+    await waitFor(() =>
+      expect(spy.mock.calls.filter(([p]) => p?.view === 'upcoming').length).toBe(upcomingBefore + 1),
+    )
+    expect(spy.mock.calls.filter(([p]) => p?.refresh === true)).toHaveLength(1)
+  })
+
   it('shows the empty state for no upcoming bookings', async () => {
     const real = await bookingService.list()
     vi.spyOn(bookingService, 'list').mockResolvedValue({ ...real, items: [], total: 0 })
@@ -81,6 +99,21 @@ describe('BookingsPage', () => {
     expect(
       screen.getByText('New bookings from calls or your Booqable site will appear here.'),
     ).toBeInTheDocument()
+  })
+
+  it('shows the Past empty state without a description', async () => {
+    const real = await bookingService.list()
+    vi.spyOn(bookingService, 'list').mockImplementation(async (params) =>
+      params?.view === 'past' ? { ...real, items: [], total: 0 } : real,
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<BookingsPage />)
+    await screen.findByText('Dana Whitfield')
+    await user.click(screen.getByRole('tab', { name: 'Past' }))
+    expect(await screen.findByText('No past bookings yet')).toBeInTheDocument()
+    expect(
+      screen.queryByText('New bookings from calls or your Booqable site will appear here.'),
+    ).not.toBeInTheDocument()
   })
 
   it('shows the error title when Booqable cannot be reached', async () => {

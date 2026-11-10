@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef } from 'react'
 
 import { Button } from '@/components/ui/Button'
@@ -35,6 +35,7 @@ export function BookingsPage() {
 
   // Only an explicit Refresh click bypasses the backend's short cache.
   const refreshNext = useRef(false)
+  const queryClient = useQueryClient()
 
   const query = useQuery({
     queryKey: ['bookings', 'list', { view, page }],
@@ -60,7 +61,9 @@ export function BookingsPage() {
             disabled={query.isFetching}
             onClick={() => {
               refreshNext.current = true
-              void query.refetch()
+              // Refetches the active query (with refresh: true) and marks every
+              // other cached tab/page stale so it reloads when next shown.
+              void queryClient.invalidateQueries({ queryKey: ['bookings'] })
             }}
           >
             Refresh

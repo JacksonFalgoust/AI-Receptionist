@@ -12,7 +12,9 @@ const WINDOWS: Record<'7d' | '30d', number> = {
  * BOOQABLE_TIMEZONE uses on the backend for reservation times, default
  * America/New_York. No shared config exists between the two runtimes, so
  * this must be kept in sync by hand with
- * app/console/dashboard/store.py's _today_start_utc().
+ * app/console/dashboard/store.py's _today_start_utc(), and with
+ * app/booking/orders.py's summarize() (via config.BOOQABLE_TIMEZONE) and
+ * formatBusinessDateTime in formatDate.ts, which also depend on it.
  */
 export const BUSINESS_TIMEZONE = 'America/New_York'
 

@@ -5,6 +5,7 @@ console session)."""
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -24,6 +25,8 @@ from app.booking.orders import (
     to_bookings,
 )
 from app.console.auth import sessions as auth
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -106,6 +109,7 @@ async def list_bookings(
         page_bookings = ordered[start : start + pageSize]
         line_items = await fetch_line_items(client, [b.id for b in page_bookings])
     except Exception as exc:  # noqa: BLE001 -- every upstream failure is a 502
+        logger.exception("Bookings load failed")
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return BookingsPageOut(

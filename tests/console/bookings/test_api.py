@@ -1,5 +1,6 @@
 """FastAPI-level tests for GET /api/bookings."""
 
+import types
 from datetime import UTC, datetime
 
 import pytest
@@ -7,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from app import config, models
 from app.booking import orders
-from app.booking.booqable_client import BooqableError
+from app.booking.booqable_client import BooqableClient, BooqableError
 from app.console.auth import sessions as auth
 from app.console.bookings import api as bookings_api
 from app.main import app
@@ -175,3 +176,65 @@ def test_invalid_page_params_are_422(params):
 def test_requires_auth():
     app.dependency_overrides.clear()
     assert client.get("/api/bookings").status_code == 401
+
+
+def test_customers_from_earlier_pages_are_named(monkeypatch):
+    """Runs the REAL paging loop: c1 appears only in page 1's `included`."""
+    page1 = [
+        _order(f"p{i}", "reserved", "2026-11-12T20:00:00Z", "2026-11-13T20:00:00Z", number=i)
+        for i in range(50)
+    ]
+    page2 = [
+        _order("q1", "reserved", "2026-11-14T20:00:00Z", "2026-11-15T20:00:00Z",
+               number=900, customer_id="c2")
+    ]
+    c2 = {"id": "c2", "type": "customers", "attributes": {"name": "Bob Two"}}
+    pages = {1: {"data": page1, "included": [CUSTOMER]}, 2: {"data": page2, "included": [c2]}}
+
+    class PagedClient:
+        def __init__(self):
+            self.list_all_with_included = types.MethodType(
+                BooqableClient.list_all_with_included, self
+            )
+
+        attrs = staticmethod(FakeClient.attrs)
+
+        async def get(self, path, params=None):
+            if path.startswith("orders/"):
+                return _detail(path.split("/")[1])
+            return pages[params["page[number]"]]
+
+    monkeypatch.setattr(bookings_api, "BooqableClient", PagedClient)
+    body = client.get("/api/bookings", params={"pageSize": 100}).json()
+    assert body["total"] == 51
+    names = {b["id"]: b["customerName"] for b in body["items"]}
+    assert names["p0"] == "Jane Doe"
+    assert names["q1"] == "Bob Two"
+
+
+def test_failed_line_fetch_yields_null_items_not_an_error(monkeypatch):
+    async def get(self, path, params=None):
+        if path == "orders/o1":
+            raise BooqableError("boom", status_code=500)
+        return _detail(path.split("/")[1])
+
+    monkeypatch.setattr(FakeClient, "get", get)
+    response = client.get("/api/bookings")
+    assert response.status_code == 200
+    by_id = {b["id"]: b for b in response.json()["items"]}
+    assert by_id["o1"]["items"] is None
+    assert by_id["o1"]["itemCount"] == 2
+    assert by_id["o3"]["items"] == [{"name": "Kayak", "quantity": 2}]
+    assert by_id["o2"]["items"] == [{"name": "Kayak", "quantity": 2}]
+
+
+def test_summary_uses_configured_business_timezone(monkeypatch):
+    default = client.get("/api/bookings").json()["summary"]
+    assert default["pickupsToday"] == 1
+    orders.clear_cache()
+    # In Singapore (UTC+8) it is still Nov 10 at 15:00 UTC, but the 20:00 UTC
+    # pickup/return instants fall on Nov 11, so they are no longer "today".
+    monkeypatch.setattr(config, "BOOQABLE_TIMEZONE", "Asia/Singapore")
+    shifted = client.get("/api/bookings").json()["summary"]
+    assert shifted != default
+    assert shifted["returnsToday"] == 0
