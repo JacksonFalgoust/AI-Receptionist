@@ -15,3 +15,8 @@ docs/superpowers/
 CLAUDE.md
 
 data/
+# Local env variants/backups and server logs
+.env.*
+.env.bak*
+!.env.example
+*.log

@@ -78,14 +78,22 @@ from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app import config
+from app.guide import caller_context
 from app.guide.session import GuideSession, build_input
 from app.guide.streaming import ToolCallStarted, stream_reply
 
-from . import barge_in, call_recording, fillers, speaker_events, speech_timing, twilio_auth
+from . import barge_in, call_end, call_recording, fillers, speaker_events, speech_timing, stt_fixups, twilio_auth
+from .spoken_text import PhraseJoiner, canned_goodbye_text
 
 logger = logging.getLogger("voice_receptionist")
 
 router = APIRouter()
+
+
+def mask_phone(value: str | None) -> str:
+    """Log-safe phone: keep only the last 4 digits."""
+    digits = "".join(ch for ch in (value or "") if ch.isdigit())
+    return f"***{digits[-4:]}" if len(digits) >= 4 else ("***" if value else "none")
 
 # Ceiling on holding a buffered turn while the caller is (per clientSpeaking
 # events) still audibly speaking. Normally the commit timer is re-armed by
@@ -153,6 +161,7 @@ class CallState:
     # that cancels a reply before it completes can't leave a stale question
     # flag from an earlier, unrelated turn in place.
     guide_awaiting_answer: bool = False
+    bare_greeting_ignored: bool = False
     # event-loop-clock timestamp of the last reply's final Twilio frame
     # (the closing `last: true` message) finishing its send -- diagnostic
     # only, see respond_to()'s TIMING logs. Lets the agent-start speaker
@@ -161,6 +170,27 @@ class CallState:
     # no application-level ack for individual text frames). 0.0 means no
     # reply has finished sending yet this call.
     last_reply_sent_at: float = 0.0
+    # Event-loop time the *current* reply's first frame went to Twilio (0.0
+    # once its agent-start has been reported, or before any frame). The
+    # agent-start handler measures against this, not last_reply_sent_at: a
+    # streamed reply's playback starts before its last frame is sent, so
+    # measuring from "last frame" picked up the previous turn's timestamp.
+    reply_first_frame_at: float = 0.0
+    # Event-loop time of the caller's most recent client-stop speaker event.
+    client_stop_at: float = 0.0
+    # Working-sound bookkeeping for the current reply: a play message was
+    # sent, and reply text has since gone out. If Twilio only starts the
+    # sound after that (mediaPlaying on), it is cut immediately.
+    working_play_sent: bool = False
+    # Event-loop time of the latest chime `play` sent, and of the latest
+    # agent-start speaker event (for stuck-audio detection).
+    working_play_sent_at: float = 0.0
+    last_agent_start_at: float = 0.0
+    # Set after a stuck-audio recovery: no more chimes this call.
+    chime_disabled: bool = False
+    # Last filler phrase spoken this call, so the next one differs.
+    last_filler: str | None = None
+    reply_text_after_play: bool = False
     # Event-loop time a client-side tool call started this turn, or 0.0 if
     # none is currently pending. app/guide/streaming.py streams every round's text
     # live, including narration ahead of a tool call, so the guide can go
@@ -178,6 +208,49 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
     token = websocket.query_params.get("token", "")
 
     st = CallState()
+    public_host = websocket.headers.get("host", "")
+    working_sound_url = f"https://{public_host}{config.WORKING_SOUND_PATH}" if public_host else ""
+
+    async def _recover_stuck_audio(reply_text: str, sent_from: float) -> bool:
+        """Twilio gives no ack for text frames; its agent-start speaker event is
+        the only sign playback began. If none arrives within
+        STUCK_AUDIO_RECOVERY_SECONDS -- after the chime `play`, if one was sent
+        this turn, otherwise after the reply's first frame -- the TTS queue is
+        treated as stuck (seen 2026-10-13: a chime that Twilio never fetched
+        silenced every later reply). Resend the reply as a fresh talk cycle,
+        which preempts the stuck media, and stop using the chime this call."""
+        wait = config.STUCK_AUDIO_RECOVERY_SECONDS
+        # Only once Twilio has shown it sends speaker events on this call
+        # (the greeting's agent-start), so a missing event stream can't
+        # cause spurious resends.
+        if wait <= 0 or not st.last_agent_start_at:
+            return False
+        # Only a pending chime has ever stalled Twilio's queue. On other turns
+        # the reply often plays straight on from the filler with no fresh
+        # agent-start, which looked "stuck" and caused a repeated reply
+        # (2026-10-13 09:22 call).
+        if not st.working_play_sent:
+            return False
+        loop = asyncio.get_event_loop()
+        since = st.working_play_sent_at if st.working_play_sent else sent_from
+        deadline = loop.time() + wait
+        while loop.time() < deadline:
+            if st.last_agent_start_at >= since:
+                return False
+            await asyncio.sleep(0.05)
+        if st.last_agent_start_at >= since:
+            return False
+        logger.warning(
+            "No Twilio playback %.1fs after reply%s; resending without chime",
+            wait, " (chime pending)" if st.working_play_sent else "",
+        )
+        st.chime_disabled = True
+        st.working_play_sent = False
+        st.reply_text_after_play = False
+        await websocket.send_json(
+            {"type": "text", "token": reply_text, "last": True, "preemptible": True}
+        )
+        return True
 
     async def respond_to(input_text: str, filler_eligible: bool) -> None:
         # Every frame is marked preemptible so that if this turn is still
@@ -189,6 +262,15 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         start_time = asyncio.get_event_loop().time()
         reply_text = ""
         filler = None
+        tool_call_seen = False
+        slow_tool_seen = False
+        tool_names: tuple = ()
+        after_tool = False
+        working_sound_on = False
+        # The caller said something new, so any earlier endCall is void.
+        st.guide.end_call_requested = False
+        st.working_play_sent = False
+        st.reply_text_after_play = False
         audio_started_at: float | None = None
         gen = stream_reply(input_text, st.guide)
         pending: asyncio.Future | None = None
@@ -197,6 +279,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         # module docstring for the GuideAnts-side half of this picture.
         twilio_send_start: float | None = None
         twilio_frame_count = 0
+        joiner = PhraseJoiner(config.SPOKEN_JOIN_PHRASES)
 
         def _queued_audio_seconds() -> float:
             """Best-effort estimate of TTS audio still unplayed from what's
@@ -228,17 +311,52 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         # gets its own filler, so the caller is never sitting in true
         # silence for long.
         async def next_event():
-            nonlocal pending, filler
+            nonlocal pending, filler, tool_call_seen, working_sound_on, tool_names
             pending = asyncio.ensure_future(gen.__anext__())
-            if filler_eligible:
+            # Known-slow tools always get the filler (+ working sound), even
+            # when the caller's turn wasn't a question ("Yes." before a booking).
+            if (filler_eligible or slow_tool_seen) and (
+                tool_call_seen or not config.FILLER_ONLY_FOR_TOOL_CALLS
+            ):
                 done, _ = await asyncio.wait({pending}, timeout=config.FILLER_DELAY_SECONDS)
-                if pending not in done and _queued_audio_seconds() <= 0.0:
-                    phrase = fillers.pick(config.FILLER_PHRASES)
+                if (pending not in done and _queued_audio_seconds() <= 0.0 and not working_sound_on
+                        and not reply_text.strip()):
+                    phrase = fillers.pick_for_tools(
+                        tool_names, config.FILLER_PHRASES, st.last_filler,
+                        use_action_pools=config.FILLER_PHRASES == config._DEFAULT_FILLER_PHRASES,
+                    )
+                    if phrase:
+                        st.last_filler = phrase
+                    play_working = bool(
+                        slow_tool_seen and config.WORKING_SOUND_ENABLED and working_sound_url
+                        and not st.chime_disabled
+                    )
                     if phrase:
                         filler = phrase
+                        if not st.reply_first_frame_at:
+                            st.reply_first_frame_at = asyncio.get_event_loop().time()
                         await websocket.send_json(
                             {"type": "text", "token": phrase + " ", "last": False, "preemptible": True}
                         )
+                    if play_working:
+                        working_sound_on = True  # one attempt per wait
+                        # Only once the filler has finished playing, and only
+                        # if the answer still isn't back: then a one-shot
+                        # ~8s chime (no loop), so it can never run on.
+                        filler_secs = (
+                            speech_timing.estimate_seconds(phrase, config.TTS_WORDS_PER_SECOND) + 0.3
+                            if phrase else 0.0
+                        )
+                        done, _ = await asyncio.wait({pending}, timeout=filler_secs)
+                        if pending not in done:
+                            await websocket.send_json(
+                                {"type": "play", "source": working_sound_url, "loop": 1,
+                                 "preemptible": True, "interruptible": True}
+                            )
+                            st.working_play_sent = True
+                            st.working_play_sent_at = asyncio.get_event_loop().time()
+                            st.reply_text_after_play = False
+                            logger.info("Working sound started (tool wait)")
             try:
                 return await pending
             except StopAsyncIteration:
@@ -250,6 +368,12 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                 if event is None:
                     break
                 if isinstance(event, ToolCallStarted):
+                    if held := joiner.flush():
+                        await websocket.send_json(
+                            {"type": "text", "token": held, "last": False, "preemptible": True}
+                        )
+                        reply_text += held
+                        st.partial_reply = reply_text
                     # The guide (or narration ahead of it) may already have
                     # gone quiet by the time this arrives -- the caller
                     # hears silence until the next Delta, which can be
@@ -257,10 +381,30 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                     # softens barge-in for that gap; see the `prompt`
                     # handler below.
                     st.tool_call_started_at = asyncio.get_event_loop().time()
+                    tool_call_seen = True
+                    tool_names = tuple(event.names)
+                    if set(event.names) & config.WORKING_SOUND_TOOLS:
+                        slow_tool_seen = True
                     logger.info("Client tool call(s) in flight: %s", ", ".join(event.names))
+                    after_tool = True
                     continue
+                if after_tool:
+                    # Every frame is preemptible, so text arriving after a
+                    # tool call would cut off whatever is still playing (the
+                    # filler or words spoken before the tool) mid-sentence.
+                    # Let that finish first (bounded).
+                    after_tool = False
+                    waited = 0.0
+                    while _queued_audio_seconds() > 0.05 and waited < 10.0:
+                        await asyncio.sleep(0.05)
+                        waited += 0.05
                 st.tool_call_started_at = 0.0
-                token = event.text
+                working_sound_on = False  # this text preempts the sound
+                if st.working_play_sent:
+                    st.reply_text_after_play = True
+                token = joiner.feed(event.text)
+                if not token:
+                    continue  # held: part of a protected phrase still arriving
                 if reply_text and not reply_text[-1].isspace() and not token[:1].isspace():
                     # Round boundary (e.g. narration, then a tool call, then
                     # the final answer): without this, adjacent rounds run
@@ -270,6 +414,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                     token = " " + token
                 if twilio_send_start is None:
                     twilio_send_start = asyncio.get_event_loop().time()
+                    st.reply_first_frame_at = twilio_send_start
                     logger.info(
                         "TIMING: GuideAnts request sent -> first token ready to send to Twilio: %.3fs",
                         twilio_send_start - start_time,
@@ -282,8 +427,19 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                     audio_started_at = asyncio.get_event_loop().time()
                 reply_text += token
                 st.partial_reply = reply_text
+            if held := joiner.flush():
+                if twilio_send_start is None:
+                    twilio_send_start = asyncio.get_event_loop().time()
+                    st.reply_first_frame_at = twilio_send_start
+                await websocket.send_json({"type": "text", "token": held, "last": False, "preemptible": True})
+                twilio_frame_count += 1
+                if audio_started_at is None:
+                    audio_started_at = asyncio.get_event_loop().time()
+                reply_text += held
+                st.partial_reply = reply_text
             await websocket.send_json({"type": "text", "token": "", "last": True, "preemptible": True})
-            if twilio_send_start is not None:
+            if reply_text and twilio_send_start is not None:
+                await _recover_stuck_audio(reply_text, twilio_send_start)
                 # "last frame sent" is the honest number here -- Twilio gives
                 # no application-level ack that it received a text frame, so
                 # this is when *we* finished handing the reply over, not
@@ -336,6 +492,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         # see module docstring).
         if reply_text:
             st.messages.append({"role": "assistant", "content": reply_text})
+            logger.info("Agent said: %r", reply_text[:400])
             st.guide_awaiting_answer = reply_text.rstrip().endswith("?")
             # Cleared so a later barge-in cancellation (which lands during
             # the pacing sleep below, not during generation) doesn't re-append
@@ -380,8 +537,85 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
             remaining = estimated_duration - (asyncio.get_event_loop().time() - start_time)
             if remaining > 0:
                 await asyncio.sleep(remaining)
+        if st.guide.end_call_requested and reply_text:
+            await _end_call()
+        elif st.guide.end_call_requested:
+            # The guide hung up without saying anything (18:46 false start:
+            # the caller heard silence) -- say the ready-made goodbye first.
+            logger.info("endCall with no spoken goodbye; playing the ready-made goodbye first")
+            await _canned_goodbye()
+        elif reply_text and config.AUTO_END_CALL_ENABLED:
+            # Backup when the guide said goodbye but didn't call endCall.
+            assistants = [x["content"] for x in st.messages if x["role"] == "assistant"]
+            users = [x["content"] for x in st.messages if x["role"] == "user"]
+            previous_agent = assistants[-2] if len(assistants) >= 2 else ""
+            if users and call_end.should_end(previous_agent, users[-1], reply_text):
+                logger.info("Caller is done and reply was a goodbye; ending call (server-side backup)")
+                await _end_call()
+
+    async def _end_call() -> None:
+        """Goodbye has finished playing: hand the call back to Twilio, which
+        reaches the <Hangup/> after <Connect> and ends the call."""
+        st.guide.end_call_requested = False
+        await asyncio.sleep(config.END_CALL_AFTER_PLAYBACK_SECONDS)
+        logger.info("Caller is done; ending ConversationRelay session (endCall)")
+        with contextlib.suppress(Exception):
+            await websocket.send_json(
+                {"type": "end", "handoffData": json.dumps({"reasonCode": "caller-done"})}
+            )
+
+    async def _canned_goodbye() -> None:
+        """Speak the ready-made goodbye, wait for it to finish playing, then
+        hang up the same way endCall does."""
+        text = canned_goodbye_text()
+        st.reply_first_frame_at = asyncio.get_event_loop().time()
+        await websocket.send_json({"type": "text", "token": text, "last": True, "preemptible": True})
+        st.messages.append({"role": "assistant", "content": text})
+        estimated = speech_timing.estimate_seconds(text, config.TTS_WORDS_PER_SECOND)
+        if st.agent_stop_seen:
+            st.playback_done.clear()
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(st.playback_done.wait(), timeout=estimated * 1.5 + 2.0)
+        else:
+            await asyncio.sleep(estimated)
+        await _end_call()
+
+    def _wants_canned_goodbye(user_text: str) -> bool:
+        if not config.CANNED_GOODBYE_ENABLED:
+            return False
+        assistants = [x["content"] for x in st.messages if x["role"] == "assistant"]
+        last_agent = assistants[-1] if assistants else ""
+        # Only right after "anything else?" -- anywhere else (mid-booking) the
+        # model handles it. caller_done() also covers "bye"/"goodbye".
+        return call_end.asked_anything_else(last_agent) and call_end.caller_done(user_text)
+
+    def _one_word_name_reply() -> bool:
+        """The agent just asked for the caller's name and all we have so far is
+        one word -- likely a first name with the last name still coming."""
+        if config.NAME_EXTRA_WAIT_SECONDS <= 0:
+            return False
+        words = (st.pending_text or "").split()
+        if len(words) != 1:
+            return False
+        agent = [x["content"] for x in st.messages if x["role"] == "assistant"]
+        last = (agent[-1] if agent else "").lower()
+        return "name" in last and "spell" not in last and "?" in last
 
     def start_reply(user_text: str) -> None:
+        _agent_lines = [x["content"] for x in st.messages if x["role"] == "assistant"]
+        fixed = stt_fixups.fix_choice(_agent_lines[-1] if _agent_lines else "", user_text)
+        if fixed != user_text:
+            logger.info("Heard %r after 'text or email?'; treating it as %r", user_text, fixed)
+            user_text = fixed
+        if _wants_canned_goodbye(user_text):
+            st.messages.append({"role": "user", "content": user_text})
+            st.interrupted_reply = None
+            st.partial_reply = ""
+            st.playback_text = ""
+            st.guide_awaiting_answer = False
+            logger.info("Caller is done after 'anything else?'; ready-made goodbye, no model turn")
+            st.task = asyncio.create_task(_canned_goodbye())
+            return
         input_text = build_input(user_text, st.interrupted_reply)
         if st.interrupted_reply:
             logger.info("Folding interruption note into next turn: %r", input_text)
@@ -394,6 +628,8 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
         st.task = asyncio.create_task(respond_to(input_text, fillers.looks_like_question(user_text)))
 
     def _arm_commit(delay: float) -> None:
+        if delay < PENDING_TURN_CEILING_SECONDS and _one_word_name_reply():
+            delay += config.NAME_EXTRA_WAIT_SECONDS
         if st.pending_commit and not st.pending_commit.done():
             st.pending_commit.cancel()
         st.pending_commit = asyncio.create_task(_commit_pending_after(delay))
@@ -463,11 +699,15 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
 
                 authenticated = True
                 st.guide.caller_phone = msg.get("from")
+                if config.FAST_TOOLS_ENABLED and config.BOOQABLE_API_KEY and st.guide.prefetch_task is None:
+                    st.guide.prefetch_task = asyncio.create_task(caller_context.prefetch_booqable(st.guide))
+                if config.KNOWN_CALLER_NOTE_ENABLED and config.BOOQABLE_API_KEY and st.guide.caller_lookup_task is None:
+                    st.guide.caller_lookup_task = asyncio.create_task(caller_context.lookup_known_caller(st.guide))
                 logger.info(
                     "Call setup: callSid=%s from=%s to=%s",
                     msg.get("callSid"),
-                    msg.get("from"),
-                    msg.get("to"),
+                    mask_phone(msg.get("from")),
+                    mask_phone(msg.get("to")),
                 )
 
             elif not authenticated:
@@ -569,6 +809,17 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                         # is_backchannel() check below and treat it as a
                         # real turn.
                         schedule_turn(text)
+                    elif (
+                        config.IGNORE_FIRST_BARE_GREETING
+                        and not st.bare_greeting_ignored
+                        and not any(m["role"] == "user" for m in st.messages)
+                        and call_end.is_bare_greeting(text)
+                    ):
+                        # The welcome greeting already asked how to help; a
+                        # lone "hi" is the caller (or line noise) starting --
+                        # wait for the actual request instead of greeting again.
+                        st.bare_greeting_ignored = True
+                        logger.info("Ignored bare first-turn greeting (waiting for more speech): %r", text)
                     elif fillers.is_backchannel(text, config.EXTRA_BACKCHANNEL_PHRASES):
                         # STT can finish transcribing a short "ok" after the
                         # reply has already finished playing, so this branch
@@ -590,23 +841,47 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
             elif msg_type == "error":
                 logger.error("Conversation Relay error: %s", msg.get("description"))
 
+            elif msg_type == "info" and msg.get("name") == "mediaPlaying":
+                if msg.get("value") == "on" and st.reply_text_after_play:
+                    # The chime only started after the reply had begun (Twilio
+                    # fetched it late and queued it behind the reply): cut it.
+                    logger.info("Working sound started after the reply; cutting it")
+                    with contextlib.suppress(Exception):
+                        await websocket.send_json(
+                            {"type": "text", "token": " ", "last": True, "preemptible": True}
+                        )
+                    st.reply_text_after_play = False
+                elif msg.get("value") == "off":
+                    st.working_play_sent = False
+                    st.reply_text_after_play = False
+
             # Only unhandled types reach the classifier, so a prompt whose
             # transcript happens to mention "agent speaking" can't match.
             elif (speaker_kind := speaker_events.classify(msg)) is not None:
                 if speaker_kind == "agent-stop":
                     st.agent_stop_seen = True
                     st.playback_done.set()
-                elif speaker_kind == "agent-start" and st.last_reply_sent_at:
+                elif speaker_kind == "agent-start" and not st.reply_first_frame_at:
+                    st.last_agent_start_at = asyncio.get_event_loop().time()
+                elif speaker_kind == "agent-start" and st.reply_first_frame_at:
+                    st.last_agent_start_at = asyncio.get_event_loop().time()
                     # Closest thing to a receipt Twilio gives back for a
                     # reply's text frames: not an ack of receiving them, but
                     # confirmation it has started speaking them, which it
                     # can't do without having received (and TTS'd) them
                     # first. Compare against respond_to()'s "last frame
                     # sent" TIMING log to see the app -> Twilio gap in full.
+                    now = asyncio.get_event_loop().time()
                     logger.info(
-                        "TIMING: last frame sent to Twilio -> Twilio agent-start (playback begins): %.3fs",
-                        asyncio.get_event_loop().time() - st.last_reply_sent_at,
+                        "TIMING: first frame sent to Twilio -> Twilio agent-start (playback begins): %.3fs",
+                        now - st.reply_first_frame_at,
                     )
+                    if st.client_stop_at and st.client_stop_at < st.reply_first_frame_at:
+                        logger.info(
+                            "TIMING: caller stopped speaking -> agent playback begins: %.3fs",
+                            now - st.client_stop_at,
+                        )
+                    st.reply_first_frame_at = 0.0
                 elif speaker_kind == "client-start":
                     st.client_speaking = True
                     # The caller resumed while a turn was buffered: hold the
@@ -617,6 +892,7 @@ async def conversation_relay_ws(websocket: WebSocket) -> None:
                     if st.pending_text:
                         _arm_commit(PENDING_TURN_CEILING_SECONDS)
                 elif speaker_kind == "client-stop":
+                    st.client_stop_at = asyncio.get_event_loop().time()
                     st.client_speaking = False
                     # The continuation's transcript trails this event by STT
                     # finalization time, so give it TURN_RESUME_GRACE_SECONDS

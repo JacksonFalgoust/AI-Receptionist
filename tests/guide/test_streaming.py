@@ -478,7 +478,7 @@ def test_streamed_tool_call_round_trip_yields_tool_call_started_then_text(monkey
         {
             "type": "function_call_output",
             "call_id": "call_1",
-            "output": json.dumps({"phone_number": "+15551234567"}),
+            "output": json.dumps({"phone_number": "+15551234567", "last_four": "4567", "last_four_spoken": "4, 5, 6, 7"}),
         }
     ]
     assert tool_call_stream.closed

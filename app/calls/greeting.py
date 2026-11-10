@@ -9,6 +9,8 @@ from app import config
 from app.booking import reservations
 from app.booking.booqable_client import BooqableClient, BooqableError
 
+from .spoken_text import fill_business
+
 logger = logging.getLogger("voice_receptionist")
 
 
@@ -33,12 +35,12 @@ def _published_greeting() -> str:
                     "greeting"
                 )
                 if greeting:
-                    return greeting
+                    return fill_business(greeting)
         finally:
             session.close()
     except Exception:  # noqa: BLE001 -- never block answering a call
         logger.warning("could not read published greeting; using the default", exc_info=True)
-    return config.WELCOME_GREETING
+    return fill_business(config.WELCOME_GREETING)
 
 
 async def greeting_for(from_number: str) -> str:

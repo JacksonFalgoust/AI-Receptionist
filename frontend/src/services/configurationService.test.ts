@@ -16,10 +16,10 @@ describe('configurationService (live)', () => {
   beforeEach(() => vi.clearAllMocks())
 
   it('reads the configuration', async () => {
-    vi.mocked(http.get).mockResolvedValue({ businessProfile: { name: 'Peachtree Pedals' } })
+    vi.mocked(http.get).mockResolvedValue({ businessProfile: { name: 'Atlanta Bikes' } })
     const result = await configurationService.getConfiguration()
     expect(http.get).toHaveBeenCalledWith('/concierge/configuration')
-    expect(result.businessProfile.name).toBe('Peachtree Pedals')
+    expect(result.businessProfile.name).toBe('Atlanta Bikes')
   })
 
   it('patches a single section', async () => {

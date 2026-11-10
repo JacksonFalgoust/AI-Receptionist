@@ -2,6 +2,7 @@
 input text."""
 
 from dataclasses import dataclass, field
+from typing import Any
 
 # How much of an interrupted reply to quote back to the guide. Long enough to
 # give real context, short enough not to balloon the prompt.
@@ -32,6 +33,31 @@ class GuideSession:
     # The matched Booqable customer record from that lookup, or None if not
     # yet checked, no match was found, or the lookup failed/timed out.
     known_customer: dict | None = None
+    # Per-call caches for Booqable data that doesn't change mid-call: the
+    # catalog (listCatalog) and the resolved default location. Saves the
+    # repeat product_groups/locations GETs on later tool turns.
+    catalog_cache: list | None = None
+    # All text the model produced so far in the current caller turn (every
+    # round, spoken or not) -- used by the sendPaymentLink guard.
+    round_text: str = ""
+    # Background Booqable prefetch started at call setup (see prefetch_booqable).
+    prefetch_task: Any = None
+    # Set when the guide calls endCall; app/calls/relay.py ends the ConversationRelay
+    # session once the current reply's playback finishes.
+    end_call_requested: bool = False
+    location_cache: dict | None = None
+    # Background known-caller lookup started at call setup (see
+    # lookup_known_caller); the first turn's input carries its result.
+    caller_lookup_task: Any = None
+    # Booking-confirmation guard: the previous turn's agent text and this
+    # turn's caller text (see booking_confirmed).
+    prev_round_text: str = ""
+    turn_user_text: str = ""
+    # Set when the caller said yes to a recap: the booking details it covered
+    # (see _booking_key). Lets createReservation through after a phone/email
+    # side question without a second recap, if the details are unchanged.
+    recap_yes_key: str | None = None
+    known_caller_note_sent: bool = False
     # Business-language log of every reservation tool this call actually
     # ran, in call order -- persisted as ConversationAction rows by
     # app/calls/call_recording.py at call end. Not sent to GuideAnts; purely an

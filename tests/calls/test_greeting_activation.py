@@ -17,6 +17,7 @@ from sqlalchemy.pool import StaticPool
 from app import config, db as db_module, models
 from app.db import Base
 from app.calls.greeting import greeting_for
+from app.calls.spoken_text import fill_business
 
 
 @pytest.fixture
@@ -49,7 +50,7 @@ def _publish(factory, greeting, status="succeeded"):
 
 
 def test_no_publication_falls_back_to_the_env_greeting(session_factory):
-    assert asyncio.run(greeting_for("")) == config.WELCOME_GREETING
+    assert asyncio.run(greeting_for("")) == fill_business(config.WELCOME_GREETING)
 
 
 def test_published_greeting_is_used(session_factory):
@@ -59,7 +60,7 @@ def test_published_greeting_is_used(session_factory):
 
 def test_failed_publication_is_ignored(session_factory):
     _publish(session_factory, "Never spoken", status="failed")
-    assert asyncio.run(greeting_for("")) == config.WELCOME_GREETING
+    assert asyncio.run(greeting_for("")) == fill_business(config.WELCOME_GREETING)
 
 
 def test_most_recent_succeeded_publication_wins(session_factory):
@@ -76,4 +77,4 @@ def test_database_failure_falls_back_without_raising(session_factory, monkeypatc
         raise RuntimeError("database gone")
 
     monkeypatch.setattr(db_module, "SessionLocal", boom)
-    assert asyncio.run(greeting_for("")) == config.WELCOME_GREETING
+    assert asyncio.run(greeting_for("")) == fill_business(config.WELCOME_GREETING)

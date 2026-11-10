@@ -73,7 +73,7 @@ const mockConfigurationService: ConfigurationService = {
   async preview() {
     await delay()
     return {
-      instructions: 'You are the phone receptionist for Peachtree Pedals...',
+      instructions: 'You are the phone receptionist for Atlanta Bikes...',
       contentHash: 'mock-hash',
       knowledgeItemCount: store.knowledge.length,
       changed: store.conciergeConfiguration.hasUnpublishedChanges,

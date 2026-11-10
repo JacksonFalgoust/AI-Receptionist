@@ -34,6 +34,7 @@ EXPECTED_OPERATION_IDS = frozenset(
         "cancelReservation",
         "sendPaymentLink",
         "get_caller_phone_number",
+        "endCall",
     }
 )
 

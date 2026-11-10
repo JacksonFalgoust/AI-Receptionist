@@ -1,3 +1,4 @@
+from app.calls.spoken_text import fill_business
 import asyncio
 
 from fastapi.testclient import TestClient
@@ -98,7 +99,7 @@ def test_twiml_malformed_greeting_template_falls_back_to_default_greeting(monkey
 
     assert response.status_code == 200
     assert "wss://testserver/ws?token=" in response.text
-    assert config.WELCOME_GREETING in response.text
+    assert fill_business(config.WELCOME_GREETING) in response.text
 
 
 def test_twiml_unknown_customer_falls_back_to_default_greeting(monkeypatch):
@@ -120,7 +121,7 @@ def test_twiml_unknown_customer_falls_back_to_default_greeting(monkeypatch):
 
     assert response.status_code == 200
     assert "wss://testserver/ws?token=" in response.text
-    assert config.WELCOME_GREETING in response.text
+    assert fill_business(config.WELCOME_GREETING) in response.text
 
 
 def test_twiml_lookup_raises_falls_back_to_default_greeting(monkeypatch):
@@ -142,7 +143,7 @@ def test_twiml_lookup_raises_falls_back_to_default_greeting(monkeypatch):
 
     assert response.status_code == 200
     assert "wss://testserver/ws?token=" in response.text
-    assert config.WELCOME_GREETING in response.text
+    assert fill_business(config.WELCOME_GREETING) in response.text
 
 
 def test_twiml_lookup_timeout_falls_back_to_default_greeting(monkeypatch):
@@ -166,4 +167,4 @@ def test_twiml_lookup_timeout_falls_back_to_default_greeting(monkeypatch):
 
     assert response.status_code == 200
     assert "wss://testserver/ws?token=" in response.text
-    assert config.WELCOME_GREETING in response.text
+    assert fill_business(config.WELCOME_GREETING) in response.text

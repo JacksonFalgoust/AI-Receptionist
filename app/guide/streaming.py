@@ -18,6 +18,7 @@ next call automatically falls back to starting a fresh conversation --
 earlier context for that call is lost, but the caller still gets an answer.
 """
 
+import asyncio
 import contextlib
 import logging
 from dataclasses import dataclass, field
@@ -28,7 +29,9 @@ from openai import AsyncOpenAI
 
 from app import config
 
-from . import connection, sentinel, tools
+from app.calls import call_end
+
+from . import caller_context, connection, sentinel, tools
 from .session import GuideSession
 
 logger = logging.getLogger("voice_receptionist.guide")
@@ -80,12 +83,24 @@ def _collect_function_calls(output: Any, outcome: "_TurnOutcome") -> None:
             seen.add(item.call_id)
 
 
+# Safe to run concurrently within one round: no writes, no ordering needs.
+_READ_ONLY_TOOLS = frozenset({"listCatalog", "checkAvailability", "listCustomers", "findReservations"})
+
+
 async def _tool_outputs(outcome: "_TurnOutcome", session: GuideSession) -> list[dict[str, str]]:
-    outputs = []
-    for call_id, name, arguments in outcome.function_calls:
-        output = await tools.execute_tool(name, arguments, session)
-        outputs.append({"type": "function_call_output", "call_id": call_id, "output": output})
-    return outputs
+    calls = outcome.function_calls
+    if (
+        config.FAST_TOOLS_ENABLED
+        and len(calls) > 1
+        and all(name in _READ_ONLY_TOOLS for _, name, _ in calls)
+    ):
+        results = await asyncio.gather(*(tools.execute_tool(n, a, session) for _, n, a in calls))
+    else:
+        results = [await tools.execute_tool(n, a, session) for _, n, a in calls]
+    return [
+        {"type": "function_call_output", "call_id": call_id, "output": output}
+        for (call_id, _, _), output in zip(calls, results)
+    ]
 
 
 async def _start_conversation(
@@ -281,15 +296,30 @@ async def _stream_reply_with_tools(
     and then cut off same as the buffering branches' worst case; this is
     logged as a warning since it means the guide said the marker too early."""
     next_input: Any = user_text
+    spoken_so_far = ""
+    # Set once a round has already spoken a goodbye and then called endCall:
+    # the follow-up round (the guide answering the endCall result) is
+    # consumed but not spoken, so the caller never hears the goodbye twice.
+    mute = False
     for i in range(_MAX_TOOL_ITERATIONS):
         outcome = _TurnOutcome()
         gate = sentinel.SentinelGate()
+        if i == 0:
+            session.prev_round_text = session.round_text
+            session.turn_user_text = user_text if isinstance(user_text, str) else ""
+            session.round_text = ""
         async with contextlib.aclosing(_stream_turn(client, next_input, session, outcome)) as gen:
             async for delta in gen:
-                if text := gate.feed(delta):
+                session.round_text += delta
+                if (text := gate.feed(delta)) and not mute:
+                    spoken_so_far += text
                     yield Delta(text)
+        if mute and not gate.open and gate.retained:
+            logger.info("Goodbye already spoken before endCall; not repeating it: %r", gate.retained)
 
         if not outcome.function_calls:  # final round
+            if mute:
+                return
             if not gate.open:  # FAILSAFE: phrase never arrived this turn
                 if text := sentinel.strip_sentinel(gate.retained):
                     yield Delta(text)
@@ -297,6 +327,33 @@ async def _stream_reply_with_tools(
                     "No trigger phrase this turn; speaking the round unstreamed (failsafe)"
                 )
             return
+
+        names = [name for _, name, _ in outcome.function_calls]
+        if (
+            gate.emitted_any
+            and names
+            and all(n == "endCall" for n in names)
+            and call_end.reply_is_goodbye(spoken_so_far)
+        ):
+            logger.info("Goodbye spoken in the same round as endCall; the follow-up round stays silent")
+            mute = True
+            yield ToolCallStarted(tuple(names))
+            next_input = await _tool_outputs(outcome, session)
+            continue
+        if (
+            gate.emitted_any
+            and names
+            and all(n == "sendPaymentLink" for n in names)
+            and "?" in spoken_so_far
+        ):
+            # The guide asked "shall I text you…?" and called sendPaymentLink
+            # in the same round. The send guard refuses it (NOT SENT); the
+            # follow-up round stays silent so the question isn't asked twice
+            # and the caller's answer isn't talked over (22:14 call).
+            logger.info("Text offer asked in the same round as sendPaymentLink; waiting for the answer")
+            mute = True  # no ToolCallStarted either: no "One moment." filler after the question
+            next_input = await _tool_outputs(outcome, session)
+            continue
 
         if i == _MAX_TOOL_ITERATIONS - 1:
             logger.warning(
@@ -344,6 +401,8 @@ async def stream_reply(
     than opening fresh conversations forever.
     """
     client = connection.get_client()
+    if not _is_retry:
+        user_text = await caller_context._with_known_caller_note(user_text, session)
 
     if session.conversation_id is None and session.stream_missing_conversation:
         async for event in _start_conversation(client, user_text, session):
