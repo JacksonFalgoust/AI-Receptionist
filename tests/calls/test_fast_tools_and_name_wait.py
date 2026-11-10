@@ -108,6 +108,7 @@ def _name_call(monkeypatch, first_reply_words, gap):
         ws.send_json({"type": "setup", "callSid": sid, "from": "+15551234567", "to": "+15557654321"})
         ws.send_json({"type": "prompt", "voicePrompt": "I want to book.", "last": True})
         _drain_until_last(ws, timeout=2.0)
+        time.sleep(0.2)  # let the first reply's playback hold end (else this is a mid-reply barge-in)
         ws.send_json({"type": "prompt", "voicePrompt": first_reply_words, "last": True})
         time.sleep(gap)
         ws.send_json({"type": "prompt", "voicePrompt": "White.", "last": True})

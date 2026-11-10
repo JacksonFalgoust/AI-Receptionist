@@ -4,6 +4,7 @@ from app.calls.spoken_text import canned_goodbye_text
 from app.calls import relay
 import asyncio
 import json
+import time
 
 from fastapi.testclient import TestClient
 
@@ -14,6 +15,10 @@ from app.main import app
 from tests.calls.test_streaming_and_tool_barge_in import _drain_until_last, _read_or_timeout
 
 client = TestClient(app)
+# The reply task holds open for its estimated playback time (~10 ms at the test's
+# TTS rate) after the last frame; a prompt sent inside that window is a
+# mid-reply interruption, not a new turn.
+_PLAYBACK_SETTLE = 0.2
 AGENT_ON = {"type": "info", "name": "agentSpeaking", "value": "on"}
 
 
@@ -54,6 +59,7 @@ def _two_turns(monkeypatch, second, sid):
         ws.send_json({"type": "setup", "callSid": sid, "from": "+15551234567", "to": "+15557654321"})
         ws.send_json({"type": "prompt", "voicePrompt": "Book it please.", "last": True})
         _drain_until_last(ws)
+        time.sleep(_PLAYBACK_SETTLE)  # let the reply's playback hold end
         ws.send_json({"type": "prompt", "voicePrompt": second, "last": True})
         frames = _frames(ws, timeout=1.5)
     return calls, frames
@@ -87,6 +93,7 @@ def test_no_canned_goodbye_mid_booking(monkeypatch):
         ws.send_json({"type": "setup", "callSid": sid, "from": "+15551234567", "to": "+15557654321"})
         ws.send_json({"type": "prompt", "voicePrompt": "Book it.", "last": True})
         _drain_until_last(ws)
+        time.sleep(_PLAYBACK_SETTLE)  # let the reply's playback hold end
         ws.send_json({"type": "prompt", "voicePrompt": "No.", "last": True})
         frames = _frames(ws)
     assert len(calls) == 2 and not [f for f in frames if f["type"] == "end"]
