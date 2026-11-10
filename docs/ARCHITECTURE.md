@@ -581,7 +581,9 @@ GuideAnts hands
 each unresolved `function_call` back to this app, same as
 `get_caller_phone_number`; there's no `/api/reservations/*` HTTP surface
 anymore (`app/booking/api.py` now only serves `/api/booqable/ping`, a
-manual connectivity check). None of this touches the Twilio WS path directly
+manual connectivity check; the one other HTTP route over Booqable is the
+console's read-only `GET /api/bookings` in `app/console/bookings/api.py`, which
+only issues GETs via `app/booking/orders.py`). None of this touches the Twilio WS path directly
 either — no streaming, no per-call state — it's plain async function calls
 made from inside `execute_tool`/`_run_reservation_tool` while a tool-call
 round-trip is in flight for some call's turn.

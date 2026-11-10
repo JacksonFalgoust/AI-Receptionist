@@ -15,6 +15,7 @@ from app.calls.twiml import router as twiml_router
 from app.console.auth.api import router as auth_router
 from app.console.concierge.api import router as concierge_router
 from app.console.conversations.api import router as conversations_router
+from app.console.bookings.api import router as bookings_router
 from app.console.dashboard.api import router as dashboard_router
 from app.console.knowledge.api import router as knowledge_router
 from app.console.workflows.api import router as workflow_router
@@ -63,6 +64,7 @@ app.include_router(reservations_router)
 app.include_router(auth_router)
 app.include_router(concierge_router)
 app.include_router(conversations_router)
+app.include_router(bookings_router)
 app.include_router(dashboard_router)
 app.include_router(knowledge_router)
 app.include_router(workflow_router)

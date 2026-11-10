@@ -1,15 +1,22 @@
 """Classify Booqable orders into console bookings and compute the page summary.
 
-Pure logic, no I/O. Read-only against Booqable; called only by
+Pure logic plus read-only (GET) Booqable loading; called only by
 app/console/bookings/api.py.
 """
 
+import asyncio
+import time
 from dataclasses import dataclass
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, datetime, timedelta
+from datetime import time as day_time
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from app.booking.reservations import _customer_phone
+import httpx
+
+from app import config
+from app.booking.booqable_client import BooqableClient, BooqableError
+from app.booking.reservations import _customer_phone, _order_line_items
 
 View = Literal["upcoming", "past"]
 Label = Literal["out_now", "overdue", "not_picked_up", "returned", "canceled"]
@@ -122,8 +129,8 @@ def sort_for_view(bookings: list[Booking], view: View) -> list[Booking]:
 
 def summarize(bookings: list[Booking], now: datetime, tz: ZoneInfo) -> BookingSummary:
     today = now.astimezone(tz).date()
-    window_start = datetime.combine(today, time.min, tzinfo=tz)
-    window_end = datetime.combine(today + timedelta(days=7), time.min, tzinfo=tz)
+    window_start = datetime.combine(today, day_time.min, tzinfo=tz)
+    window_end = datetime.combine(today + timedelta(days=7), day_time.min, tzinfo=tz)
     upcoming = [b for b in bookings if b.view == "upcoming"]
     return BookingSummary(
         pickups_today=sum(1 for b in upcoming if b.starts_at and b.starts_at.astimezone(tz).date() == today),
@@ -131,3 +138,51 @@ def summarize(bookings: list[Booking], now: datetime, tz: ZoneInfo) -> BookingSu
         next_7_days=sum(1 for b in upcoming if b.starts_at and window_start <= b.starts_at < window_end),
         unpaid=sum(1 for b in upcoming if b.payment != "paid"),
     )
+
+
+# --- loading (read-only GETs against Booqable) ---
+
+CACHE_TTL_SECONDS = 30
+LINE_FETCH_CONCURRENCY = 5
+
+_cache: tuple[float, list[dict[str, Any]], list[dict[str, Any]], datetime] | None = None
+
+
+def clear_cache() -> None:
+    global _cache
+    _cache = None
+
+
+async def load_orders(
+    client: BooqableClient, *, refresh: bool = False
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], datetime]:
+    """(orders, included, fetched_at). Cached for CACHE_TTL_SECONDS; fetched_at is
+    when Booqable was actually queried, not when this request arrived."""
+    global _cache
+    if not refresh and _cache is not None and time.monotonic() - _cache[0] < CACHE_TTL_SECONDS:
+        return _cache[1], _cache[2], _cache[3]
+    data, included = await client.list_all_with_included("orders", params={"include": "customer"})
+    fetched_at = datetime.now(UTC)
+    _cache = (time.monotonic(), data, included, fetched_at)
+    return data, included, fetched_at
+
+
+async def fetch_line_items(
+    client: BooqableClient, order_ids: list[str]
+) -> dict[str, list[dict[str, Any]] | None]:
+    """Booked-product lines per order id; an id whose fetch fails maps to None."""
+    semaphore = asyncio.Semaphore(LINE_FETCH_CONCURRENCY)
+
+    async def one(order_id: str) -> tuple[str, list[dict[str, Any]] | None]:
+        async with semaphore:
+            try:
+                payload = await client.get(f"orders/{order_id}", params={"include": "lines"})
+            except (BooqableError, httpx.HTTPError):
+                return order_id, None
+        return order_id, _order_line_items(client, payload.get("included") or [])
+
+    return dict(await asyncio.gather(*(one(i) for i in order_ids)))
+
+
+def booqable_url(order_id: str) -> str:
+    return f"{config.BOOQABLE_COMPANY_URL}/orders/{order_id}"

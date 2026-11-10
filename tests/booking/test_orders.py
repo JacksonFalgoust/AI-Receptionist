@@ -1,12 +1,18 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
 
+from app.booking import orders
+from app.booking.booqable_client import BooqableError
+
 from app.booking.orders import (
     Booking,
     BookingSummary,
     classify,
+    fetch_line_items,
+    load_orders,
     parse_timestamp,
     payment_label,
     sort_for_view,
@@ -156,3 +162,101 @@ def test_summary_uses_business_day_not_utc_day():
     summary = summarize([booking], now, TZ)
     assert summary.returns_today == 1
     assert summary.pickups_today == 0
+
+
+# --- loading ---
+
+
+class FakeClient:
+    def __init__(self, pages=None, details=None):
+        self.pages = pages or []
+        self.details = details or {}
+        self.calls = []
+        self.in_flight = 0
+        self.max_in_flight = 0
+
+    @staticmethod
+    def attrs(resource):
+        return resource.get("attributes") or {}
+
+    async def list_all_with_included(self, path, *, page_size=50, params=None):
+        self.calls.append((path, params))
+        data, included = [], []
+        for page_data, page_included in self.pages:
+            data.extend(page_data)
+            included.extend(page_included)
+        return data, included
+
+    async def get(self, path, params=None):
+        self.calls.append((path, params))
+        self.in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        await asyncio.sleep(0)
+        self.in_flight -= 1
+        result = self.details[path]
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    orders.clear_cache()
+    yield
+    orders.clear_cache()
+
+
+def test_load_orders_collects_included_from_every_page():
+    client = FakeClient(
+        pages=[
+            ([{"id": f"a{i}"} for i in range(50)], [{"id": "c1", "type": "customers"}]),
+            ([{"id": f"b{i}"} for i in range(13)], [{"id": "c2", "type": "customers"}]),
+        ]
+    )
+    data, included, _ = asyncio.run(load_orders(client))
+    assert len(data) == 63
+    assert {c["id"] for c in included} == {"c1", "c2"}
+
+
+def test_load_orders_caches_for_30_seconds(monkeypatch):
+    client = FakeClient(pages=[([{"id": "a"}], [])])
+    clock = [1000.0]
+    monkeypatch.setattr(orders.time, "monotonic", lambda: clock[0])
+    asyncio.run(load_orders(client))
+    asyncio.run(load_orders(client))
+    assert len(client.calls) == 1
+    clock[0] += 31
+    asyncio.run(load_orders(client))
+    assert len(client.calls) == 2
+
+
+def test_load_orders_refresh_bypasses_cache():
+    client = FakeClient(pages=[([{"id": "a"}], [])])
+    _, _, first = asyncio.run(load_orders(client))
+    _, _, second = asyncio.run(load_orders(client, refresh=True))
+    assert len(client.calls) == 2
+    assert second >= first
+
+
+def _detail(title, quantity):
+    return {
+        "data": {"id": "x"},
+        "included": [
+            {"type": "lines", "attributes": {"line_type": "charge", "item_id": "i1", "title": title, "quantity": quantity}}
+        ],
+    }
+
+
+def test_fetch_line_items_tolerates_one_failure():
+    client = FakeClient(
+        details={"orders/o1": _detail("Kayak", 2), "orders/o2": BooqableError("boom", status_code=500)}
+    )
+    result = asyncio.run(fetch_line_items(client, ["o1", "o2"]))
+    assert result == {"o1": [{"name": "Kayak", "quantity": 2}], "o2": None}
+
+
+def test_fetch_line_items_caps_concurrency():
+    ids = [f"o{i}" for i in range(12)]
+    client = FakeClient(details={f"orders/{i}": _detail("K", 1) for i in ids})
+    asyncio.run(fetch_line_items(client, ids))
+    assert 1 <= client.max_in_flight <= 5

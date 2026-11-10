@@ -96,6 +96,36 @@ class BooqableClient:
             page += 1
         return results
 
+    async def list_all_with_included(
+        self,
+        path: str,
+        *,
+        page_size: int = 50,
+        params: dict[str, Any] | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Like list_all, but also concatenates each page's JSON:API `included`."""
+        results: list[dict[str, Any]] = []
+        included: list[dict[str, Any]] = []
+        page = 1
+        base_params = dict(params or {})
+        while True:
+            query = {
+                **base_params,
+                "page[number]": page,
+                "page[size]": page_size,
+            }
+            payload = await self.get(path, params=query)
+            data = payload.get("data") or []
+            included.extend(payload.get("included") or [])
+            if isinstance(data, dict):
+                results.append(data)
+                break
+            results.extend(data)
+            if len(data) < page_size:
+                break
+            page += 1
+        return results, included
+
     @staticmethod
     def resource(type_name: str, attributes: dict[str, Any], id: str | None = None) -> dict[str, Any]:
         data: dict[str, Any] = {"type": type_name, "attributes": attributes}
