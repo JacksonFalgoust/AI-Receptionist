@@ -14,7 +14,7 @@ const WINDOWS: Record<'7d' | '30d', number> = {
  * this must be kept in sync by hand with
  * app/console/dashboard/store.py's _today_start_utc().
  */
-const BUSINESS_TIMEZONE = 'America/New_York'
+export const BUSINESS_TIMEZONE = 'America/New_York'
 
 /**
  * BUSINESS_TIMEZONE's UTC offset, in minutes, at the given instant --

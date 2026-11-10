@@ -116,3 +116,13 @@ describe('billing statuses', () => {
     expect(statusTone('overdue')).toEqual({ tone: 'danger', label: 'Overdue' })
   })
 })
+
+describe('booking statuses', () => {
+  it('gives booking and payment labels a tone and label', () => {
+    expect(statusTone('out_now')).toEqual({ tone: 'info', label: 'Out now' })
+    expect(statusTone('not_picked_up')).toEqual({ tone: 'warning', label: 'Not picked up' })
+    expect(statusTone('returned')).toEqual({ tone: 'muted', label: 'Returned' })
+    expect(statusTone('unpaid')).toEqual({ tone: 'warning', label: 'Unpaid' })
+    expect(statusTone('partly_paid')).toEqual({ tone: 'warning', label: 'Partly paid' })
+  })
+})
