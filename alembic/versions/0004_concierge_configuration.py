@@ -4,7 +4,7 @@ Revision ID: 0004
 Revises: 0003
 Create Date: 2026-09-18
 
-Schema only. Seed data lives in app/configuration_store.py because
+Schema only. Seed data lives in app/console/concierge/store.py because
 app/db.py's create_all() -- not Alembic -- is the real runtime path.
 """
 

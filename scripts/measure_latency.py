@@ -1,12 +1,13 @@
 ﻿"""Time-to-first-spoken-token and full reply time through guide_client.stream_reply
-(the exact path app/main.py uses). Usage: python scripts/measure_latency.py [label]
+(the exact path app/calls/relay.py uses). Usage: python scripts/measure_latency.py [label]
 
 Also runs a multi-turn tool conversation in ONE session (listCatalog, then
 checkAvailability, then listCatalog again) so per-call caching shows up.
 Read-only: never books, never sends."""
 import asyncio, sys, time, json
 sys.path.insert(0, ".")
-from app.guide_client import GuideSession, Delta, ToolCallStarted, stream_reply
+from app.guide.session import GuideSession
+from app.guide.streaming import Delta, ToolCallStarted, stream_reply
 
 PROMPTS = [
     ("hours", "What are your hours today?"),

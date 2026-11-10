@@ -52,7 +52,7 @@ local tool timing harness against live read-only Booqable calls.
 - **Fix:**
   - New `endCall` tool, which hangs up after the goodbye has finished playing,
     plus `END_CALL_AFTER_PLAYBACK_SECONDS`.
-  - Server-side backup (`app/call_end.py`) for when the model says goodbye
+  - Server-side backup (`app/calls/call_end.py`) for when the model says goodbye
     without calling `endCall`.
   - A ready-made goodbye when the caller says they're done after "anything else?".
 - **Switches:** `AUTO_END_CALL_ENABLED`, `CANNED_GOODBYE_ENABLED`, `CANNED_GOODBYE_TEXT`.
@@ -63,7 +63,7 @@ local tool timing harness against live read-only Booqable calls.
 - **Fix:**
   - Deepgram `nova-3-general` with `en-US`.
   - STT hints for times, weekdays, dates, product names and "text"/"email".
-  - `app/stt_fixups.py` corrects known mis-hearings.
+  - `app/calls/stt_fixups.py` corrects known mis-hearings.
 - **Switches:** `STT_SPEECH_MODEL`, `STT_LANGUAGE`, `STT_HINTS`.
 
 ### Working sound and stuck-audio recovery (`ce8b3b4`, `c5dd163`, `1e15880`, `1dd224b`)
@@ -167,7 +167,7 @@ Problems seen on the 17:52 call, and their fixes:
 - **A booking was offered for "today" after closing.** At 6:20 PM (the shop
   closes at 6 PM) the guide checked stock for 9 AM-6 PM today, Booqable said
   in stock, and the agent offered bikes "available today". Hours were only in
-  the instructions; no tool checked them. Now `app/business_hours.py` checks
+  the instructions; no tool checked them. Now `app/booking/business_hours.py` checks
   windows against the published business profile's hours in
   `BOOQABLE_TIMEZONE`:
   - createReservation refuses a start in the past (15 min grace), before

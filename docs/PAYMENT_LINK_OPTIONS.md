@@ -1,8 +1,8 @@
 # Payment link — deferred options
 
-The `sendPaymentLink` reservation tool (`app/payments.py`,
-`app/postmark_client.py`, `app/twilio_client.py`, dispatched from
-`app/guide_client.py`) sends a **placeholder link**
+The `sendPaymentLink` reservation tool (`app/booking/payments.py`,
+`app/booking/postmark_client.py`, `app/booking/twilio_client.py`, dispatched from
+`app/guide/tools.py`) sends a **placeholder link**
 (`PAYMENT_LINK_BASE_URL` + the order id — no real checkout page, no charge)
 by email (Postmark) or SMS (Twilio), depending on `channel` /
 `PAYMENT_LINK_DEFAULT_CHANNEL`. Both channels are live -- Twilio's A2P 10DLC
@@ -40,7 +40,7 @@ one of:
   programmatic version if one exists beyond what's publicly documented.
 
 Either way, only `payments.build_test_payment_link` and (for the Stripe path)
-`app/payments.py`'s `send_payment_link` need to change — the
+`app/booking/payments.py`'s `send_payment_link` need to change — the
 channel-sending and Booqable-lookup plumbing around it stays the same.
 
 ## 2. Email delivery — implemented via Postmark
@@ -51,7 +51,7 @@ SendGrid/SMTP/Gmail API, all considered here previously — Postmark was
 preferred for its simple single-email HTTP endpoint and clear per-message
 error codes).
 
-`app/postmark_client.py` mirrors `app/twilio_client.py`'s shape: a small
+`app/booking/postmark_client.py` mirrors `app/booking/twilio_client.py`'s shape: a small
 wrapper POSTing to `https://api.postmarkapp.com/email` with
 `X-Postmark-Server-Token` auth, raising `PostmarkError` the same way
 `TwilioSmsError`/`BooqableError` do — on an HTTP error status, and also on a
@@ -59,7 +59,7 @@ non-zero Postmark `ErrorCode` in an otherwise-200 response (e.g. `406`
 inactive recipient, `401` unconfirmed sender signature — `POSTMARK_FROM_EMAIL`
 must be a confirmed Sender Signature in the Postmark account).
 
-It plugs into `app/payments.send_payment_link` alongside `TwilioSmsClient` —
+It plugs into `app/booking/payments.py`'s `send_payment_link` alongside `TwilioSmsClient` —
 the contact lookup (`get_order_contact`) already returns `email` alongside
 `phone`; `send_payment_link` picks whichever channel is requested (or
 falls back to `config.PAYMENT_LINK_DEFAULT_CHANNEL`, `"email"` today) and

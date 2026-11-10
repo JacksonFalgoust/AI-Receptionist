@@ -1,6 +1,6 @@
 """SQLAlchemy models backing conversation history (E6 slice 1), console
 knowledge items (E6 slice 2), and console workflows (E6 slice 3). Field names
-are snake_case; app/conversations_api.py translates to the frontend's exact
+are snake_case; app/console/conversations/api.py translates to the frontend's exact
 camelCase JSON shape (frontend/src/types/conversation.ts) -- these models don't
 know about that shape themselves.
 """
@@ -86,7 +86,7 @@ class ConversationAction(Base):
 
 class KnowledgeItem(Base):
     """A console-managed knowledge item (frontend/src/types/knowledge.ts).
-    Published: app/guide_publish/render.py renders every publishable row
+    Published: app/guide/publish/render.py renders every publishable row
     into the guide bundle, and GuideAnts' import replaces the live vector
     store wholesale -- see
     docs/superpowers/specs/2026-09-18-guide-publish-pipeline-design.md."""
@@ -123,7 +123,7 @@ class Workflow(Base):
     status: Mapped[str] = mapped_column(String, nullable=False)  # WorkflowStatus
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     # The whole WorkflowStep[] array, replaced wholesale on every save --
-    # never merged field-by-field. See app/workflow_store.py.
+    # never merged field-by-field. See app/console/workflows/store.py.
     steps: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
     # Always 0 in this slice -- no execution engine exists yet.
     execution_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -136,7 +136,7 @@ class AuthSession(Base):
     """A logged-in session's bearer token -- the frontend AuthProvider's
     Session (frontend/src/types/user.ts), stored server-side so logout and
     expiry are enforced rather than only client-trusted. Unrelated to
-    GuideAnts' own conversation-continuation id (app/guide_client.py's
+    GuideAnts' own conversation-continuation id (app/guide/session.py's
     GuideSession.conversation_id)."""
 
     __tablename__ = "auth_sessions"
@@ -195,7 +195,7 @@ class GuidePublication(Base):
     # sha256 over the canonical file map -- drives no-op detection and diffs.
     content_hash: Mapped[str] = mapped_column(String, nullable=False)
     instructions_text: Mapped[str] = mapped_column(Text, nullable=False)
-    # The three config sections as published. app/main.py's _greeting_for()
+    # The three config sections as published. app/calls/greeting.py's greeting_for()
     # reads the latest succeeded row's copy, which is what keeps draft edits
     # from reaching callers before Publish.
     published_config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
