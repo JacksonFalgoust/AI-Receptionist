@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { AppShell } from '@/components/layout/AppShell'
+import { BookingsPage } from '@/pages/BookingsPage'
 import { ConfigurationPage } from '@/pages/ConfigurationPage'
 import { ConversationDetailPage } from '@/pages/ConversationDetailPage'
 import { ConversationsPage } from '@/pages/ConversationsPage'
@@ -43,6 +44,10 @@ export function AppRoutes() {
           <Route element={<ProtectedRoute permission="view:conversations" />}>
             <Route path={paths.conversations} element={<ConversationsPage />} />
             <Route path={paths.conversation()} element={<ConversationDetailPage />} />
+          </Route>
+
+          <Route element={<ProtectedRoute permission="view:bookings" />}>
+            <Route path={paths.bookings} element={<BookingsPage />} />
           </Route>
 
           <Route element={<ProtectedRoute permission="manage:knowledge" />}>

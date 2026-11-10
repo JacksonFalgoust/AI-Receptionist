@@ -27,4 +27,11 @@ describe('permissions', () => {
     const managePermissions = PERMISSIONS.filter((p) => p.startsWith('manage:'))
     expect(canAny('viewer', managePermissions)).toBe(false)
   })
+
+  it('gives bookings to the roles that see conversations, but not analysts', () => {
+    expect(can('manager', 'view:bookings')).toBe(true)
+    expect(can('agent', 'view:bookings')).toBe(true)
+    expect(can('viewer', 'view:bookings')).toBe(true)
+    expect(can('analyst', 'view:bookings')).toBe(false)
+  })
 })

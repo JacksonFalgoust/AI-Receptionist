@@ -1,6 +1,7 @@
 import {
   Activity,
   BookOpen,
+  CalendarDays,
   CircleHelp,
   GitBranch,
   House,
@@ -59,6 +60,12 @@ export const NAV_GROUPS: NavGroup[] = [
         to: paths.conversations,
         icon: MessageSquare,
         permission: 'view:conversations',
+      },
+      {
+        label: 'Bookings',
+        to: paths.bookings,
+        icon: CalendarDays,
+        permission: 'view:bookings',
       },
     ],
   },

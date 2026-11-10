@@ -10,6 +10,7 @@ import type { Role } from '@/types'
 export const PERMISSIONS = [
   'view:overview',
   'view:conversations',
+  'view:bookings',
   'view:activity',
   'view:analytics',
   'manage:configuration',
@@ -35,17 +36,18 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   manager: [
     'view:overview',
     'view:conversations',
+    'view:bookings',
     'view:activity',
     'view:analytics',
     'manage:routing',
     'use:test',
   ],
   // PRD §4.3: works assigned escalations and the conversations behind them.
-  agent: ['view:overview', 'view:conversations', 'view:activity'],
+  agent: ['view:overview', 'view:conversations', 'view:bookings', 'view:activity'],
   // PRD §4.4: reporting only, no configuration.
   analyst: ['view:overview', 'view:analytics'],
   // PRD §4.5: read-only.
-  viewer: ['view:overview', 'view:conversations', 'view:analytics'],
+  viewer: ['view:overview', 'view:conversations', 'view:bookings', 'view:analytics'],
 }
 
 export function can(role: Role, permission: Permission): boolean {
