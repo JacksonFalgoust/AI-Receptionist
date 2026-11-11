@@ -10,6 +10,8 @@ export const paths = {
 
   overview: '/overview',
   bookings: '/bookings',
+  customers: '/customers',
+  customer: (id = ':id') => `/customers/${id}`,
   conversations: '/conversations',
   conversation: (id = ':id') => `/conversations/${id}`,
   activity: '/activity',
