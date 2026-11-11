@@ -39,6 +39,7 @@ class Booking:
     total_cents: int
     payment: PaymentLabel
     item_count: int | None
+    customer_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,7 @@ def to_bookings(orders: list[dict[str, Any]], included: list[dict[str, Any]], no
                 total_cents=attrs.get("grand_total_in_cents") or 0,
                 payment=payment_label(attrs.get("payment_status")),
                 item_count=attrs.get("item_count"),
+                customer_id=attrs.get("customer_id"),
             )
         )
     return bookings
