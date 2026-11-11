@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatDate, formatDateRange, formatDateTime, formatDuration, relativeTime } from './formatDate'
+import { formatBusinessDateTime, formatDate, formatDateRange, formatDateTime, formatDuration, relativeTime } from './formatDate'
 
 const NOW = new Date('2026-09-08T12:00:00.000Z').getTime()
 
@@ -122,5 +122,16 @@ describe('formatDateRange', () => {
     expect(formatDateRange('2026-12-31T22:00:00.000Z', '2027-01-01T02:00:00.000Z')).toBe(
       'Dec 31, 2026 – Jan 1, 2027',
     )
+  })
+})
+
+describe('formatBusinessDateTime', () => {
+  it('formats in the business timezone, not UTC', () => {
+    expect(formatBusinessDateTime('2026-11-11T04:30:00+00:00')).toBe('Nov 10, 2026, 11:30 PM')
+  })
+
+  it('returns an em dash for null or unparseable input', () => {
+    expect(formatBusinessDateTime(null)).toBe('—')
+    expect(formatBusinessDateTime('nope')).toBe('—')
   })
 })

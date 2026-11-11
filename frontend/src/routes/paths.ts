@@ -9,6 +9,7 @@ export const paths = {
   invite: (token = ':token') => `/invite/${token}`,
 
   overview: '/overview',
+  bookings: '/bookings',
   conversations: '/conversations',
   conversation: (id = ':id') => `/conversations/${id}`,
   activity: '/activity',

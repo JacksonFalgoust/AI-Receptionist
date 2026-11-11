@@ -1,5 +1,7 @@
 import type { IsoDateTime } from '@/types'
 
+import { BUSINESS_TIMEZONE } from './dateRange'
+
 /**
  * Timestamp formatting for feeds, tables, and status panels. Locale is pinned
  * to en-US so output is deterministic in tests and consistent across users
@@ -15,6 +17,11 @@ const WEEK = 7 * DAY
 const DATE_TIME_FORMAT = new Intl.DateTimeFormat('en-US', {
   dateStyle: 'medium',
   timeStyle: 'short',
+})
+const BUSINESS_DATE_TIME_FORMAT = new Intl.DateTimeFormat('en-US', {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+  timeZone: BUSINESS_TIMEZONE,
 })
 const DATE_FORMAT = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeZone: 'UTC' })
 const DATE_NO_YEAR_FORMAT = new Intl.DateTimeFormat('en-US', {
@@ -51,6 +58,13 @@ export function relativeTime(iso: IsoDateTime, now: number = Date.now()): string
 export function formatDateTime(iso: IsoDateTime): string {
   const date = parse(iso)
   return date ? DATE_TIME_FORMAT.format(date) : ''
+}
+
+/** A booking time in the business timezone, whatever the viewer's. An em dash when absent. */
+export function formatBusinessDateTime(iso: IsoDateTime | null): string {
+  if (!iso) return '—'
+  const date = parse(iso)
+  return date ? BUSINESS_DATE_TIME_FORMAT.format(date) : '—'
 }
 
 /** "4m 12s" · "22s" · an em dash when unknown. Seconds are padded so a column aligns. */

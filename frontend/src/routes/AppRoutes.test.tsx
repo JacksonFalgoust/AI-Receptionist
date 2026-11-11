@@ -91,8 +91,17 @@ describe('application routing', () => {
     expect(screen.queryByRole('link', { name: 'Users & Roles' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Billing' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Conversations' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Bookings' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Overview' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Help' })).toBeInTheDocument()
+  })
+
+  it('shows an owner a Bookings sidebar link to /bookings', async () => {
+    seedSession()
+    renderApp('/overview')
+
+    const link = await screen.findByRole('link', { name: 'Bookings' })
+    expect(link).toHaveAttribute('href', '/bookings')
   })
 
   it('resolves the knowledge editor routes C1 links to', async () => {

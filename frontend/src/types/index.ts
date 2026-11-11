@@ -8,6 +8,7 @@
 export * from './activity'
 export * from './analytics'
 export * from './billing'
+export * from './booking'
 export * from './common'
 export * from './concierge'
 export * from './conversation'

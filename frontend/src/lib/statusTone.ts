@@ -6,6 +6,7 @@ import type { KnowledgeStatus } from '@/types/knowledge'
 import type { UserStatus } from '@/types/user'
 import type { WorkflowStatus } from '@/types/workflow'
 import type { BillingStatus, InvoiceStatus } from '@/types/billing'
+import type { BookingLabel, PaymentLabel } from '@/types/booking'
 
 /**
  * Semantic UI tone, separate from `types/concierge.Tone` (the Concierge's voice/persona setting).
@@ -40,6 +41,8 @@ export type KnownStatus =
   | ConversationOutcome
   | BillingStatus
   | InvoiceStatus
+  | BookingLabel
+  | PaymentLabel
 
 const STATUS_TONE: Record<KnownStatus, ToneInfo> = {
   enabled: { tone: 'success', label: 'Enabled' },
@@ -85,6 +88,12 @@ const STATUS_TONE: Record<KnownStatus, ToneInfo> = {
   paid: { tone: 'success', label: 'Paid' },
   due: { tone: 'warning', label: 'Due' },
   overdue: { tone: 'danger', label: 'Overdue' },
+  // BookingLabel / PaymentLabel. 'overdue', 'canceled' and 'paid' are shared with the above.
+  out_now: { tone: 'info', label: 'Out now' },
+  not_picked_up: { tone: 'warning', label: 'Not picked up' },
+  returned: { tone: 'muted', label: 'Returned' },
+  unpaid: { tone: 'warning', label: 'Unpaid' },
+  partly_paid: { tone: 'warning', label: 'Partly paid' },
 }
 
 export function statusTone(status: KnownStatus): ToneInfo {
