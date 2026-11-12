@@ -4,6 +4,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { BookingsPage } from '@/pages/BookingsPage'
 import { CustomerDetailPage } from '@/pages/CustomerDetailPage'
 import { CustomersPage } from '@/pages/CustomersPage'
+import { ProductsPage } from '@/pages/ProductsPage'
 import { ConfigurationPage } from '@/pages/ConfigurationPage'
 import { ConversationDetailPage } from '@/pages/ConversationDetailPage'
 import { ConversationsPage } from '@/pages/ConversationsPage'
@@ -55,6 +56,10 @@ export function AppRoutes() {
           <Route element={<ProtectedRoute permission="view:customers" />}>
             <Route path={paths.customers} element={<CustomersPage />} />
             <Route path={paths.customer()} element={<CustomerDetailPage />} />
+          </Route>
+
+          <Route element={<ProtectedRoute permission="manage:products" />}>
+            <Route path={paths.products} element={<ProductsPage />} />
           </Route>
 
           <Route element={<ProtectedRoute permission="manage:knowledge" />}>

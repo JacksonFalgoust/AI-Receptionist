@@ -12,6 +12,7 @@ export const paths = {
   bookings: '/bookings',
   customers: '/customers',
   customer: (id = ':id') => `/customers/${id}`,
+  products: '/products',
   conversations: '/conversations',
   conversation: (id = ':id') => `/conversations/${id}`,
   activity: '/activity',
