@@ -25,6 +25,11 @@ def _scoped():
     )
 
 
+def _clean(text: str | None) -> str | None:
+    """Strip whitespace; blank becomes None."""
+    return (text or "").strip() or None
+
+
 def list_workflows(db: Session) -> list[models.Workflow]:
     """Most recently updated first, matching the mock service's
     sortByDesc(lastUpdatedAt). No filters, no pagination -- matches
@@ -37,12 +42,17 @@ def get_workflow(db: Session, workflow_id: str) -> models.Workflow | None:
 
 
 def create_workflow(
-    db: Session, *, name: str, description: str | None = None
+    db: Session,
+    *,
+    name: str,
+    description: str | None = None,
+    applies_when: str | None = None,
 ) -> models.Workflow:
     workflow = models.Workflow(
         organization_id=config.DEFAULT_ORGANIZATION_ID,
         name=name,
         description=description,
+        applies_when=_clean(applies_when),
         status="draft",
         version=1,
         steps=[],
@@ -57,11 +67,13 @@ def create_workflow(
 def save_draft(
     db: Session, workflow: models.Workflow, patch: dict[str, Any]
 ) -> models.Workflow:
-    """Applies only the keys present in `patch` -- name/description/steps.
+    """Applies only the keys present in `patch` -- name/description/applies_when/steps.
     `steps`, when present, replaces the entire column value wholesale; this
     is never a per-step merge. status/version are never touched here --
     the API layer (app/console/workflows/api.py) never puts them in a patch dict."""
     for key, value in patch.items():
+        if key == "applies_when":
+            value = _clean(value)
         setattr(workflow, key, value)
     workflow.last_updated_at = datetime.utcnow()
     db.flush()
@@ -71,6 +83,8 @@ def save_draft(
 def publish_workflow(db: Session, workflow: models.Workflow) -> models.Workflow:
     if not workflow.steps:
         raise ValueError("cannot publish a workflow with no steps")
+    if not (workflow.applies_when or "").strip():
+        raise ValueError("cannot publish a workflow without an 'Applies when'")
     workflow.status = "active"
     workflow.version += 1
     workflow.last_updated_at = datetime.utcnow()

@@ -52,9 +52,9 @@ def _seed(SessionLocal, **overrides):
     return workflow_id
 
 
-def _seed_with_steps(SessionLocal, steps):
+def _seed_with_steps(SessionLocal, steps, **overrides):
     db = SessionLocal()
-    workflow = workflow_store.create_workflow(db, name="With steps")
+    workflow = workflow_store.create_workflow(db, name="With steps", **overrides)
     workflow_store.save_draft(db, workflow, {"steps": steps})
     db.commit()
     workflow_id = workflow.id
@@ -79,7 +79,7 @@ def test_create_returns_201_and_camelcase_workflow(db_session_factory):
     assert body["executionCount"] == 0
     assert body["lastUpdatedAt"].endswith("Z")
     assert set(body) == {
-        "id", "organizationId", "name", "description", "status", "version",
+        "id", "organizationId", "name", "description", "appliesWhen", "status", "version",
         "steps", "executionCount", "lastUpdatedAt",
     }
 
@@ -221,7 +221,7 @@ def test_patch_keeps_step_optional_fields(db_session_factory):
         "id": "s1",
         "name": "Look up availability",
         "type": "look_up",
-        "requiredIntegrationId": "int_booqable",
+        "tool": "checkAvailability",
         "errorBehavior": "Apologize and offer a callback",
         "escalationBehavior": "Transfer to a human",
         "configuration": {"category": "bikes"},
@@ -231,14 +231,14 @@ def test_patch_keeps_step_optional_fields(db_session_factory):
 
     assert response.status_code == 200
     out_step = response.json()["steps"][0]
-    assert out_step["requiredIntegrationId"] == "int_booqable"
+    assert out_step["tool"] == "checkAvailability"
     assert out_step["errorBehavior"] == "Apologize and offer a callback"
     assert out_step["escalationBehavior"] == "Transfer to a human"
     assert out_step["configuration"] == {"category": "bikes"}
 
 
 def test_publish_rejects_empty_steps_with_422(db_session_factory):
-    workflow_id = _seed(db_session_factory)
+    workflow_id = _seed(db_session_factory, applies_when="when asked")
 
     response = client.post(f"/api/workflows/{workflow_id}/publish")
 
@@ -246,7 +246,7 @@ def test_publish_rejects_empty_steps_with_422(db_session_factory):
 
 
 def test_publish_activates_and_increments_version(db_session_factory):
-    workflow_id = _seed_with_steps(db_session_factory, ONE_STEP)
+    workflow_id = _seed_with_steps(db_session_factory, ONE_STEP, applies_when="when asked")
 
     response = client.post(f"/api/workflows/{workflow_id}/publish")
 
@@ -291,3 +291,87 @@ def test_routes_require_auth(method, path, kwargs):
     # No db_session_factory fixture: require_auth is not overridden.
     response = getattr(client, method)(path, **kwargs)
     assert response.status_code == 401
+
+
+def test_create_accepts_and_returns_applies_when(db_session_factory):
+    response = client.post(
+        "/api/workflows", json={"name": "Intake", "appliesWhen": "when a caller wants to book"}
+    )
+
+    assert response.status_code == 201
+    assert response.json()["appliesWhen"] == "when a caller wants to book"
+
+
+def test_patch_sets_and_clears_applies_when(db_session_factory):
+    workflow_id = _seed(db_session_factory)
+
+    response = client.patch(
+        f"/api/workflows/{workflow_id}",
+        json={"appliesWhen": "when a caller asks to make a reservation"},
+    )
+    assert response.status_code == 200
+    assert response.json()["appliesWhen"] == "when a caller asks to make a reservation"
+
+    response = client.patch(f"/api/workflows/{workflow_id}", json={"appliesWhen": None})
+    assert response.status_code == 200
+    assert response.json()["appliesWhen"] is None
+
+
+def test_patch_rejects_unknown_tool_with_422(db_session_factory):
+    workflow_id = _seed(db_session_factory)
+    step = {"id": "s1", "name": "n", "type": "look_up", "tool": "bogus"}
+
+    response = client.patch(f"/api/workflows/{workflow_id}", json={"steps": [step]})
+
+    assert response.status_code == 422
+
+
+def test_patch_keeps_a_valid_tool(db_session_factory):
+    workflow_id = _seed(db_session_factory)
+    step = {"id": "s1", "name": "n", "type": "look_up", "tool": "checkAvailability"}
+
+    response = client.patch(f"/api/workflows/{workflow_id}", json={"steps": [step]})
+
+    assert response.status_code == 200
+    assert response.json()["steps"][0]["tool"] == "checkAvailability"
+
+
+def test_patch_rejects_the_old_required_integration_field(db_session_factory):
+    workflow_id = _seed(db_session_factory)
+    step = {"id": "s1", "name": "n", "type": "look_up", "requiredIntegrationId": "int_x"}
+
+    response = client.patch(f"/api/workflows/{workflow_id}", json={"steps": [step]})
+
+    assert response.status_code == 422
+
+
+def test_get_tolerates_a_stored_step_with_required_integration_id(db_session_factory):
+    workflow_id = _seed_with_steps(
+        db_session_factory,
+        [{"id": "s1", "name": "n", "type": "look_up", "requiredIntegrationId": "int_x"}],
+    )
+
+    response = client.get(f"/api/workflows/{workflow_id}")
+
+    assert response.status_code == 200
+    step = response.json()["steps"][0]
+    assert "requiredIntegrationId" not in step
+    assert step["tool"] is None
+
+
+def test_publish_rejects_blank_applies_when_with_422(db_session_factory):
+    workflow_id = _seed_with_steps(db_session_factory, ONE_STEP)
+
+    response = client.post(f"/api/workflows/{workflow_id}/publish")
+
+    assert response.status_code == 422
+    assert "Applies when" in response.json()["detail"]
+
+
+def test_publish_succeeds_with_applies_when(db_session_factory):
+    workflow_id = _seed_with_steps(db_session_factory, ONE_STEP, applies_when="when asked")
+
+    response = client.post(f"/api/workflows/{workflow_id}/publish")
+
+    assert response.status_code == 200
+    assert response.json()["appliesWhen"] == "when asked"

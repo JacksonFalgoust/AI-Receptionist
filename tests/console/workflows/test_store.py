@@ -96,7 +96,7 @@ def test_save_draft_never_touches_status_or_version():
 
 def test_publish_rejects_empty_steps():
     db = _session()
-    workflow = _create(db)
+    workflow = _create(db, applies_when="when asked")
 
     with pytest.raises(ValueError):
         workflow_store.publish_workflow(db, workflow)
@@ -107,7 +107,7 @@ def test_publish_rejects_empty_steps():
 
 def test_publish_activates_and_increments_version():
     db = _session()
-    workflow = _create(db)
+    workflow = _create(db, applies_when="when asked")
     workflow_store.save_draft(
         db, workflow, {"steps": [{"id": "s1", "name": "Ask for ID", "type": "ask_customer"}]}
     )
@@ -122,7 +122,7 @@ def test_publish_activates_and_increments_version():
 
 def test_publishing_twice_increments_version_each_time():
     db = _session()
-    workflow = _create(db)
+    workflow = _create(db, applies_when="when asked")
     workflow_store.save_draft(
         db, workflow, {"steps": [{"id": "s1", "name": "Ask for ID", "type": "ask_customer"}]}
     )
@@ -180,3 +180,30 @@ def test_delete_removes_the_row():
     db.commit()
 
     assert workflow_store.get_workflow(db, workflow.id) is None
+
+
+def test_publish_rejects_blank_applies_when():
+    db = _session()
+    workflow = _create(db, applies_when="   ")
+    workflow_store.save_draft(
+        db, workflow, {"steps": [{"id": "s1", "name": "n", "type": "ask_customer"}]}
+    )
+    db.commit()
+
+    with pytest.raises(ValueError, match="Applies when"):
+        workflow_store.publish_workflow(db, workflow)
+
+    assert workflow.status == "draft"
+
+
+def test_publish_succeeds_with_applies_when():
+    db = _session()
+    workflow = _create(db, applies_when="when a caller wants to book")
+    workflow_store.save_draft(
+        db, workflow, {"steps": [{"id": "s1", "name": "n", "type": "ask_customer"}]}
+    )
+    db.commit()
+
+    workflow_store.publish_workflow(db, workflow)
+
+    assert workflow.status == "active"
