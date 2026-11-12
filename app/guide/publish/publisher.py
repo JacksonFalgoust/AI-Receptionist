@@ -29,7 +29,7 @@ import io
 import logging
 import zipfile
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from sqlalchemy import select
@@ -72,8 +72,14 @@ def _knowledge_warning(files: dict | None) -> str | None:
     )
 
 
-def _warnings_for(remote: list | None, files: dict | None = None) -> list | None:
-    warnings = list(remote or [])
+def _warnings_for(
+    remote: list | None,
+    files: dict | None = None,
+    render_warnings: list | None = None,
+) -> list | None:
+    """Render warnings (workflows skipped locally) come first, then the
+    remote ones, then the knowledge note. None when there are none."""
+    warnings = list(render_warnings or []) + list(remote or [])
     knowledge = _knowledge_warning(files)
     if knowledge:
         warnings.append(knowledge)
@@ -106,6 +112,7 @@ class RenderResult:
     content_hash: str
     instructions: str
     knowledge: dict[str, bytes]
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -132,6 +139,18 @@ def _knowledge_items(db: Session) -> list[models.KnowledgeItem]:
     )
 
 
+def _workflows(db: Session) -> list[models.Workflow]:
+    """Every workflow of the org, whatever its status -- render decides
+    which ones the guide sees."""
+    return list(
+        db.scalars(
+            select(models.Workflow).where(
+                models.Workflow.organization_id == config.DEFAULT_ORGANIZATION_ID
+            )
+        )
+    )
+
+
 def latest_succeeded(db: Session) -> models.GuidePublication | None:
     return db.scalar(
         select(models.GuidePublication)
@@ -151,11 +170,13 @@ def _render(db: Session) -> RenderResult:
     # never advertise a topic the push does not carry (or vice versa).
     items = _knowledge_items(db)
     today = date.today()
+    workflows_prose, render_warnings = render.workflow_prose(_workflows(db))
     instructions = template.render_instructions(
         render.build_slots(
             configuration,
             render.knowledge_topics(items, today),
             render.core_facts(items, today),
+            workflows_prose=workflows_prose,
         )
     )
     knowledge = render.knowledge_files(items, today)
@@ -167,6 +188,7 @@ def _render(db: Session) -> RenderResult:
         content_hash=_marked(bundle_hash),
         instructions=instructions,
         knowledge=knowledge,
+        warnings=render_warnings,
     )
 
 
@@ -252,7 +274,7 @@ async def publish(db: Session, published_by: str) -> models.GuidePublication:
             knowledge_item_count=knowledge_count,
             bundle_bytes=rendered.zip_bytes,
             status="succeeded",
-            warnings=None,
+            warnings=_warnings_for(None, None, rendered.warnings),
         )
         db.add(publication)
         configuration_store.mark_published(db, configuration, datetime.utcnow())
@@ -284,7 +306,9 @@ async def publish(db: Session, published_by: str) -> models.GuidePublication:
         return publication
 
     publication.status = "succeeded"
-    publication.warnings = _warnings_for(result.get("warnings"), result.get("files"))
+    publication.warnings = _warnings_for(
+        result.get("warnings"), result.get("files"), rendered.warnings
+    )
     # Written only on success: this snapshot is what app/calls/greeting.py's greeting
     # reads, so a failed publish must not move what callers hear.
     publication.published_config = snapshot

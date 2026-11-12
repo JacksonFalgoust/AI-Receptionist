@@ -471,3 +471,96 @@ def test_a_core_fact_edit_reaches_the_instructions(db, push_ok):
     second = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
     assert "close an hour early" not in first.instructions_text
     assert "close an hour early" in second.instructions_text
+
+
+# --- workflows --------------------------------------------------------------
+
+def _add_workflow(db, **overrides):
+    fields = dict(
+        id="w1",
+        organization_id=config.DEFAULT_ORGANIZATION_ID,
+        name="Book a rental",
+        applies_when="when a caller asks to make a reservation",
+        status="active",
+        version=1,
+        steps=[
+            {
+                "id": "s1",
+                "name": "Pickup day",
+                "description": "ask which day they would like to pick up",
+                "type": "ask_customer",
+            }
+        ],
+    )
+    fields.update(overrides)
+    workflow = models.Workflow(**fields)
+    db.add(workflow)
+    db.commit()
+    return workflow
+
+
+def test_active_workflow_appears_in_published_instructions(db):
+    _add_workflow(db)
+
+    instructions = publisher.render_preview(db).instructions
+    assert "Book a rental" in instructions
+    assert "when a caller asks to make a reservation" in instructions
+    assert publisher.build_zip(db)[2] == instructions
+
+
+def test_draft_workflow_does_not_change_the_content_hash(db):
+    before = publisher.render_preview(db).content_hash
+    _add_workflow(db, status="draft")
+    assert publisher.render_preview(db).content_hash == before
+
+
+def test_changing_a_step_changes_the_content_hash(db):
+    workflow = _add_workflow(db)
+    before = publisher.render_preview(db).content_hash
+    workflow.steps = [
+        {**workflow.steps[0], "description": "ask what size of bike they need"}
+    ]
+    db.commit()
+    assert publisher.render_preview(db).content_hash != before
+
+
+def test_legacy_active_workflow_is_skipped_and_warned_on_publish(db, push_ok):
+    _add_workflow(db, applies_when=None)
+
+    publication = asyncio.run(publisher.publish(db, published_by="admin@example.com"))
+
+    assert publication.status == "succeeded"
+    assert publication.warnings[0] == (
+        "Workflow 'Book a rental' is active but has no 'Applies when', "
+        "so the guide does not see it."
+    )
+    assert "model alias not resolved" in publication.warnings
+
+
+def test_render_warnings_survive_the_nothing_to_send_path(db, push_ok):
+    _add_workflow(db, applies_when=None)
+    asyncio.run(publisher.publish(db, published_by="a"))
+    row = configuration_store.get_configuration(db)
+    configuration_store.save_draft(
+        db, row, {"identity": {**row.identity, "greeting": "Hello again"}}
+    )
+    db.commit()
+
+    second = asyncio.run(publisher.publish(db, published_by="a"))
+
+    assert len(push_ok) == 1
+    assert second.warnings and "no 'Applies when'" in second.warnings[0]
+
+
+def test_over_cap_workflows_refuse_publish_before_any_network_call(db, push_ok):
+    _add_workflow(
+        db,
+        steps=[
+            {"id": f"s{n}", "name": f"Part {n}", "description": "ask something", "type": "ask_customer"}
+            for n in range(1, 22)
+        ],
+    )
+
+    with pytest.raises(ValueError):
+        asyncio.run(publisher.publish(db, published_by="a"))
+    assert push_ok == []
