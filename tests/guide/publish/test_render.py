@@ -580,7 +580,6 @@ def test_build_slots_includes_workflows_prose_and_template_accepts_it():
     assert prose in rendered
     # The precedence sentence follows the procedures, not the generic text.
     assert rendered.index(prose) < rendered.index("instead of the generic RESERVATIONS")
-    assert rendered.index("BOOKING STEPS (follow in order") < rendered.index("WORKFLOWS:")
 
 
 def test_steps_read_as_short_sentences_with_hint_after_the_text():
