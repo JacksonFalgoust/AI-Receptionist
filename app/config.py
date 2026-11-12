@@ -25,8 +25,10 @@ TTS_WORDS_PER_SECOND = float(os.environ.get("TTS_WORDS_PER_SECOND", "2.5"))
 WELCOME_GREETING = os.environ.get(
     "WELCOME_GREETING", "Thanks for calling, {business}! How can I help you today?"
 )
+# Spoken before the normal greeting for a known Booqable customer:
+# "<this> <the published greeting>", e.g. "Hello Jane! Thanks for calling, ...".
 WELCOME_BACK_GREETING_TEMPLATE = os.environ.get(
-    "WELCOME_BACK_GREETING_TEMPLATE", "Hi {name}, welcome back! How can I help you today?"
+    "WELCOME_BACK_GREETING_TEMPLATE", "Hello {name}!"
 )
 
 # --- Console configuration seed -------------------------------------------

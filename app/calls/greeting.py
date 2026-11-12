@@ -1,5 +1,5 @@
 """The welcome greeting spoken when a call is answered: personalized for a
-known Booqable customer, else the last published greeting, else
+known Booqable customer (a "Hello <name>!" prefix plus the normal greeting), else the last published greeting, else
 config.WELCOME_GREETING."""
 
 import asyncio
@@ -64,7 +64,7 @@ async def greeting_for(from_number: str) -> str:
         name = (client.attrs(customer).get("name") or "").split()
         if not name:
             return _published_greeting()
-        return config.WELCOME_BACK_GREETING_TEMPLATE.format(name=name[0])
+        return f"{config.WELCOME_BACK_GREETING_TEMPLATE.format(name=name[0])} {_published_greeting()}"
     except (BooqableError, asyncio.TimeoutError, Exception):
         logger.warning("Caller lookup failed; using default greeting", exc_info=True)
         return _published_greeting()
