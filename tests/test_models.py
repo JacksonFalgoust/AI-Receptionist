@@ -228,3 +228,23 @@ def test_guide_publication_model_roundtrips(db_session):
     assert stored.bundle_bytes == b"PK\x03\x04"
     assert stored.published_config["identity"]["greeting"] == "Hi"
     assert stored.warnings is None
+
+
+def test_init_db_adds_applies_when_to_an_existing_workflows_table():
+    from sqlalchemy import text
+
+    from app.db import _add_missing_columns
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE workflows (id VARCHAR PRIMARY KEY, name VARCHAR)"))
+
+    def cols():
+        with engine.connect() as conn:
+            return [r[1] for r in conn.execute(text("PRAGMA table_info(workflows)"))]
+
+    assert "applies_when" not in cols()
+    _add_missing_columns(engine)
+    assert "applies_when" in cols()
+    _add_missing_columns(engine)
+    assert cols().count("applies_when") == 1

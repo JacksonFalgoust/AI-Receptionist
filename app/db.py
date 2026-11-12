@@ -20,7 +20,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from . import config
@@ -50,6 +50,18 @@ def init_db() -> None:
     from . import models  # noqa: F401 -- import needed to register tables on Base
 
     Base.metadata.create_all(bind=engine)
+    _add_missing_columns(engine)
+
+
+def _add_missing_columns(bind_engine) -> None:
+    """create_all() never alters an existing table, so add columns introduced
+    after a database was first created. Idempotent."""
+    insp = inspect(bind_engine)
+    if not insp.has_table("workflows"):
+        return
+    if "applies_when" not in {c["name"] for c in insp.get_columns("workflows")}:
+        with bind_engine.begin() as conn:
+            conn.execute(text("ALTER TABLE workflows ADD COLUMN applies_when TEXT"))
 
 
 @contextmanager
