@@ -214,6 +214,17 @@ def core_facts(items: list[models.KnowledgeItem], today: date) -> str:
 # core_facts it is never truncated: a step list cut short is a different
 # procedure, so going over refuses the publish instead.
 _WORKFLOWS_MAX_CHARS = 6000
+_TRIGGER_LEAD_WORDS = ("when", "if", "after", "before")
+
+
+def _trigger_clause(trigger: str) -> str:
+    """Read an "Applies when" value as the tail of "Use it ...". A leading
+    when/if/after/before keeps its own word (lowercased); anything else gets
+    "when" in front and is otherwise left exactly as written."""
+    first = trigger.split(None, 1)[0] if trigger else ""
+    if first.lower() in _TRIGGER_LEAD_WORDS:
+        return first.lower() + trigger[len(first):]
+    return f"when {trigger}"
 
 # Spelled out because the guide copies what it reads, and digits read badly
 # aloud. Also the per-workflow step limit.
@@ -331,7 +342,7 @@ def workflow_prose(workflows: list[models.Workflow]) -> tuple[str, list[str]]:
 
         sentences = [
             f"WORKFLOW: {_workflow_text(workflow.name) or 'Untitled'}.",
-            f"Use it {trigger[0].lower()}{trigger[1:]}.",
+            f"Use it {_trigger_clause(trigger)}.",
             "Follow these steps in order, one question per turn.",
         ]
         sentences += [

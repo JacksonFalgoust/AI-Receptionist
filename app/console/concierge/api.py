@@ -2,9 +2,10 @@
 .../publish, GET /api/concierge/publications, GET /api/concierge/bundle --
 the live backing for frontend/src/services/configurationService.ts.
 
-Unlike app/console/workflows/api.py, these records are NOT console-only: a
-successful publish rewrites the live GuideAnts guide's INSTRUCTIONS and
-replaces its KNOWLEDGE FILES, and changes what the next caller hears. The
+Unlike the console-only Publish buttons (e.g. app/console/workflows/api.py's,
+which just marks a row), this one reaches the live guide: a successful publish rewrites the
+live GuideAnts guide's INSTRUCTIONS (including active workflows) and replaces
+its KNOWLEDGE FILES, and changes what the next caller hears. The
 publish owns the guide's whole vector store -- see
 app/guide/publish/guideants_admin.py for what that deletes and why.
 

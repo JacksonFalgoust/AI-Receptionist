@@ -642,3 +642,17 @@ def test_template_places_none_sentence_before_the_slot():
         "none\n"
     ) in text
     assert "list above says none, there are no procedures" not in text
+
+
+@pytest.mark.parametrize(
+    "trigger, expected",
+    [
+        ("When a caller asks to make a reservation", "Use it when a caller asks to make a reservation."),
+        ("a caller wants to cancel", "Use it when a caller wants to cancel."),
+        ("VIP callers call", "Use it when VIP callers call."),
+        ("If the caller is upset", "Use it if the caller is upset."),
+    ],
+)
+def test_trigger_wording_reads_as_a_sentence(trigger, expected):
+    prose, _ = render.workflow_prose([_workflow(applies_when=trigger)])
+    assert f". {expected} Follow" in prose

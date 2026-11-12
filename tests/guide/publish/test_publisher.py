@@ -556,11 +556,30 @@ def test_over_cap_workflows_refuse_publish_before_any_network_call(db, push_ok):
     _add_workflow(
         db,
         steps=[
+            {
+                "id": f"s{n}",
+                "name": f"Part {n}",
+                "description": "ask something " + "and keep going " * 40,
+                "type": "ask_customer",
+            }
+            for n in range(1, 11)
+        ],
+    )
+
+    with pytest.raises(ValueError, match="characters"):
+        asyncio.run(publisher.publish(db, published_by="a"))
+    assert push_ok == []
+
+
+def test_too_many_steps_refuse_publish_before_any_network_call(db, push_ok):
+    _add_workflow(
+        db,
+        steps=[
             {"id": f"s{n}", "name": f"Part {n}", "description": "ask something", "type": "ask_customer"}
             for n in range(1, 22)
         ],
     )
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="steps"):
         asyncio.run(publisher.publish(db, published_by="a"))
     assert push_ok == []
