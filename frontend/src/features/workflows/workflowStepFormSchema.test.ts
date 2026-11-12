@@ -95,6 +95,7 @@ describe('formValuesToSteps', () => {
 
   it('trims a step name and drops blank optional fields back to undefined', () => {
     const [step] = formValuesToSteps({
+      ...baseValues,
       steps: [
         {
           ...baseValues.steps[0],
