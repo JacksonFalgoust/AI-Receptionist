@@ -10,6 +10,7 @@ import re
 from datetime import date
 
 from app import models
+from app.console.workflows.tools import WORKFLOW_TOOLS
 from . import hours as hours_module
 
 # Spoken aloud by TTS. instructions.md forbids markup in the guide's own
@@ -66,6 +67,7 @@ def build_slots(
     configuration: models.ConciergeConfiguration,
     knowledge_topics: list[str],
     core_facts: str = "none",
+    workflows_prose: str = "none",
 ) -> dict[str, str]:
     """The complete slot set. Adding one here requires adding it to
     instructions.template.md too -- template.render_instructions() rejects
@@ -74,7 +76,8 @@ def build_slots(
     `knowledge_topics` is the list from knowledge_topics(): exactly the
     titles of the items Publish sends, so the guide only searches for topics
     that exist. An empty list renders as the word "none", which the template
-    tells the guide to read as "never search"."""
+    tells the guide to read as "never search". `workflows_prose` is the
+    first half of workflow_prose()'s result, "none" meaning no procedures."""
     profile = configuration.business_profile
     return {
         "business.name": _clean(profile.get("name", ""), "business.name"),
@@ -91,6 +94,7 @@ def build_slots(
         "identity.tone_prose": _tone_prose(configuration.identity),
         "knowledge.topics": "; ".join(knowledge_topics) if knowledge_topics else "none",
         "knowledge.core_facts": core_facts or "none",
+        "workflows.prose": workflows_prose or "none",
     }
 
 
@@ -202,3 +206,139 @@ def core_facts(items: list[models.KnowledgeItem], today: date) -> str:
             parts.append(f"{title}: {body}")
     text = "\n".join(parts)
     return text[:_CORE_FACTS_MAX_CHARS] if text else "none"
+
+
+# --- workflows --------------------------------------------------------------
+
+# A cap on the whole {{workflows.prose}} block, not per workflow. Unlike
+# core_facts it is never truncated: a step list cut short is a different
+# procedure, so going over refuses the publish instead.
+_WORKFLOWS_MAX_CHARS = 6000
+
+# Spelled out because the guide copies what it reads, and digits read badly
+# aloud. Also the per-workflow step limit.
+_STEP_NUMBERS = (
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+    "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+    "seventeen", "eighteen", "nineteen", "twenty",
+)
+
+# Step type (app/console/workflows/api.py's WorkflowStepType) -> what the
+# guide is told to do. Every hint leads its step except "end", which reads
+# as the step's last words ("say goodbye, then end the call").
+_STEP_HINTS = {
+    "ask_customer": "ask the caller",
+    "validate": "check",
+    "look_up": "look up",
+    "make_decision": "decide",
+    "execute_action": "carry out",
+    "confirm": "read it back and ask the caller to confirm",
+    "send_communication": "send the caller a message",
+    "escalate": "offer to have a team member call back",
+    "end": "then end the call",
+}
+
+# _FORBIDDEN plus braces, so admin text can never carry a `{{slot}}`.
+_WORKFLOW_MARKUP = re.compile(_FORBIDDEN.pattern + r"|[{}]")
+
+
+def _workflow_text(value: str | None) -> str:
+    """Admin-authored workflow text as one clean phrase: markup replaced
+    with spaces (never rejected), whitespace collapsed, and trailing
+    punctuation dropped so the sentence this is placed in supplies its own.
+
+    Repeated until stable because removing one " - " can leave the next
+    dash behind a space ("a - - b" -> "a - b")."""
+    text = value or ""
+    while (cleaned := _WORKFLOW_MARKUP.sub(" ", text)) != text:
+        text = cleaned
+    return " ".join(text.split()).rstrip(".,;:!?")
+
+
+def _step_sentences(workflow_name: str, number: str, step: dict) -> str:
+    step_type = step.get("type")
+    tool = step.get("tool")
+    if tool and tool not in WORKFLOW_TOOLS:
+        raise ValueError(
+            f"workflows.prose: workflow {workflow_name!r} step {number} names "
+            f"{tool!r}, which is not one of the guide's tools"
+        )
+
+    hint = _STEP_HINTS.get(step_type, "")
+    parts = [] if step_type == "end" else [hint]
+    parts += [_workflow_text(step.get("name")), _workflow_text(step.get("description"))]
+    # An end step that ends the call with endCall would otherwise say so twice.
+    if tool and not (step_type == "end" and tool == "endCall"):
+        parts.append(f"using the {tool} tool")  # a known name: inserted unstripped
+    if step_type == "end":
+        parts.append(hint)
+    sentences = [f"Step {number}: {', '.join(p for p in parts if p)}."]
+
+    error = _workflow_text(step.get("errorBehavior"))
+    escalation = _workflow_text(step.get("escalationBehavior"))
+    if error:
+        sentences.append(f"If this step fails: {error}.")
+        if escalation:
+            sentences.append(f"If that does not resolve it: {escalation}.")
+    elif escalation:
+        # "If that does not resolve it" would have nothing to refer back to.
+        sentences.append(f"If this step fails: {escalation}.")
+    return " ".join(sentences)
+
+
+def workflow_prose(workflows: list[models.Workflow]) -> tuple[str, list[str]]:
+    """Active workflows -> (the {{workflows.prose}} value, warnings).
+
+    One paragraph per workflow, blank-line separated, ordered by name
+    (case-insensitive) then id so the prompt hash does not depend on row
+    order. Draft and inactive workflows are absent. An active workflow the
+    guide could not use -- no "Applies when" to trigger it, or no steps --
+    is skipped with a warning for the publication rather than blocking the
+    publish. Prose is "none" when nothing qualifies, which the template
+    tells the guide to read as "no procedures".
+
+    Raises ValueError (a refused publish) for more than twenty steps in one
+    workflow, a step naming a tool the guide does not have, or a block over
+    _WORKFLOWS_MAX_CHARS."""
+    paragraphs: list[str] = []
+    warnings: list[str] = []
+    for workflow in sorted(workflows, key=lambda w: ((w.name or "").lower(), w.id or "")):
+        if workflow.status != "active":
+            continue
+        label = (workflow.name or "").strip()
+        trigger = _workflow_text(workflow.applies_when)
+        steps = workflow.steps or []
+        if not trigger:
+            warnings.append(
+                f"Workflow '{label}' is active but has no 'Applies when', "
+                "so the guide does not see it."
+            )
+            continue
+        if not steps:
+            warnings.append(
+                f"Workflow '{label}' is active but has no steps, so the guide does not see it."
+            )
+            continue
+        if len(steps) > len(_STEP_NUMBERS):
+            raise ValueError(
+                f"workflows.prose: workflow {label!r} has {len(steps)} steps; "
+                f"at most {len(_STEP_NUMBERS)} can be given to the guide"
+            )
+
+        sentences = [
+            f"WORKFLOW: {_workflow_text(workflow.name) or 'Untitled'}.",
+            f"Use it {trigger}.",
+            "Follow these steps in order, one question per turn.",
+        ]
+        sentences += [
+            _step_sentences(label, number, step) for number, step in zip(_STEP_NUMBERS, steps)
+        ]
+        paragraphs.append(" ".join(sentences))
+
+    prose = "\n\n".join(paragraphs)
+    if len(prose) > _WORKFLOWS_MAX_CHARS:
+        raise ValueError(
+            f"workflows.prose: the active workflows render to {len(prose)} characters, "
+            f"over the {_WORKFLOWS_MAX_CHARS}-character limit; shorten or deactivate one"
+        )
+    return (prose or "none"), warnings
