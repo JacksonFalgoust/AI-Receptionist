@@ -426,29 +426,29 @@ def test_step_type_hint_and_tool_are_rendered():
             )
         ]
     )
-    assert "ask the caller" in prose
-    assert "using the checkAvailability tool" in prose
-    assert "using the get_caller_phone_number tool" in prose
-    assert "read it back and ask the caller to confirm" in prose
-    assert "Step five: Wrap up, say goodbye, then end the call." in prose
+    assert "Ask the caller for this." in prose
+    assert "Look this up using the checkAvailability tool." in prose
+    assert "Look this up using the get_caller_phone_number tool." in prose
+    assert "Read it back and ask the caller to confirm." in prose
+    assert "Step five: Wrap up. say goodbye. Say a short goodbye, then end the call." in prose
 
 
 @pytest.mark.parametrize(
     "step_type, hint",
     [
-        ("validate", "check"),
-        ("look_up", "look up"),
-        ("make_decision", "decide"),
-        ("execute_action", "carry out"),
-        ("send_communication", "send the caller a message"),
-        ("escalate", "offer to have a team member call back"),
+        ("validate", "Check this."),
+        ("look_up", "Look this up."),
+        ("make_decision", "Decide this."),
+        ("execute_action", "Carry this out."),
+        ("send_communication", "Send the caller a message."),
+        ("escalate", "Offer to have a team member call back."),
     ],
 )
 def test_every_other_step_type_has_a_spoken_hint(step_type, hint):
     prose, _ = render.workflow_prose(
         [_workflow(steps=[_step(type=step_type, name="Thing", description="")])]
     )
-    assert f"Step one: {hint}, Thing." in prose
+    assert f"Step one: Thing. {hint}" in prose
 
 
 def test_end_step_with_end_call_tool_does_not_repeat_itself():
@@ -456,7 +456,7 @@ def test_end_step_with_end_call_tool_does_not_repeat_itself():
         [_workflow(steps=[_step(type="end", tool="endCall", name="Goodbye", description="")])]
     )
     step_line = prose[prose.index("Step one:"):]
-    assert step_line == "Step one: Goodbye, then end the call."
+    assert step_line == "Step one: Goodbye. Say a short goodbye, then end the call."
     assert step_line.lower().count("end the call") == 1
     assert "endCall" not in step_line
 
@@ -466,7 +466,7 @@ def test_end_call_tool_on_another_step_type_is_still_named():
     prose, _ = render.workflow_prose(
         [_workflow(steps=[_step(type="escalate", tool="endCall", name="Hand off", description="")])]
     )
-    assert "using the endCall tool" in prose
+    assert "Offer to have a team member call back using the endCall tool." in prose
 
 
 def test_error_and_escalation_behavior_are_rendered():
@@ -581,3 +581,64 @@ def test_build_slots_includes_workflows_prose_and_template_accepts_it():
     # The precedence sentence follows the procedures, not the generic text.
     assert rendered.index(prose) < rendered.index("instead of the generic RESERVATIONS")
     assert rendered.index("BOOKING STEPS (follow in order") < rendered.index("WORKFLOWS:")
+
+
+def test_steps_read_as_short_sentences_with_hint_after_the_text():
+    prose, _ = render.workflow_prose(
+        [
+            _workflow(
+                steps=[
+                    _step(name="Ask what they want to reserve",
+                          description="Get the item, dates and times"),
+                    _step(name="Check availability", description="See if it is free",
+                          type="look_up", tool="checkAvailability"),
+                    _step(name="Confirm the details", description="Read back the reservation.",
+                          type="confirm"),
+                ]
+            )
+        ]
+    )
+    assert (
+        "Step one: Ask what they want to reserve. Get the item, dates and times. "
+        "Ask the caller for this. "
+        "Step two: Check availability. See if it is free. "
+        "Look this up using the checkAvailability tool. "
+        "Step three: Confirm the details. Read back the reservation. "
+        "Read it back and ask the caller to confirm."
+    ) in prose
+
+
+def test_step_with_no_name_or_description_renders_the_hint_alone():
+    prose, _ = render.workflow_prose([_workflow(steps=[_step(name="", description="")])])
+    assert prose.endswith("Step one: Ask the caller for this.")
+    assert ": ." not in prose
+
+
+def test_step_with_nothing_to_say_has_no_dangling_colon():
+    prose, _ = render.workflow_prose(
+        [_workflow(steps=[_step(type="bogus", name="", description="")])]
+    )
+    assert prose.endswith("Step one.")
+
+
+def test_capitalized_applies_when_is_lowercased_at_the_first_character_only():
+    prose, _ = render.workflow_prose(
+        [_workflow(applies_when="When a caller asks about NYC pickups")]
+    )
+    assert "Use it when a caller asks about NYC pickups. " in prose
+
+
+def test_end_step_says_goodbye_first():
+    prose, _ = render.workflow_prose(
+        [_workflow(steps=[_step(type="end", name="Wrap up", description="")])]
+    )
+    assert prose.endswith("Step one: Wrap up. Say a short goodbye, then end the call.")
+
+
+def test_template_places_none_sentence_before_the_slot():
+    text = template.render_instructions(render.build_slots(_configuration(), []))
+    assert (
+        "If the procedures below say none, there are none to follow.\n"
+        "none\n"
+    ) in text
+    assert "list above says none, there are no procedures" not in text

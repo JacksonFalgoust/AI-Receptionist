@@ -223,19 +223,19 @@ _STEP_NUMBERS = (
     "seventeen", "eighteen", "nineteen", "twenty",
 )
 
-# Step type (app/console/workflows/api.py's WorkflowStepType) -> what the
-# guide is told to do. Every hint leads its step except "end", which reads
-# as the step's last words ("say goodbye, then end the call").
+# Step type (app/console/workflows/api.py's WorkflowStepType) -> the short
+# sentence (no final period) telling the guide what to do. It follows the
+# step's own name and description; a step's tool is appended to it.
 _STEP_HINTS = {
-    "ask_customer": "ask the caller",
-    "validate": "check",
-    "look_up": "look up",
-    "make_decision": "decide",
-    "execute_action": "carry out",
-    "confirm": "read it back and ask the caller to confirm",
-    "send_communication": "send the caller a message",
-    "escalate": "offer to have a team member call back",
-    "end": "then end the call",
+    "ask_customer": "Ask the caller for this",
+    "validate": "Check this",
+    "look_up": "Look this up",
+    "make_decision": "Decide this",
+    "execute_action": "Carry this out",
+    "confirm": "Read it back and ask the caller to confirm",
+    "send_communication": "Send the caller a message",
+    "escalate": "Offer to have a team member call back",
+    "end": "Say a short goodbye, then end the call",
 }
 
 # _FORBIDDEN plus braces, so admin text can never carry a `{{slot}}`.
@@ -265,14 +265,18 @@ def _step_sentences(workflow_name: str, number: str, step: dict) -> str:
         )
 
     hint = _STEP_HINTS.get(step_type, "")
-    parts = [] if step_type == "end" else [hint]
-    parts += [_workflow_text(step.get("name")), _workflow_text(step.get("description"))]
     # An end step that ends the call with endCall would otherwise say so twice.
-    if tool and not (step_type == "end" and tool == "endCall"):
-        parts.append(f"using the {tool} tool")  # a known name: inserted unstripped
-    if step_type == "end":
+    tool_named = bool(tool) and not (step_type == "end" and tool == "endCall")
+    # Every part is one sentence; _workflow_text already dropped trailing periods.
+    parts = [_workflow_text(step.get("name")), _workflow_text(step.get("description"))]
+    if tool_named and step_type == "end":
+        parts += [f"Use the {tool} tool", hint]  # a known name: inserted unstripped
+    elif tool_named:
+        parts.append(f"{hint} using the {tool} tool" if hint else f"Use the {tool} tool")
+    else:
         parts.append(hint)
-    sentences = [f"Step {number}: {', '.join(p for p in parts if p)}."]
+    body = " ".join(f"{p}." for p in parts if p)
+    sentences = [f"Step {number}: {body}" if body else f"Step {number}."]
 
     error = _workflow_text(step.get("errorBehavior"))
     escalation = _workflow_text(step.get("escalationBehavior"))
@@ -327,7 +331,7 @@ def workflow_prose(workflows: list[models.Workflow]) -> tuple[str, list[str]]:
 
         sentences = [
             f"WORKFLOW: {_workflow_text(workflow.name) or 'Untitled'}.",
-            f"Use it {trigger}.",
+            f"Use it {trigger[0].lower()}{trigger[1:]}.",
             "Follow these steps in order, one question per turn.",
         ]
         sentences += [
