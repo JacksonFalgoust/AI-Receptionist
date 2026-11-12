@@ -2,12 +2,13 @@
 POST /api/workflows/{id}/publish -- frontend/src/services/
 workflowService.ts's httpWorkflowService, made real (E6 slice 3).
 
-CONSOLE-ONLY: these records drive the admin console's Workflows pages and
-nothing else. Publishing a workflow here has no effect on live calls --
-nothing in app/'s call-handling code reads this table. What has to change
-to close that gap: docs/superpowers/specs/
-2026-09-17-e6-workflows-design.md, "Future: giving a published workflow
-live effect".
+These records drive the admin console's Workflows pages. Publishing a
+workflow here only marks the row; it does not touch the guide. Active
+workflows with an "Applies when" reach live calls through Guide Publish
+(app/guide/publish/render.py workflow_prose), which renders them into the
+guide's instructions as prose -- the guide follows the steps, this app does
+not enforce them, and execution_count stays 0. See docs/superpowers/specs/
+2026-11-11-workflows-in-guide-instructions-design.md.
 """
 
 from __future__ import annotations

@@ -3,9 +3,12 @@ by app/console/workflows/api.py. Same conventions as app/console/knowledge/store
 function takes a Session and none commit, so the caller owns the
 transaction boundary.
 
-Console-only: publishing a workflow here has no effect on live calls --
-nothing in app/'s call-handling code reads this table. See
-docs/superpowers/specs/2026-09-17-e6-workflows-design.md, "Future".
+Publishing a workflow here only marks the row. Active workflows with an
+"Applies when" reach the guide through Guide Publish
+(app/guide/publish/render.py workflow_prose), which renders them into the
+guide's instructions; the guide follows the steps, this app does not
+enforce them. See
+docs/superpowers/specs/2026-11-11-workflows-in-guide-instructions-design.md.
 """
 
 from __future__ import annotations
