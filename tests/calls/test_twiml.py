@@ -75,6 +75,7 @@ def test_twiml_known_customer_gets_personalized_greeting(monkeypatch):
     assert response.status_code == 200
     assert "wss://testserver/ws?token=" in response.text
     assert config.WELCOME_BACK_GREETING_TEMPLATE.format(name="Jane") in response.text
+    assert fill_business(config.WELCOME_GREETING) in response.text
 
 
 def test_twiml_malformed_greeting_template_falls_back_to_default_greeting(monkeypatch):
