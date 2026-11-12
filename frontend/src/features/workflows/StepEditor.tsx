@@ -8,8 +8,12 @@ import { Select } from '@/components/ui/Select'
 import type { SelectOption } from '@/components/ui/Select'
 import { Textarea } from '@/components/ui/Textarea'
 import { useConfirm } from '@/components/ui/useConfirm'
-import { withCurrentValue } from '@/lib/selectOptions'
-import { WORKFLOW_STEP_TYPE_LABELS, WORKFLOW_STEP_TYPES } from '@/types'
+import {
+  WORKFLOW_STEP_TYPE_LABELS,
+  WORKFLOW_STEP_TYPES,
+  WORKFLOW_TOOL_LABELS,
+  WORKFLOW_TOOLS,
+} from '@/types'
 
 import type { WorkflowStepsFormValues } from './workflowStepFormSchema'
 
@@ -18,10 +22,14 @@ const TYPE_OPTIONS: SelectOption[] = WORKFLOW_STEP_TYPES.map((type) => ({
   label: WORKFLOW_STEP_TYPE_LABELS[type],
 }))
 
+const TOOL_OPTIONS: SelectOption[] = WORKFLOW_TOOLS.map((tool) => ({
+  value: tool,
+  label: WORKFLOW_TOOL_LABELS[tool],
+}))
+
 export interface StepEditorProps {
   /** The step's position in the shared form's `steps` array, or `null` while none is selected. */
   index: number | null
-  integrationOptions: SelectOption[]
   onDelete: () => void
 }
 
@@ -31,7 +39,7 @@ export interface StepEditorProps {
  * under `steps.${index}`, the same convention `BusinessProfileFields` uses,
  * so it saves and publishes together with the rest of the page's one form.
  */
-export function StepEditor({ index, integrationOptions, onDelete }: StepEditorProps) {
+export function StepEditor({ index, onDelete }: StepEditorProps) {
   const { watch } = useFormContext<WorkflowStepsFormValues>()
 
   if (index === null) {
@@ -56,7 +64,6 @@ export function StepEditor({ index, integrationOptions, onDelete }: StepEditorPr
     <StepFields
       key={`${watch(`steps.${index}.id`)}:${index}`}
       index={index}
-      integrationOptions={integrationOptions}
       onDelete={onDelete}
     />
   )
@@ -64,11 +71,10 @@ export function StepEditor({ index, integrationOptions, onDelete }: StepEditorPr
 
 interface StepFieldsProps {
   index: number
-  integrationOptions: SelectOption[]
   onDelete: () => void
 }
 
-function StepFields({ index, integrationOptions, onDelete }: StepFieldsProps) {
+function StepFields({ index, onDelete }: StepFieldsProps) {
   const {
     register,
     watch,
@@ -84,10 +90,6 @@ function StepFields({ index, integrationOptions, onDelete }: StepFieldsProps) {
 
   const step = watch(`steps.${index}`)
   const stepErrors = errors.steps?.[index]
-  const requiredIntegrationOptions = withCurrentValue(
-    integrationOptions,
-    step.requiredIntegrationId,
-  )
 
   async function handleDelete() {
     const confirmed = await confirm({
@@ -120,11 +122,11 @@ function StepFields({ index, integrationOptions, onDelete }: StepFieldsProps) {
           <Field label="Type" htmlFor={`step-${index}-type`}>
             <Select {...register(`steps.${index}.type`)} options={TYPE_OPTIONS} />
           </Field>
-          <Field label="Required integration" htmlFor={`step-${index}-integration`}>
+          <Field label="Tool" htmlFor={`step-${index}-tool`}>
             <Select
-              {...register(`steps.${index}.requiredIntegrationId`)}
-              options={requiredIntegrationOptions}
-              placeholder="No required integration"
+              {...register(`steps.${index}.tool`)}
+              options={TOOL_OPTIONS}
+              placeholder="No tool"
             />
           </Field>
         </div>

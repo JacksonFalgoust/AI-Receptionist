@@ -4,17 +4,12 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { FormProvider, useForm } from 'react-hook-form'
 
+import { WORKFLOW_TOOLS } from '@/types'
 import { ConfirmDialogProvider } from '@/components/ui/ConfirmDialog'
-import type { SelectOption } from '@/components/ui/Select'
 
 import { StepEditor } from './StepEditor'
 import { emptyStep, workflowStepsFormSchema } from './workflowStepFormSchema'
 import type { StepFormValues, WorkflowStepsFormValues } from './workflowStepFormSchema'
-
-const integrationOptions: SelectOption[] = [
-  { value: 'int_scheduling', label: 'Scheduling' },
-  { value: 'int_customer_records', label: 'CRM' },
-]
 
 const baseStep: StepFormValues = {
   ...emptyStep(),
@@ -22,7 +17,7 @@ const baseStep: StepFormValues = {
   name: 'Check availability',
   description: 'Scheduling system, offer alternatives.',
   type: 'look_up',
-  requiredIntegrationId: 'int_scheduling',
+  tool: 'checkAvailability',
   errorBehavior: 'Escalate to a team member',
   escalationBehavior: '',
   configuration: [{ key: 'timeoutSeconds', value: '30' }],
@@ -41,7 +36,7 @@ function Harness({
   onDelete?: () => void
 }) {
   const form = useForm<WorkflowStepsFormValues>({
-    defaultValues: { steps: steps ?? [step] },
+    defaultValues: { appliesWhen: '', steps: steps ?? [step] },
     resolver: zodResolver(workflowStepsFormSchema),
   })
 
@@ -49,7 +44,7 @@ function Harness({
     <ConfirmDialogProvider>
       <FormProvider {...form}>
         <form onSubmit={form.handleSubmit(() => {})}>
-          <StepEditor index={index} integrationOptions={integrationOptions} onDelete={onDelete} />
+          <StepEditor index={index} onDelete={onDelete} />
           <button type="submit">Submit</button>
         </form>
       </FormProvider>
@@ -69,7 +64,8 @@ describe('StepEditor', () => {
     expect(screen.getByLabelText('Name')).toBeInTheDocument()
     expect(screen.getByLabelText('Description')).toBeInTheDocument()
     expect(screen.getByLabelText('Type')).toBeInTheDocument()
-    expect(screen.getByLabelText('Required integration')).toBeInTheDocument()
+    expect(screen.getByLabelText('Tool')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Required integration')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Error behavior')).toBeInTheDocument()
     expect(screen.getByLabelText('Escalation behavior')).toBeInTheDocument()
   })
@@ -78,7 +74,7 @@ describe('StepEditor', () => {
     render(<Harness index={0} />)
     expect(screen.getByLabelText('Name')).toHaveValue('Check availability')
     expect(screen.getByLabelText('Type')).toHaveValue('look_up')
-    expect(screen.getByLabelText('Required integration')).toHaveValue('int_scheduling')
+    expect(screen.getByLabelText('Tool')).toHaveValue('checkAvailability')
   })
 
   it('offers every step type as an option', () => {
@@ -87,9 +83,14 @@ describe('StepEditor', () => {
     expect(within(select).getAllByRole('option')).toHaveLength(9)
   })
 
-  it('offers a way to select no required integration', () => {
-    render(<Harness index={0} step={{ ...baseStep, requiredIntegrationId: '' }} />)
-    expect(screen.getByLabelText('Required integration')).toHaveValue('')
+  it('lists exactly the ten tools plus a no-tool placeholder', () => {
+    render(<Harness index={0} step={{ ...baseStep, tool: '' }} />)
+    const select = screen.getByLabelText('Tool') as HTMLSelectElement
+    expect(select).toHaveValue('')
+    const options = within(select).getAllByRole('option')
+    expect(options).toHaveLength(11)
+    expect(options[0]).toHaveTextContent('No tool')
+    expect(options.slice(1).map((o) => (o as HTMLOptionElement).value)).toEqual([...WORKFLOW_TOOLS])
   })
 
   it('shows the step\'s configuration rows', () => {

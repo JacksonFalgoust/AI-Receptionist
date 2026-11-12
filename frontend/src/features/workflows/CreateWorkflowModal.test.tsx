@@ -54,6 +54,7 @@ describe('CreateWorkflowModal', () => {
 
     await user.type(screen.getByLabelText('Name'), 'Cancel a booking')
     await user.type(screen.getByLabelText('Description (optional)'), 'Cancels an existing reservation.')
+    await user.type(screen.getByLabelText('Applies when (optional)'), 'when a caller wants to cancel')
     await user.click(screen.getByRole('button', { name: 'Create workflow' }))
 
     expect(await screen.findByRole('heading', { name: 'Workflow detail' })).toBeInTheDocument()
@@ -61,6 +62,7 @@ describe('CreateWorkflowModal', () => {
     const created = store.workflows.find((workflow) => workflow.name === 'Cancel a booking')
     expect(created).toMatchObject({
       description: 'Cancels an existing reservation.',
+      appliesWhen: 'when a caller wants to cancel',
       status: 'draft',
       version: 1,
     })

@@ -10,9 +10,12 @@ import { http } from './http'
 export interface CreateWorkflowInput {
   name: string
   description?: string
+  appliesWhen?: string
 }
 
-export type WorkflowPatch = Partial<Pick<Workflow, 'name' | 'description' | 'steps'>>
+export type WorkflowPatch = Partial<
+  Pick<Workflow, 'name' | 'description' | 'appliesWhen' | 'steps'>
+>
 
 /** PRD §15 / US-8.1, US-8.2. */
 export interface WorkflowService {
@@ -56,6 +59,7 @@ const mockWorkflowService: WorkflowService = {
       organizationId: MOCK_ORGANIZATION_ID,
       name: input.name,
       description: input.description,
+      appliesWhen: input.appliesWhen,
       status: 'draft',
       version: 1,
       steps: [],

@@ -30,12 +30,45 @@ export const WORKFLOW_STEP_TYPE_LABELS: Record<WorkflowStepType, string> = {
   end: 'End workflow',
 }
 
+/**
+ * The guide tools a step may name. Same names, same order as the backend's
+ * `app/console/workflows/tools.py` `WORKFLOW_TOOLS` (a pytest checks this).
+ */
+export const WORKFLOW_TOOLS = [
+  'listCatalog',
+  'checkAvailability',
+  'findReservations',
+  'listCustomers',
+  'createCustomer',
+  'createReservation',
+  'cancelReservation',
+  'sendPaymentLink',
+  'get_caller_phone_number',
+  'endCall',
+] as const
+
+export type WorkflowTool = (typeof WORKFLOW_TOOLS)[number]
+
+export const WORKFLOW_TOOL_LABELS: Record<WorkflowTool, string> = {
+  listCatalog: 'List catalog',
+  checkAvailability: 'Check availability',
+  findReservations: 'Find reservations',
+  listCustomers: 'List customers',
+  createCustomer: 'Create customer',
+  createReservation: 'Create reservation',
+  cancelReservation: 'Cancel reservation',
+  sendPaymentLink: 'Send payment link',
+  get_caller_phone_number: "Get caller's phone number",
+  endCall: 'End call',
+}
+
 export interface WorkflowStep {
   id: Id
   name: string
   description?: string
   type: WorkflowStepType
-  requiredIntegrationId?: Id
+  /** The guide tool this step calls, if any. */
+  tool?: WorkflowTool
   /** What Concierge does when this step fails (PRD §15.4). */
   errorBehavior?: string
   escalationBehavior?: string
@@ -48,6 +81,8 @@ export interface Workflow extends TenantScoped {
   id: Id
   name: string
   description?: string
+  /** When Concierge should use this workflow, in plain words. */
+  appliesWhen?: string
   status: WorkflowStatus
   version: number
   steps: WorkflowStep[]

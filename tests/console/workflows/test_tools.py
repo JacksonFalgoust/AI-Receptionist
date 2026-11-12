@@ -21,7 +21,6 @@ def test_workflow_tools_match_the_guide_tool_schemas():
     assert len(WORKFLOW_TOOLS) == len(set(WORKFLOW_TOOLS))
 
 
-@pytest.mark.xfail(strict=True, reason="frontend list added in Task 5")
 def test_frontend_tool_list_matches_backend():
     text = (ROOT / "frontend" / "src" / "types" / "workflow.ts").read_text()
     block = re.search(r"WORKFLOW_TOOLS\s*=\s*\[(.*?)\]\s*as const", text, re.S).group(1)

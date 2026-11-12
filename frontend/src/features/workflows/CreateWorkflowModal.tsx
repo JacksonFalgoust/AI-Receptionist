@@ -30,6 +30,7 @@ export interface CreateWorkflowModalProps {
 export function CreateWorkflowModal({ isOpen, onClose }: CreateWorkflowModalProps) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [appliesWhen, setAppliesWhen] = useState('')
   const [nameError, setNameError] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const toast = useToast()
@@ -40,6 +41,7 @@ export function CreateWorkflowModal({ isOpen, onClose }: CreateWorkflowModalProp
       workflowService.create({
         name: name.trim(),
         description: description.trim() || undefined,
+        appliesWhen: appliesWhen.trim() || undefined,
       }),
     onSuccess: (workflow) => {
       queryClient.setQueryData<Workflow[]>(WORKFLOWS_KEY, (current) =>
@@ -58,6 +60,7 @@ export function CreateWorkflowModal({ isOpen, onClose }: CreateWorkflowModalProp
   function reset() {
     setName('')
     setDescription('')
+    setAppliesWhen('')
     setNameError(null)
   }
 
@@ -111,6 +114,13 @@ export function CreateWorkflowModal({ isOpen, onClose }: CreateWorkflowModalProp
           onChange={(event) => setDescription(event.target.value)}
           rows={3}
         />
+      </Field>
+      <Field
+        label="Applies when (optional)"
+        htmlFor="workflow-applies-when"
+        description="Say when Concierge should use this, for example: when a caller asks to make a reservation."
+      >
+        <Input value={appliesWhen} onChange={(event) => setAppliesWhen(event.target.value)} />
       </Field>
     </Modal>
   )

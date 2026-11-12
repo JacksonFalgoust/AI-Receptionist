@@ -8,7 +8,8 @@ import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { Button } from '@/components/ui/Button'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { QueryBoundary } from '@/components/ui/QueryBoundary'
-import type { SelectOption } from '@/components/ui/Select'
+import { Field } from '@/components/ui/Field'
+import { Input } from '@/components/ui/Input'
 import { useToast } from '@/components/ui/ToastProvider'
 import { useConfirm } from '@/components/ui/useConfirm'
 import { StepEditor } from '@/features/workflows/StepEditor'
@@ -23,7 +24,6 @@ import type { WorkflowStepsFormValues } from '@/features/workflows/workflowStepF
 import { statusTone } from '@/lib/statusTone'
 import { paths } from '@/routes/paths'
 import { toAppError } from '@/services/errors'
-import { integrationService } from '@/services/integrationService'
 import { workflowService } from '@/services/workflowService'
 import type { Workflow } from '@/types'
 
@@ -42,15 +42,6 @@ export function WorkflowDetailPage() {
     queryFn: () => workflowService.get(id!),
   })
 
-  const integrationsQuery = useQuery({
-    queryKey: ['integrations'],
-    queryFn: () => integrationService.list(),
-  })
-  const integrationOptions: SelectOption[] = (integrationsQuery.data ?? []).map((integration) => ({
-    value: integration.id,
-    label: integration.name,
-  }))
-
   return (
     <div className="mx-auto max-w-6xl">
       <div className="mb-3">
@@ -62,13 +53,7 @@ export function WorkflowDetailPage() {
         />
       </div>
       <QueryBoundary query={query} skeletonRows={8}>
-        {(workflow) => (
-          <WorkflowStepsForm
-            workflow={workflow}
-            detailKey={detailKey}
-            integrationOptions={integrationOptions}
-          />
-        )}
+        {(workflow) => <WorkflowStepsForm workflow={workflow} detailKey={detailKey} />}
       </QueryBoundary>
     </div>
   )
@@ -77,11 +62,9 @@ export function WorkflowDetailPage() {
 function WorkflowStepsForm({
   workflow,
   detailKey,
-  integrationOptions,
 }: {
   workflow: Workflow
   detailKey: unknown[]
-  integrationOptions: SelectOption[]
 }) {
   const queryClient = useQueryClient()
   const toast = useToast()
@@ -106,6 +89,7 @@ function WorkflowStepsForm({
       // Publish always saves what's on screen first, so what gets published
       // is never a stale draft from before the admin's last edit.
       const saved = await workflowService.saveDraft(workflow.id, {
+        appliesWhen: values.appliesWhen.trim(),
         steps: formValuesToSteps(values),
       })
       return thenPublish ? workflowService.publish(workflow.id) : saved
@@ -138,9 +122,13 @@ function WorkflowStepsForm({
       toast.show('Add at least one step before publishing.', { tone: 'danger' })
       return
     }
+    if (values.appliesWhen.trim() === '') {
+      toast.show("Add an 'Applies when' before publishing.", { tone: 'danger' })
+      return
+    }
     const confirmed = await confirm({
       title: 'Publish this workflow?',
-      description: 'Concierge will immediately use these steps for new conversations.',
+      description: 'These steps are added to the guide the next time you publish the guide.',
       confirmLabel: 'Publish',
     })
     if (!confirmed) return
@@ -199,6 +187,13 @@ function WorkflowStepsForm({
           </>
         }
       />
+      <Field
+        label="Applies when"
+        htmlFor="workflow-applies-when"
+        description="Say when Concierge should use this, for example: when a caller asks to make a reservation."
+      >
+        <Input {...form.register('appliesWhen')} />
+      </Field>
       <div className="grid gap-4 lg:grid-cols-2">
         <StepList
           steps={steps}
@@ -209,7 +204,6 @@ function WorkflowStepsForm({
         />
         <StepEditor
           index={selectedIndex === -1 ? null : selectedIndex}
-          integrationOptions={integrationOptions}
           onDelete={() => {
             if (selectedIndex !== -1) handleDeleteStep(steps[selectedIndex].id)
           }}

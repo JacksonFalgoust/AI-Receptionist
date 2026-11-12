@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router-dom'
 
 import { resetStore, store } from '@/mocks/store'
 import { paths } from '@/routes/paths'
+import { workflowService } from '@/services/workflowService'
 import { renderWithProviders, seedSession } from '@/test/renderWithProviders'
 
 import { WorkflowDetailPage } from './WorkflowDetailPage'
@@ -65,15 +66,56 @@ describe('WorkflowDetailPage', () => {
     expect(screen.getByLabelText('Name')).toHaveValue('Confirm the chosen time')
   })
 
-  it('offers the connected integrations as required-integration options', async () => {
+  it('shows the step\'s tool in the editor', async () => {
     renderPage(paths.workflow('wf_booking'))
     await screen.findByLabelText('Name')
 
     await userEvent
       .setup()
       .click(screen.getByRole('button', { name: /^(?!Move ).*Check the client record/ }))
-    expect(screen.getByLabelText('Required integration')).toHaveValue('int_customer_records')
-    expect(screen.getByText('Customer Records')).toBeInTheDocument()
+    expect(screen.getByLabelText('Tool')).toHaveValue('listCustomers')
+  })
+
+  it('shows the stored Applies when value', async () => {
+    renderPage(paths.workflow('wf_booking'))
+    await screen.findByLabelText('Name')
+    expect(screen.getByLabelText('Applies when')).toHaveValue(
+      store.workflows.find((w) => w.id === 'wf_booking')!.appliesWhen,
+    )
+  })
+
+  it('saves an edited Applies when with the steps', async () => {
+    const user = userEvent.setup()
+    const spy = vi.spyOn(workflowService, 'saveDraft')
+    renderPage(paths.workflow('wf_booking'))
+    await screen.findByLabelText('Name')
+
+    await user.clear(screen.getByLabelText('Applies when'))
+    await user.type(screen.getByLabelText('Applies when'), 'when a caller wants to book')
+    await user.click(screen.getByRole('button', { name: 'Save draft' }))
+
+    expect(await screen.findByText('Draft saved.')).toBeInTheDocument()
+    expect(spy).toHaveBeenCalledWith(
+      'wf_booking',
+      expect.objectContaining({
+        appliesWhen: 'when a caller wants to book',
+        steps: expect.any(Array),
+      }),
+    )
+    spy.mockRestore()
+  })
+
+  it('blocks publishing with a blank Applies when', async () => {
+    const user = userEvent.setup()
+    renderPage(paths.workflow('wf_booking'))
+    await screen.findByLabelText('Name')
+
+    await user.clear(screen.getByLabelText('Applies when'))
+    await user.click(screen.getByRole('button', { name: 'Publish' }))
+
+    expect(await screen.findByText("Add an 'Applies when' before publishing.")).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(store.workflows.find((w) => w.id === 'wf_booking')!.version).toBe(7)
   })
 
   it('saves an edit as a draft without publishing', async () => {
@@ -171,7 +213,7 @@ describe('WorkflowDetailPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Publish' }))
     const dialog = within(await screen.findByRole('dialog'))
-    expect(dialog.getByText(/immediately use/)).toBeInTheDocument()
+    expect(dialog.getByText(/added to the guide the next time you publish the guide/)).toBeInTheDocument()
     await user.click(dialog.getByRole('button', { name: 'Publish' }))
 
     expect(await screen.findByText('Workflow published.')).toBeInTheDocument()

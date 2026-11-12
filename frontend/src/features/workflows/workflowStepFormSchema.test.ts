@@ -11,13 +11,14 @@ import {
 import type { WorkflowStepsFormValues } from './workflowStepFormSchema'
 
 const baseValues: WorkflowStepsFormValues = {
+  appliesWhen: 'when a caller asks to book',
   steps: [
     {
       id: 'wfs_1',
       name: 'Check availability',
       description: 'Scheduling system, offer alternatives.',
       type: 'look_up',
-      requiredIntegrationId: 'int_scheduling',
+      tool: 'checkAvailability',
       errorBehavior: 'Escalate to a team member',
       escalationBehavior: '',
       configuration: [{ key: 'timeoutSeconds', value: '30' }],
@@ -30,6 +31,7 @@ const baseWorkflow: Workflow = {
   organizationId: 'org_horizon',
   name: 'Book an appointment',
   description: 'Books a client appointment.',
+  appliesWhen: 'when a caller asks to book',
   status: 'active',
   version: 4,
   executionCount: 12,
@@ -40,7 +42,7 @@ const baseWorkflow: Workflow = {
       name: 'Check availability',
       description: 'Scheduling system, offer alternatives.',
       type: 'look_up',
-      requiredIntegrationId: 'int_scheduling',
+      tool: 'checkAvailability',
       errorBehavior: 'Escalate to a team member',
       configuration: { timeoutSeconds: '30' },
     },
@@ -57,7 +59,7 @@ describe('workflowStepsFormSchema', () => {
   })
 
   it('accepts an empty step list', () => {
-    expect(workflowStepsFormSchema.safeParse({ steps: [] }).success).toBe(true)
+    expect(workflowStepsFormSchema.safeParse({ appliesWhen: '', steps: [] }).success).toBe(true)
   })
 
   it('accepts a fully filled-in step', () => {
@@ -73,10 +75,11 @@ describe('workflowToFormValues', () => {
       name: 'Check availability',
       description: 'Scheduling system, offer alternatives.',
       type: 'look_up',
-      requiredIntegrationId: 'int_scheduling',
+      tool: 'checkAvailability',
       errorBehavior: 'Escalate to a team member',
       escalationBehavior: '',
     })
+    expect(values.appliesWhen).toBe('when a caller asks to book')
   })
 
   it('turns a step\'s configuration record into rows', () => {
@@ -92,11 +95,16 @@ describe('workflowToFormValues', () => {
   it('gives an optional field with no value an empty string, not undefined', () => {
     const values = workflowToFormValues(baseWorkflow)
     expect(values.steps[1].description).toBe('')
-    expect(values.steps[1].requiredIntegrationId).toBe('')
+    expect(values.steps[1].tool).toBe('')
   })
 })
 
 describe('formValuesToSteps', () => {
+  it('round-trips a step\'s tool', () => {
+    const [step] = formValuesToSteps(baseValues)
+    expect(step.tool).toBe('checkAvailability')
+  })
+
   it('turns configuration rows back into a record', () => {
     const [step] = formValuesToSteps(baseValues)
     expect(step.configuration).toEqual({ timeoutSeconds: '30' })
@@ -131,7 +139,7 @@ describe('formValuesToSteps', () => {
           ...baseValues.steps[0],
           name: '  Check availability  ',
           description: '   ',
-          requiredIntegrationId: '',
+          tool: '',
           errorBehavior: '  ',
           escalationBehavior: '',
         },
@@ -140,7 +148,7 @@ describe('formValuesToSteps', () => {
     expect(step).toMatchObject({
       name: 'Check availability',
       description: undefined,
-      requiredIntegrationId: undefined,
+      tool: undefined,
       errorBehavior: undefined,
       escalationBehavior: undefined,
     })
@@ -148,6 +156,10 @@ describe('formValuesToSteps', () => {
 })
 
 describe('emptyStep', () => {
+  it('starts with no tool', () => {
+    expect(emptyStep().tool).toBe('')
+  })
+
   it('starts blank with the first step type and a fresh id', () => {
     const a = emptyStep()
     const b = emptyStep()

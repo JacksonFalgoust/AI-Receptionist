@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
-import { WORKFLOW_STEP_TYPES } from '@/types'
-import type { Workflow, WorkflowStep } from '@/types'
+import { WORKFLOW_STEP_TYPES, WORKFLOW_TOOLS } from '@/types'
+import type { Workflow, WorkflowStep, WorkflowTool } from '@/types'
 
 export interface ConfigurationRowValues {
   key: string
@@ -14,8 +14,8 @@ export interface StepFormValues {
   name: string
   description: string
   type: WorkflowStep['type']
-  /** `''` means "no required integration". */
-  requiredIntegrationId: string
+  /** `''` means "no tool". */
+  tool: string
   errorBehavior: string
   escalationBehavior: string
   /** `WorkflowStep.configuration`'s `Record<string, string>`, laid out as editable rows. */
@@ -23,6 +23,7 @@ export interface StepFormValues {
 }
 
 export interface WorkflowStepsFormValues {
+  appliesWhen: string
   steps: StepFormValues[]
 }
 
@@ -37,7 +38,7 @@ const stepSchema = z
     name: z.string().trim().min(1, 'Enter a step name'),
     description: z.string(),
     type: z.enum(WORKFLOW_STEP_TYPES),
-    requiredIntegrationId: z.string(),
+    tool: z.string(),
     errorBehavior: z.string(),
     escalationBehavior: z.string(),
     configuration: z.array(configurationRowSchema),
@@ -63,18 +64,24 @@ const stepSchema = z
   })
 
 export const workflowStepsFormSchema = z.object({
+  appliesWhen: z.string(),
   steps: z.array(stepSchema),
 })
+
+function isWorkflowTool(value: string): value is WorkflowTool {
+  return (WORKFLOW_TOOLS as readonly string[]).includes(value)
+}
 
 /** A workflow's steps, laid out as the editor's controls expect them. */
 export function workflowToFormValues(workflow: Workflow): WorkflowStepsFormValues {
   return {
+    appliesWhen: workflow.appliesWhen ?? '',
     steps: workflow.steps.map((step) => ({
       id: step.id,
       name: step.name,
       description: step.description ?? '',
       type: step.type,
-      requiredIntegrationId: step.requiredIntegrationId ?? '',
+      tool: step.tool ?? '',
       errorBehavior: step.errorBehavior ?? '',
       escalationBehavior: step.escalationBehavior ?? '',
       configuration: Object.entries(step.configuration ?? {}).map(([key, value]) => ({
@@ -99,7 +106,7 @@ export function formValuesToSteps(values: WorkflowStepsFormValues): WorkflowStep
       name: step.name.trim(),
       description: step.description.trim() || undefined,
       type: step.type,
-      requiredIntegrationId: step.requiredIntegrationId || undefined,
+      tool: isWorkflowTool(step.tool) ? step.tool : undefined,
       errorBehavior: step.errorBehavior.trim() || undefined,
       escalationBehavior: step.escalationBehavior.trim() || undefined,
       configuration: Object.keys(configuration).length > 0 ? configuration : undefined,
@@ -114,7 +121,7 @@ export function emptyStep(): StepFormValues {
     name: '',
     description: '',
     type: WORKFLOW_STEP_TYPES[0],
-    requiredIntegrationId: '',
+    tool: '',
     errorBehavior: '',
     escalationBehavior: '',
     configuration: [],
