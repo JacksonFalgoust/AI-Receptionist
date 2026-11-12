@@ -224,7 +224,6 @@ def test_patch_keeps_step_optional_fields(db_session_factory):
         "tool": "checkAvailability",
         "errorBehavior": "Apologize and offer a callback",
         "escalationBehavior": "Transfer to a human",
-        "configuration": {"category": "bikes"},
     }
 
     response = client.patch(f"/api/workflows/{workflow_id}", json={"steps": [step]})
@@ -234,7 +233,6 @@ def test_patch_keeps_step_optional_fields(db_session_factory):
     assert out_step["tool"] == "checkAvailability"
     assert out_step["errorBehavior"] == "Apologize and offer a callback"
     assert out_step["escalationBehavior"] == "Transfer to a human"
-    assert out_step["configuration"] == {"category": "bikes"}
 
 
 def test_publish_rejects_empty_steps_with_422(db_session_factory):
@@ -357,6 +355,27 @@ def test_get_tolerates_a_stored_step_with_required_integration_id(db_session_fac
     step = response.json()["steps"][0]
     assert "requiredIntegrationId" not in step
     assert step["tool"] is None
+
+
+def test_get_tolerates_a_stored_step_with_configuration(db_session_factory):
+    workflow_id = _seed_with_steps(
+        db_session_factory,
+        [{"id": "s1", "name": "n", "type": "look_up", "configuration": {"category": "bikes"}}],
+    )
+
+    response = client.get(f"/api/workflows/{workflow_id}")
+
+    assert response.status_code == 200
+    assert "configuration" not in response.json()["steps"][0]
+
+
+def test_patch_rejects_step_configuration_with_422(db_session_factory):
+    workflow_id = _seed(db_session_factory)
+    step = {"id": "s1", "name": "n", "type": "look_up", "configuration": {"k": "v"}}
+
+    response = client.patch(f"/api/workflows/{workflow_id}", json={"steps": [step]})
+
+    assert response.status_code == 422
 
 
 def test_publish_rejects_blank_applies_when_with_422(db_session_factory):

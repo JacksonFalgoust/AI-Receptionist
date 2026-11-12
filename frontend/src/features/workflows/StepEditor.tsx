@@ -1,4 +1,4 @@
-import { useFieldArray, useFormContext } from 'react-hook-form'
+import { useFormContext } from 'react-hook-form'
 
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
@@ -53,13 +53,9 @@ export function StepEditor({ index, onDelete }: StepEditorProps) {
     )
   }
 
-  // Keyed by both the step's own id and its index: `useFieldArray` below does
-  // not support a dynamically-changing array path on one mounted instance, so
-  // anything that changes which path `steps.${index}.configuration` points
-  // at must remount it. Id alone misses a step moving to a different index
-  // (Move up/down keeps the same id); index alone misses a step being
-  // deleted and the fallback selection landing on the same index a different
-  // step now occupies.
+  // Keyed by both the step's own id and its index so the fields remount
+  // when the selection moves to a different step, or a step moves or is
+  // deleted and a different one lands on the same index.
   return (
     <StepFields
       key={`${watch(`steps.${index}.id`)}:${index}`}
@@ -78,15 +74,9 @@ function StepFields({ index, onDelete }: StepFieldsProps) {
   const {
     register,
     watch,
-    control,
     formState: { errors },
   } = useFormContext<WorkflowStepsFormValues>()
   const confirm = useConfirm()
-
-  const configuration = useFieldArray({
-    control,
-    name: `steps.${index}.configuration`,
-  })
 
   const step = watch(`steps.${index}`)
   const stepErrors = errors.steps?.[index]
@@ -136,49 +126,6 @@ function StepFields({ index, onDelete }: StepFieldsProps) {
         <Field label="Escalation behavior" htmlFor={`step-${index}-escalation`}>
           <Textarea rows={2} {...register(`steps.${index}.escalationBehavior`)} />
         </Field>
-
-        <fieldset className="mb-4">
-          <legend className="mb-1.5 block text-sm font-semibold text-ink">Configuration</legend>
-          <div className="space-y-2">
-            {configuration.fields.map((field, rowIndex) => {
-              const rowError = stepErrors?.configuration?.[rowIndex]?.key?.message
-              return (
-                <div key={field.id}>
-                  <div className="flex gap-2">
-                    <Input
-                      aria-label="Configuration key"
-                      placeholder="Key"
-                      invalid={Boolean(rowError)}
-                      {...register(`steps.${index}.configuration.${rowIndex}.key`)}
-                    />
-                    <Input
-                      aria-label="Configuration value"
-                      placeholder="Value"
-                      {...register(`steps.${index}.configuration.${rowIndex}.value`)}
-                    />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={`Remove configuration row ${rowIndex + 1}`}
-                      onClick={() => configuration.remove(rowIndex)}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                  {rowError ? <p className="mt-1 text-xs text-danger">{rowError}</p> : null}
-                </div>
-              )
-            })}
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="mt-2"
-            onClick={() => configuration.append({ key: '', value: '' })}
-          >
-            Add configuration
-          </Button>
-        </fieldset>
       </div>
     </Panel>
   )

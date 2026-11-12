@@ -21,7 +21,6 @@ const baseValues: WorkflowStepsFormValues = {
       tool: 'checkAvailability',
       errorBehavior: 'Escalate to a team member',
       escalationBehavior: '',
-      configuration: [{ key: 'timeoutSeconds', value: '30' }],
     },
   ],
 }
@@ -44,7 +43,6 @@ const baseWorkflow: Workflow = {
       type: 'look_up',
       tool: 'checkAvailability',
       errorBehavior: 'Escalate to a team member',
-      configuration: { timeoutSeconds: '30' },
     },
     { id: 'wfs_2', name: 'End the call', type: 'end' },
   ],
@@ -82,16 +80,6 @@ describe('workflowToFormValues', () => {
     expect(values.appliesWhen).toBe('when a caller asks to book')
   })
 
-  it('turns a step\'s configuration record into rows', () => {
-    const values = workflowToFormValues(baseWorkflow)
-    expect(values.steps[0].configuration).toEqual([{ key: 'timeoutSeconds', value: '30' }])
-  })
-
-  it('gives a step with no configuration an empty row list', () => {
-    const values = workflowToFormValues(baseWorkflow)
-    expect(values.steps[1].configuration).toEqual([])
-  })
-
   it('gives an optional field with no value an empty string, not undefined', () => {
     const values = workflowToFormValues(baseWorkflow)
     expect(values.steps[1].description).toBe('')
@@ -103,33 +91,6 @@ describe('formValuesToSteps', () => {
   it('round-trips a step\'s tool', () => {
     const [step] = formValuesToSteps(baseValues)
     expect(step.tool).toBe('checkAvailability')
-  })
-
-  it('turns configuration rows back into a record', () => {
-    const [step] = formValuesToSteps(baseValues)
-    expect(step.configuration).toEqual({ timeoutSeconds: '30' })
-  })
-
-  it('drops rows with a blank key', () => {
-    const [step] = formValuesToSteps({
-      steps: [
-        {
-          ...baseValues.steps[0],
-          configuration: [
-            { key: 'timeoutSeconds', value: '30' },
-            { key: '  ', value: 'ignored' },
-          ],
-        },
-      ],
-    })
-    expect(step.configuration).toEqual({ timeoutSeconds: '30' })
-  })
-
-  it('omits configuration entirely once every row is dropped', () => {
-    const [step] = formValuesToSteps({
-      steps: [{ ...baseValues.steps[0], configuration: [{ key: '', value: '' }] }],
-    })
-    expect(step.configuration).toBeUndefined()
   })
 
   it('trims a step name and drops blank optional fields back to undefined', () => {
@@ -164,7 +125,6 @@ describe('emptyStep', () => {
     const a = emptyStep()
     const b = emptyStep()
     expect(a.name).toBe('')
-    expect(a.configuration).toEqual([])
     expect(a.id).not.toBe(b.id)
   })
 })

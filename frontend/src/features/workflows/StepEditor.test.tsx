@@ -20,7 +20,6 @@ const baseStep: StepFormValues = {
   tool: 'checkAvailability',
   errorBehavior: 'Escalate to a team member',
   escalationBehavior: '',
-  configuration: [{ key: 'timeoutSeconds', value: '30' }],
 }
 
 function Harness({
@@ -93,52 +92,6 @@ describe('StepEditor', () => {
     expect(options.slice(1).map((o) => (o as HTMLOptionElement).value)).toEqual([...WORKFLOW_TOOLS])
   })
 
-  it('shows the step\'s configuration rows', () => {
-    render(<Harness index={0} />)
-    expect(screen.getByDisplayValue('timeoutSeconds')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('30')).toBeInTheDocument()
-  })
-
-  it('adds a blank configuration row', async () => {
-    const user = userEvent.setup()
-    render(<Harness index={0} step={{ ...baseStep, configuration: [] }} />)
-
-    await user.click(screen.getByRole('button', { name: 'Add configuration' }))
-
-    expect(screen.getByLabelText('Configuration key')).toBeInTheDocument()
-    expect(screen.getByLabelText('Configuration value')).toBeInTheDocument()
-  })
-
-  it('removes a configuration row', async () => {
-    const user = userEvent.setup()
-    render(<Harness index={0} />)
-
-    await user.click(screen.getByRole('button', { name: 'Remove configuration row 1' }))
-
-    expect(screen.queryByDisplayValue('timeoutSeconds')).not.toBeInTheDocument()
-  })
-
-  it('gives each configuration row remove button a distinct name', async () => {
-    const user = userEvent.setup()
-    render(
-      <Harness
-        index={0}
-        step={{
-          ...baseStep,
-          configuration: [
-            { key: 'timeoutSeconds', value: '30' },
-            { key: 'retries', value: '2' },
-          ],
-        }}
-      />,
-    )
-
-    await user.click(screen.getByRole('button', { name: 'Remove configuration row 1' }))
-
-    expect(screen.queryByDisplayValue('timeoutSeconds')).not.toBeInTheDocument()
-    expect(screen.getByDisplayValue('retries')).toBeInTheDocument()
-  })
-
   it('asks to confirm before deleting a step', async () => {
     const user = userEvent.setup()
     const onDelete = vi.fn()
@@ -164,63 +117,22 @@ describe('StepEditor', () => {
     expect(onDelete).not.toHaveBeenCalled()
   })
 
-  it('shows the newly selected step\'s own configuration, not the previous step\'s stale rows', () => {
-    // react-hook-form's useFieldArray does not support a dynamically-changing
-    // `name` on one mounted instance — this reproduces switching the selected
-    // step within the same mounted form, exactly how WorkflowDetailPage does it.
+  it('shows the newly selected step\'s own name, not the previous step\'s', () => {
+    // Reproduces switching the selected step within the same mounted form,
+    // exactly how WorkflowDetailPage does it.
     const stepA = { ...baseStep, id: 'wfs_a' }
     const stepB = {
       ...emptyStep(),
       id: 'wfs_b',
       name: 'End the call',
       type: 'end' as const,
-      configuration: [],
     }
     const { rerender } = render(<Harness steps={[stepA, stepB]} index={0} />)
-    expect(screen.getByDisplayValue('timeoutSeconds')).toBeInTheDocument()
+    expect(screen.getByLabelText('Name')).toHaveValue('Check availability')
 
     rerender(<Harness steps={[stepA, stepB]} index={1} />)
 
-    expect(screen.queryByDisplayValue('timeoutSeconds')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Configuration key')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Name')).toHaveValue('End the call')
   })
 
-  it('keeps a step\'s own configuration intact after switching away and back', async () => {
-    const user = userEvent.setup()
-    const stepA = { ...baseStep, id: 'wfs_a' }
-    const stepB = {
-      ...emptyStep(),
-      id: 'wfs_b',
-      name: 'End the call',
-      type: 'end' as const,
-      configuration: [],
-    }
-    const { rerender } = render(<Harness steps={[stepA, stepB]} index={1} />)
-
-    await user.click(screen.getByRole('button', { name: 'Add configuration' }))
-    await user.type(screen.getByLabelText('Configuration key'), 'note')
-
-    rerender(<Harness steps={[stepA, stepB]} index={0} />)
-    expect(screen.getByDisplayValue('timeoutSeconds')).toBeInTheDocument()
-    expect(screen.queryByDisplayValue('note')).not.toBeInTheDocument()
-  })
-
-  it('flags configuration rows that share a key', async () => {
-    const user = userEvent.setup()
-    render(
-      <Harness
-        index={0}
-        step={{
-          ...baseStep,
-          configuration: [
-            { key: 'timeoutSeconds', value: '30' },
-            { key: 'timeoutSeconds', value: '45' },
-          ],
-        }}
-      />,
-    )
-
-    await user.click(screen.getByRole('button', { name: 'Submit' }))
-    expect(await screen.findByText('Configuration keys must be unique.')).toBeInTheDocument()
-  })
 })

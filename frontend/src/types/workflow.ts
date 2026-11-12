@@ -72,7 +72,6 @@ export interface WorkflowStep {
   /** What Concierge does when this step fails (PRD §15.4). */
   errorBehavior?: string
   escalationBehavior?: string
-  configuration?: Record<string, string>
 }
 
 export type WorkflowStatus = 'draft' | 'active' | 'inactive'

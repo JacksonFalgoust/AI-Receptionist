@@ -160,19 +160,15 @@ describe('WorkflowDetailPage', () => {
     expect(screen.getByLabelText('Name')).toHaveValue('Confirm the chosen time')
   })
 
-  it('shows the moved step\'s own configuration after reordering, not the row count of whichever step now sits at its old position', async () => {
+  it('shows the moved step\'s own fields after reordering', async () => {
     const user = userEvent.setup()
     renderPage(paths.workflow('wf_booking'))
     const firstStepName = await screen.findByLabelText('Name')
     expect(firstStepName).toHaveValue('Ask what the client needs')
 
-    await user.click(screen.getByRole('button', { name: 'Add configuration' }))
-    await user.type(screen.getByLabelText('Configuration key'), 'note')
-
     await user.click(screen.getByRole('button', { name: 'Move Ask what the client needs down' }))
 
     expect(screen.getByLabelText('Name')).toHaveValue('Ask what the client needs')
-    expect(screen.getByDisplayValue('note')).toBeInTheDocument()
   })
 
   it('adds a step and saves it', async () => {

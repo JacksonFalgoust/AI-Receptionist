@@ -37,6 +37,9 @@ WorkflowStepType = Literal[
 NonBlankStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
+_LEGACY_STEP_KEYS = frozenset({"requiredIntegrationId", "configuration"})
+
+
 class WorkflowStepModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -47,7 +50,6 @@ class WorkflowStepModel(BaseModel):
     tool: str | None = None
     errorBehavior: str | None = None
     escalationBehavior: str | None = None
-    configuration: dict[str, str] | None = None
 
     @field_validator("tool")
     @classmethod
@@ -105,11 +107,12 @@ def _workflow_out(workflow: models.Workflow) -> WorkflowOut:
         appliesWhen=workflow.applies_when,
         status=workflow.status,
         version=workflow.version,
-        # Steps saved before `tool` replaced requiredIntegrationId still carry
-        # the old key (extra="forbid" would reject it); drop it on read, the
-        # next save writes the clean shape.
+        # Steps saved before `tool` replaced requiredIntegrationId, or before
+        # the per-step `configuration` map was removed, still carry those keys
+        # (extra="forbid" would reject them); drop them on read, the next save
+        # writes the clean shape.
         steps=[
-            WorkflowStepModel(**{k: v for k, v in step.items() if k != "requiredIntegrationId"})
+            WorkflowStepModel(**{k: v for k, v in step.items() if k not in _LEGACY_STEP_KEYS})
             for step in (workflow.steps or [])
         ],
         executionCount=workflow.execution_count,
