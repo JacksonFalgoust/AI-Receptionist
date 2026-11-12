@@ -1,4 +1,4 @@
-import { useFieldArray, useFormContext } from 'react-hook-form'
+import { useFormContext } from 'react-hook-form'
 
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
@@ -8,8 +8,12 @@ import { Select } from '@/components/ui/Select'
 import type { SelectOption } from '@/components/ui/Select'
 import { Textarea } from '@/components/ui/Textarea'
 import { useConfirm } from '@/components/ui/useConfirm'
-import { withCurrentValue } from '@/lib/selectOptions'
-import { WORKFLOW_STEP_TYPE_LABELS, WORKFLOW_STEP_TYPES } from '@/types'
+import {
+  WORKFLOW_STEP_TYPE_LABELS,
+  WORKFLOW_STEP_TYPES,
+  WORKFLOW_TOOL_LABELS,
+  WORKFLOW_TOOLS,
+} from '@/types'
 
 import type { WorkflowStepsFormValues } from './workflowStepFormSchema'
 
@@ -18,10 +22,14 @@ const TYPE_OPTIONS: SelectOption[] = WORKFLOW_STEP_TYPES.map((type) => ({
   label: WORKFLOW_STEP_TYPE_LABELS[type],
 }))
 
+const TOOL_OPTIONS: SelectOption[] = WORKFLOW_TOOLS.map((tool) => ({
+  value: tool,
+  label: WORKFLOW_TOOL_LABELS[tool],
+}))
+
 export interface StepEditorProps {
   /** The step's position in the shared form's `steps` array, or `null` while none is selected. */
   index: number | null
-  integrationOptions: SelectOption[]
   onDelete: () => void
 }
 
@@ -31,7 +39,7 @@ export interface StepEditorProps {
  * under `steps.${index}`, the same convention `BusinessProfileFields` uses,
  * so it saves and publishes together with the rest of the page's one form.
  */
-export function StepEditor({ index, integrationOptions, onDelete }: StepEditorProps) {
+export function StepEditor({ index, onDelete }: StepEditorProps) {
   const { watch } = useFormContext<WorkflowStepsFormValues>()
 
   if (index === null) {
@@ -45,18 +53,13 @@ export function StepEditor({ index, integrationOptions, onDelete }: StepEditorPr
     )
   }
 
-  // Keyed by both the step's own id and its index: `useFieldArray` below does
-  // not support a dynamically-changing array path on one mounted instance, so
-  // anything that changes which path `steps.${index}.configuration` points
-  // at must remount it. Id alone misses a step moving to a different index
-  // (Move up/down keeps the same id); index alone misses a step being
-  // deleted and the fallback selection landing on the same index a different
-  // step now occupies.
+  // Keyed by both the step's own id and its index so the fields remount
+  // when the selection moves to a different step, or a step moves or is
+  // deleted and a different one lands on the same index.
   return (
     <StepFields
       key={`${watch(`steps.${index}.id`)}:${index}`}
       index={index}
-      integrationOptions={integrationOptions}
       onDelete={onDelete}
     />
   )
@@ -64,30 +67,19 @@ export function StepEditor({ index, integrationOptions, onDelete }: StepEditorPr
 
 interface StepFieldsProps {
   index: number
-  integrationOptions: SelectOption[]
   onDelete: () => void
 }
 
-function StepFields({ index, integrationOptions, onDelete }: StepFieldsProps) {
+function StepFields({ index, onDelete }: StepFieldsProps) {
   const {
     register,
     watch,
-    control,
     formState: { errors },
   } = useFormContext<WorkflowStepsFormValues>()
   const confirm = useConfirm()
 
-  const configuration = useFieldArray({
-    control,
-    name: `steps.${index}.configuration`,
-  })
-
   const step = watch(`steps.${index}`)
   const stepErrors = errors.steps?.[index]
-  const requiredIntegrationOptions = withCurrentValue(
-    integrationOptions,
-    step.requiredIntegrationId,
-  )
 
   async function handleDelete() {
     const confirmed = await confirm({
@@ -120,11 +112,11 @@ function StepFields({ index, integrationOptions, onDelete }: StepFieldsProps) {
           <Field label="Type" htmlFor={`step-${index}-type`}>
             <Select {...register(`steps.${index}.type`)} options={TYPE_OPTIONS} />
           </Field>
-          <Field label="Required integration" htmlFor={`step-${index}-integration`}>
+          <Field label="Tool" htmlFor={`step-${index}-tool`}>
             <Select
-              {...register(`steps.${index}.requiredIntegrationId`)}
-              options={requiredIntegrationOptions}
-              placeholder="No required integration"
+              {...register(`steps.${index}.tool`)}
+              options={TOOL_OPTIONS}
+              placeholder="No tool"
             />
           </Field>
         </div>
@@ -134,49 +126,6 @@ function StepFields({ index, integrationOptions, onDelete }: StepFieldsProps) {
         <Field label="Escalation behavior" htmlFor={`step-${index}-escalation`}>
           <Textarea rows={2} {...register(`steps.${index}.escalationBehavior`)} />
         </Field>
-
-        <fieldset className="mb-4">
-          <legend className="mb-1.5 block text-sm font-semibold text-ink">Configuration</legend>
-          <div className="space-y-2">
-            {configuration.fields.map((field, rowIndex) => {
-              const rowError = stepErrors?.configuration?.[rowIndex]?.key?.message
-              return (
-                <div key={field.id}>
-                  <div className="flex gap-2">
-                    <Input
-                      aria-label="Configuration key"
-                      placeholder="Key"
-                      invalid={Boolean(rowError)}
-                      {...register(`steps.${index}.configuration.${rowIndex}.key`)}
-                    />
-                    <Input
-                      aria-label="Configuration value"
-                      placeholder="Value"
-                      {...register(`steps.${index}.configuration.${rowIndex}.value`)}
-                    />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={`Remove configuration row ${rowIndex + 1}`}
-                      onClick={() => configuration.remove(rowIndex)}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                  {rowError ? <p className="mt-1 text-xs text-danger">{rowError}</p> : null}
-                </div>
-              )
-            })}
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="mt-2"
-            onClick={() => configuration.append({ key: '', value: '' })}
-          >
-            Add configuration
-          </Button>
-        </fieldset>
       </div>
     </Panel>
   )

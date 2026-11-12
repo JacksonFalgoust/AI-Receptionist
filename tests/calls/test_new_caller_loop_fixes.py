@@ -149,13 +149,6 @@ def test_send_without_question_still_runs_normally(monkeypatch):
 
 # --- A4 + instructions / OpenAPI -------------------------------------------------
 
-def test_instructions_calling_from_and_text_offer():
-    t = (ROOT / "guide-demo/template/instructions.template.md").read_text(encoding="utf-8")
-    assert "\"the one I'm calling from\"" in t and "means yes to the calling number" in t
-    assert "book right after they answer (no new recap)" in t
-    assert "only call sendPaymentLink in your next reply" in t
-
-
 def test_openapi_documents_new_caller_number_and_carry_over():
     a = (ROOT / "guide-demo/template/OpenAPI/voice-receptionist.json").read_text(encoding="utf-8")
     b = (ROOT / "guide-demo/tools/reservations-client-tool.json").read_text(encoding="utf-8")

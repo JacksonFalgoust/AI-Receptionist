@@ -2,12 +2,13 @@
 POST /api/workflows/{id}/publish -- frontend/src/services/
 workflowService.ts's httpWorkflowService, made real (E6 slice 3).
 
-CONSOLE-ONLY: these records drive the admin console's Workflows pages and
-nothing else. Publishing a workflow here has no effect on live calls --
-nothing in app/'s call-handling code reads this table. What has to change
-to close that gap: docs/superpowers/specs/
-2026-09-17-e6-workflows-design.md, "Future: giving a published workflow
-live effect".
+These records drive the admin console's Workflows pages. Publishing a
+workflow here only marks the row; it does not touch the guide. Active
+workflows with an "Applies when" reach live calls through Guide Publish
+(app/guide/publish/render.py workflow_prose), which renders them into the
+guide's instructions as prose -- the guide follows the steps, this app does
+not enforce them, and execution_count stays 0. See docs/superpowers/specs/
+2026-11-11-workflows-in-guide-instructions-design.md.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from app import models
@@ -24,6 +25,7 @@ from app.console.auth import sessions as auth
 from app.db import get_db
 
 from . import store as workflow_store
+from .tools import WORKFLOW_TOOLS
 
 router = APIRouter()
 
@@ -35,6 +37,9 @@ WorkflowStepType = Literal[
 NonBlankStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
+_LEGACY_STEP_KEYS = frozenset({"requiredIntegrationId", "configuration"})
+
+
 class WorkflowStepModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -42,10 +47,16 @@ class WorkflowStepModel(BaseModel):
     name: NonBlankStr
     description: str | None = None
     type: WorkflowStepType
-    requiredIntegrationId: str | None = None
+    tool: str | None = None
     errorBehavior: str | None = None
     escalationBehavior: str | None = None
-    configuration: dict[str, str] | None = None
+
+    @field_validator("tool")
+    @classmethod
+    def _tool_must_be_a_guide_tool(cls, value: str | None) -> str | None:
+        if value is not None and value not in WORKFLOW_TOOLS:
+            raise ValueError(f"unknown tool {value!r}; expected one of {', '.join(WORKFLOW_TOOLS)}")
+        return value
 
 
 class WorkflowOut(BaseModel):
@@ -53,6 +64,7 @@ class WorkflowOut(BaseModel):
     organizationId: str
     name: str
     description: str | None = None
+    appliesWhen: str | None = None
     status: WorkflowStatus
     version: int
     steps: list[WorkflowStepModel]
@@ -63,11 +75,13 @@ class WorkflowOut(BaseModel):
 class CreateWorkflowIn(BaseModel):
     name: NonBlankStr
     description: str | None = None
+    appliesWhen: str | None = None
 
 
 class WorkflowPatchIn(BaseModel):
     name: NonBlankStr | None = None
     description: str | None = None
+    appliesWhen: str | None = None
     steps: list[WorkflowStepModel] | None = None
 
     @model_validator(mode="after")
@@ -90,9 +104,17 @@ def _workflow_out(workflow: models.Workflow) -> WorkflowOut:
         organizationId=workflow.organization_id,
         name=workflow.name,
         description=workflow.description,
+        appliesWhen=workflow.applies_when,
         status=workflow.status,
         version=workflow.version,
-        steps=[WorkflowStepModel(**step) for step in (workflow.steps or [])],
+        # Steps saved before `tool` replaced requiredIntegrationId, or before
+        # the per-step `configuration` map was removed, still carry those keys
+        # (extra="forbid" would reject them); drop them on read, the next save
+        # writes the clean shape.
+        steps=[
+            WorkflowStepModel(**{k: v for k, v in step.items() if k not in _LEGACY_STEP_KEYS})
+            for step in (workflow.steps or [])
+        ],
         executionCount=workflow.execution_count,
         lastUpdatedAt=_to_iso(workflow.last_updated_at),
     )
@@ -128,7 +150,12 @@ def create_workflow(
     db: Session = Depends(get_db),
     _auth: models.AuthSession = Depends(auth.require_auth),
 ) -> WorkflowOut:
-    workflow = workflow_store.create_workflow(db, name=payload.name, description=payload.description)
+    workflow = workflow_store.create_workflow(
+        db,
+        name=payload.name,
+        description=payload.description,
+        applies_when=payload.appliesWhen,
+    )
     db.commit()
     return _workflow_out(workflow)
 
@@ -141,12 +168,13 @@ def update_workflow(
     _auth: models.AuthSession = Depends(auth.require_auth),
 ) -> WorkflowOut:
     workflow = _require_workflow(db, workflow_id)
-    # Unlike app/console/knowledge/api.py's effectiveDate/effective_date, every field
-    # here (name, description, steps) has the same spelling as the model's
-    # attribute -- model_dump() already yields exactly the dict save_draft
-    # expects, steps included (its camelCase keys are stored verbatim in
-    # the JSON column, matching how _workflow_out reads them back out).
+    # name/description/steps share spelling with the model's attributes, so
+    # model_dump() yields what save_draft expects (steps' camelCase keys are
+    # stored verbatim in the JSON column). appliesWhen is the exception: it
+    # maps to applies_when, and an explicit null clears it.
     patch: dict[str, Any] = payload.model_dump(exclude_unset=True)
+    if "appliesWhen" in patch:
+        patch["applies_when"] = patch.pop("appliesWhen")
     workflow_store.save_draft(db, workflow, patch)
     db.commit()
     return _workflow_out(workflow)

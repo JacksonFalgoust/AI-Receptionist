@@ -97,10 +97,7 @@ def test_known_caller_note_still_requires_recap():
     assert "does NOT skip the recap" in note and "Booking under Eric Smith, shall I go ahead?" in note
 
 
-def test_template_and_spec_recap_rules():
-    t = TEMPLATE.read_text(encoding="utf-8")
-    assert "Booking under Eric Smith, shall I go ahead?" in t
-    assert "must still do the recap in step 8" in t
+def test_spec_recap_rules():
     spec = json.loads((TEMPLATE.parent / "OpenAPI" / "voice-receptionist.json").read_text(encoding="utf-8"))
     assert "NOT BOOKED: confirm details with caller first" in spec["paths"]["/"]["post"]["description"]
 

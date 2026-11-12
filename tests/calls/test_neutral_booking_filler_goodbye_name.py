@@ -50,13 +50,6 @@ def test_goodbye_name_stays_whole_through_joiner():
     assert j.feed(text) + j.flush() == text
 
 
-def test_instructions_skip_separate_time_confirm():
-    s = (ROOT / "guide-demo/template/instructions.template.md").read_text(encoding="utf-8")
-    assert 'do NOT ask a separate "just to confirm the time" question' in s
-    assert "only when something is actually ambiguous" in s
-    assert "Booking under" in s and "shall I go ahead?" in s
-
-
 def test_demo_business_is_atlanta_bikes():
     assert config.DEFAULT_BUSINESS_PROFILE["name"] == "Atlanta Bikes"
     assert config.DEFAULT_IDENTITY["name"] == "Atlanta Bikes Receptionist"

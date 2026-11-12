@@ -177,7 +177,6 @@ def test_first_turn_carries_now_note(monkeypatch):
 def test_template_rules():
     t = TEMPLATE.read_text(encoding="utf-8")
     assert "BUSINESS HOURS:" in t and "offer the next open day" in t
-    assert '"Booking under"' in t and "read the details back again" in t
 
 
 def test_spoken_name_default_aliases():

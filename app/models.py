@@ -110,9 +110,9 @@ class KnowledgeItem(Base):
 
 class Workflow(Base):
     """A console-managed workflow (frontend/src/types/workflow.ts).
-    Console-only: publishing has no effect on live calls -- nothing in
-    app/ reads this table today. See
-    docs/superpowers/specs/2026-09-17-e6-workflows-design.md, "Future"."""
+    Published workflows are rendered into the guide's instructions by the
+    publish pipeline (app/guide/publish/); `applies_when` says when the
+    guide should follow one."""
 
     __tablename__ = "workflows"
 
@@ -120,6 +120,7 @@ class Workflow(Base):
     organization_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    applies_when: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False)  # WorkflowStatus
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     # The whole WorkflowStep[] array, replaced wholesale on every save --
