@@ -19,6 +19,7 @@ from app.console.bookings.api import router as bookings_router
 from app.console.customers.api import router as customers_router
 from app.console.dashboard.api import router as dashboard_router
 from app.console.knowledge.api import router as knowledge_router
+from app.console.products.api import router as products_router
 from app.console.workflows.api import router as workflow_router
 from app import config
 from app.db import init_db
@@ -69,6 +70,7 @@ app.include_router(bookings_router)
 app.include_router(customers_router)
 app.include_router(dashboard_router)
 app.include_router(knowledge_router)
+app.include_router(products_router)
 app.include_router(workflow_router)
 app.include_router(twiml_router)
 app.include_router(relay_router)

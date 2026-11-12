@@ -69,6 +69,9 @@ class BooqableClient:
     async def put(self, path: str, **kwargs: Any) -> dict[str, Any]:
         return await self.request("PUT", path, **kwargs)
 
+    async def delete(self, path: str, **kwargs: Any) -> dict[str, Any]:
+        return await self.request("DELETE", path, **kwargs)
+
     async def list_all(
         self,
         path: str,

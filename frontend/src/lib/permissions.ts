@@ -18,6 +18,7 @@ export const PERMISSIONS = [
   'manage:features',
   'manage:workflows',
   'manage:knowledge',
+  'manage:products',
   'manage:integrations',
   'manage:routing',
   'manage:users',
