@@ -26,3 +26,18 @@ def test_frontend_tool_list_matches_backend():
     text = (ROOT / "frontend" / "src" / "types" / "workflow.ts").read_text()
     block = re.search(r"WORKFLOW_TOOLS\s*=\s*\[(.*?)\]\s*as const", text, re.S).group(1)
     assert tuple(re.findall(r"""["']([^"']+)["']""", block)) == WORKFLOW_TOOLS
+
+
+def test_workflow_tools_exact_order():
+    assert WORKFLOW_TOOLS == (
+        "listCatalog",
+        "checkAvailability",
+        "findReservations",
+        "listCustomers",
+        "createCustomer",
+        "createReservation",
+        "cancelReservation",
+        "sendPaymentLink",
+        "get_caller_phone_number",
+        "endCall",
+    )
